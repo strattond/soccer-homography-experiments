@@ -1,0 +1,13 @@
+--index-url https://download.pytorch.org/whl/cu130
+--extra-index-url https://pypi.org/simple
+
+# Core files of interest
+boxmot>=16.0.9
+supervision>=0.27.0
+torch==2.10.0+cu130
+torchvision==0.25.0+cu130
+ultralytics>=8.4.6
+
+# Dependencies, but we might want to bump...
+numpy==2.3.5
+#opencv-python>=4.13.0.90
