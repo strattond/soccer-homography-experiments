@@ -6,13 +6,14 @@ import argparse
 from boxmot import ByteTrack, BotSort
 from detectionadapter import DetectionAdapter
 from pathlib import Path
-from ultralytics import YOLO
+from ultralytics import YOLO, SAM
 
 parser = argparse.ArgumentParser( description="Homography test" )
 parser.add_argument( "-input",  help="Input video file",      type=str, default="test_homography_input.mp4" )
 parser.add_argument( "-output", help="Output video file",     type=str, default="test_homography_output.mp4")
 parser.add_argument( "-model",  help="YOLO model",            type=str, default=r"runs\detect\train16\weights\best.pt")
 parser.add_argument( "-homo",   help="Calibrated homography", type=str, default="H_image_to_pitch.npy")
+parser.add_argument( "-segm",   help="Segmentation model",    type=str, default="models/sam2.1_l.pt")
 parser.add_argument( "-limit",  help="Frame limit",           type=int, default=50)
 
 args = parser.parse_args()
@@ -24,16 +25,17 @@ output_video_path = args.output
 # Load a Model for detection an prepare it
 print( "Loading model" )
 model = YOLO( args.model, verbose=False )
+segm  = SAM( args.segm )
 
 # Get Video Information
 print( "Getting video information" )
 cap    = cv2.VideoCapture( input_video_path )
-width  = int(cap.get( cv2.CAP_PROP_FRAME_WIDTH ) )
-height = int (cap.get( cv2.CAP_PROP_FRAME_HEIGHT ) )
-fourcc = int ( cap.get( cv2.CAP_PROP_FOURCC ) )
-fps    = int ( cap.get( cv2.CAP_PROP_FPS ) )
-new_w  = int(width * 0.5)
-new_h  = int(height * 0.5)
+width  = int( cap.get( cv2.CAP_PROP_FRAME_WIDTH ) )
+height = int( cap.get( cv2.CAP_PROP_FRAME_HEIGHT ) )
+fourcc = int( cap.get( cv2.CAP_PROP_FOURCC ) )
+fps    = int( cap.get( cv2.CAP_PROP_FPS ) )
+new_w  = int( width * 0.5 )
+new_h  = int( height * 0.5 )
 
 # Progress resources
 frame_limit: int = args.limit
@@ -58,7 +60,6 @@ label_annotator = sv.LabelAnnotator( text_scale=0.25 )
 
 print( "Configuring Writer" )
 out = cv2.VideoWriter( output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (new_w, new_h) )
-
 
 PITCH_TEMPLATE_POINTS = np.array([
   [   0,     0],    # top-left corner
@@ -94,6 +95,8 @@ def classify_team( hsv_patch ):
   h = hsv_patch[:,:,0].mean()
   s = hsv_patch[:,:,1].mean()
   v = hsv_patch[:,:,2].mean()
+  
+  #print( "H", h, "S", s, "V", v )
 
   # Referee: yellow
   if 20 < h < 35 and s > 80 and v > 80:
@@ -161,48 +164,59 @@ def overlay_pitch( frame, pitch_img ):
   frame[y0:y0 + ph, x0:x0 + pw] = blended
   
 def extract_jersey( frame, x1, y1, x2, y2, person_mask ):
-  roi = frame[y1:y2, x1:x2]
+  person = cv2.bitwise_and( frame, frame, mask=person_mask )
+  roi = person[y1:y2, x1:x2]
   h, w = roi.shape[:2]
 
   # Torso band relative to bottom of bbox
-  y_bot = h
-  y_top = 0
+  y_bot = int(0.65 * h)
+  y_top = int(0.15 * h)
 
   x_left  = 0
   x_right = w
 
-  torso_mask = person_mask[y_top:y_bot, x_left:x_right]
   torso_img  = roi[y_top:y_bot, x_left:x_right]
-
-  # Apply mask
-  jersey = cv2.bitwise_and( torso_img, torso_img, mask=torso_mask )
-
-  if jersey.size < 50:
-      return None
-
-  return jersey
   
-def get_person_mask( frame, x1, y1, x2, y2 ):
+  #cv2.imshow( "Frame", frame )
+  #cv2.imshow( "Person", person )
+  #cv2.imshow( "Torso", torso_img )
+  #cv2.imshow( "ROI", roi )
+  #cv2.waitKey( 10000 )
+
+  return torso_img
+  
+def get_person_mask( frame, segm, x1, y1, x2, y2 ):
   
   # Crop region
   roi = frame[y1:y2, x1:x2]
   h, w = roi.shape[:2]
+  Hsz, Wsz = frame.shape[:2]
 
   if h < 10 or w < 10:
-      return None  # too small
+    return None  # too small
+    
+  # Run the segmentation on it
+  segments = segm.predict( frame, bboxes=[[x1, y1, x2, y2]] )
+  if len(segments) == 0 or segments[0].masks is None:
+    return None
 
-  # Init mask + models
-  mask    = np.zeros( (h, w), np.uint8 )
-  bgModel = np.zeros( (1, 65), np.float64 )
-  fgModel = np.zeros( (1, 65), np.float64 )
-
-  # Run GrabCut with rectangle init
-  rect = (1, 1, w-2, h-2)  # slightly inset to avoid edges
-  cv2.grabCut(roi, mask, rect, bgModel, fgModel, 3, cv2.GC_INIT_WITH_RECT)
-
-  # Convert mask to binary person mask
-  person_mask = np.where( (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 1, 0 ).astype("uint8")
-  return person_mask
+  # There shouldn't be more than 1 person, but if there is, just ignore it
+  masks = segments[0].masks.data.cpu().numpy()
+  #mask = segments[0].masks.data[0].cpu().numpy().astype("uint8")
+  mask = masks[0]
+  mask_uint8 = mask.astype(np.uint8) * 255
+  mask_resized = cv2.resize(mask_uint8, (Wsz, Hsz), interpolation=cv2.INTER_NEAREST)
+  m = (mask_resized * 255).astype(np.uint8)
+  #person = cv2.bitwise_and( frame, frame, mask=m )
+  #cropped = person[y1:y2, x1:x2]
+  
+  h2, w2 = m.shape[:2]
+  #print( "ROI", h, "x", w )
+  #print( "Mask", h2, "x", w2 )
+  #print( cropped )
+  #cv2.imshow( "Cropped", cropped )
+  
+  return m
 
 H = np.load(args.homo)
 pitch_base = draw_empty_pitch()
@@ -235,19 +249,48 @@ while True:
   player_dets     = np.hstack( ( players.xyxy, players.confidence[:, None], players.class_id[:, None] ) )
   
   pitch_img = pitch_base.copy()
+  #print( "Predicting segments" )
+  #segResults = segm.predict( new_frame, classes=[0] )
+  #print( segResults )
+  #print( segResults.boxes )
+  #print( segResults.masks )
+  #for result in segResults:
+  #  print( len(result.boxes) )
+  #  print( len(result.masks) )
+  #  Hsz, Wsz = new_frame.shape[:2]
+  #  boxes = result.boxes.xyxy.cpu().numpy()
+  #  masks = result.masks.data.cpu().numpy()
+  #  print( "Boxes", boxes )
+  #  print( "Masks", masks )
+  #  for i, (box, mask) in enumerate(zip(boxes, masks)):
+  #    x1, y1, x2, y2 = map(int, box)
+  #    mask_uint8 = mask.astype(np.uint8) * 255
+  #    mask_resized = cv2.resize(mask_uint8, (Wsz, Hsz), interpolation=cv2.INTER_NEAREST)
+  #    m = (mask_resized * 255).astype(np.uint8)
+  #    person = cv2.bitwise_and( new_frame, new_frame, mask=m )
+  #    cropped = person[y1:y2, x1:x2]
+  #    cv2.imshow( "Person", cropped )
+  #    cv2.waitKey( 5000 )
+  #print( len( player_dets ) )
   for det in player_dets:
     x1f, y1f, x2f, y2f, conf, cid = det
     
     # Team colour classifier
     x1, y1, x2, y2 = map(int, (x1f, y1f, x2f, y2f))
     
-    person_mask = get_person_mask( new_frame, x1, y1, x2, y2 )
+    person_mask = get_person_mask( new_frame, segm, x1, y1, x2, y2 )
     if person_mask is None:
       continue
+    
+    #cv2.imshow( "Person Mask", person_mask )
+    #cv2.waitKey( 10000 )
     
     jersey_patch = extract_jersey( new_frame, x1, y1, x2, y2, person_mask )
     if jersey_patch is None:
       continue
+    
+    #cv2.imshow( "Jersey", jersey_patch )
+    #cv2.waitKey( 10000 )
     
     hsv = cv2.cvtColor( jersey_patch, cv2.COLOR_BGR2HSV )
     team = classify_team( hsv )
@@ -259,7 +302,9 @@ while True:
 
     # Draw on mini-pitch
     draw_player_on_pitch( pitch_img, X, Y, team )
-    
+    #print( "Drawing ", team, "at ", X, ", ", Y )
+  
+  # Make sure we print the (hopefully just 1) ball
   for det in ball_dets:
     x1, y1, x2, y2, conf, cid = det
     
@@ -268,10 +313,13 @@ while True:
 
     # Draw on mini-pitch
     draw_player_on_pitch( pitch_img, X, Y, "ball" )
-    
+  
+  # Copy our frame
   annotated_frame = new_frame.copy()
+  # Overlay it with pitch stuff
   overlay_pitch( annotated_frame, pitch_img )
   
+  # And write to disk
   out.write( annotated_frame )
 
 if out:
