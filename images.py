@@ -79,3 +79,24 @@ def prep_image_for_transform( src_img, filename, output_path ):
   save_image( output_path, rval, filename )
   return rval
 
+def get_person_mask( frame, segm, x1, y1, x2, y2 ):
+  
+  # Crop region
+  roi       = frame[y1:y2, x1:x2]
+  h, w      = roi.shape[:2]
+  Hsz, Wsz  = frame.shape[:2]
+
+  if h < 10 or w < 10:
+    return None  # too small
+    
+  # Run the segmentation on it
+  segments = segm.predict( frame, bboxes=[[x1, y1, x2, y2]] )
+  if len(segments) == 0 or segments[0].masks is None:
+    return None
+
+  # There shouldn't be more than 1 person, but if there is, just ignore it
+  masks         = segments[0].masks.data.cpu().numpy()
+  mask          = masks[0]
+  mask_uint8    = mask.astype(np.uint8) * 255
+  mask_resized  = cv2.resize(mask_uint8, (Wsz, Hsz), interpolation=cv2.INTER_NEAREST)
+  return (mask_resized * 255).astype(np.uint8)
