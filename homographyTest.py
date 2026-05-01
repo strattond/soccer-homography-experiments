@@ -73,6 +73,10 @@ def image_to_pitch( u, v, H ):
   #cv2.perspectiveTransform( points, H )
   return mapped[ 0, 0 ], mapped[ 1, 0 ]
 
+def positions_to_pitch( positions, H ):
+  pts = np.array(positions, dtype=np.float32).reshape( -1, 1, 2 )
+  return cv2.perspectiveTransform(pts, H).reshape( -1, 2 )
+
 def bbox_bottom_center_to_pitch( x1, y1, x2, y2, H ):
   # Calculate the middle of the two x points
   u = 0.5 * (x1 + x2)
@@ -197,6 +201,8 @@ while True:
   player_dets     = np.hstack( ( players.xyxy, players.confidence[:, None], players.class_id[:, None] ) )
   
   pitch_img = pitch_base.copy()
+  positions = []
+  teams     = []
   for det in player_dets:
     x1f, y1f, x2f, y2f, conf, cid = det
     
@@ -217,10 +223,15 @@ while True:
       continue
     
     # Homography mapping
-    X, Y = bbox_bottom_center_to_pitch( x1, y1, x2, y2, H )
+    positions.append( [0.5 * (x1 + x2), y2] )
+    teams.append( team )
+    #X, Y = bbox_bottom_center_to_pitch( x1, y1, x2, y2, H )
 
-    # Draw on mini-pitch
+  mapped = positions_to_pitch( positions, H )
+  for (X, Y), team in zip(mapped, teams):
     draw_player_on_pitch( pitch_img, X, Y, team )
+  # Draw on mini-pitch
+  # draw_player_on_pitch( pitch_img, X, Y, team )
   
   # Make sure we print the (hopefully just 1) ball
   for det in ball_dets:
