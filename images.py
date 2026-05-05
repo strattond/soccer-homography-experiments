@@ -18,7 +18,7 @@ def save_image( output_path, image, filename ):
 
 def fit_to_alpha( source_image: MatLike, alpha_source: MatLike ) -> MatLike:
 
-  # Resize and retro the alpha channel 
+  # Resize and retro the alpha channel
   result_rgba = cv2.cvtColor(source_image, cv2.COLOR_RGB2BGRA)
   # Ensure result matches original crop size
   resized_result = cv2.resize( result_rgba, (alpha_source.shape[1], alpha_source.shape[0]), interpolation=cv2.INTER_LANCZOS4 )
@@ -80,7 +80,7 @@ def prep_image_for_transform( src_img, filename, output_path ):
   return rval
 
 def get_person_mask( frame, segm, x1, y1, x2, y2 ):
-  
+
   # Crop region
   roi       = frame[y1:y2, x1:x2]
   h, w      = roi.shape[:2]
@@ -88,7 +88,7 @@ def get_person_mask( frame, segm, x1, y1, x2, y2 ):
 
   if h < 10 or w < 10:
     return None  # too small
-    
+
   # Run the segmentation on it
   segments = segm.predict( frame, bboxes=[[x1, y1, x2, y2]] )
   if len(segments) == 0 or segments[0].masks is None:
