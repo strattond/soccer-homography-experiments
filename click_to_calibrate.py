@@ -9,7 +9,8 @@ from typing import List
 
 parser = argparse.ArgumentParser( description="Click to Calibrate" )
 parser.add_argument( "-input",  help="Input video file",      type=str, default="test_homography_input.mp4" )
-parser.add_argument( "-homo",   help="Calibrated homography", type=str, default="H_image_to_pitch.4k.npy")
+parser.add_argument( "-homo4k", help="Calibrated homography (4K)", type=str, default="H_image_to_pitch.4k.npy")
+parser.add_argument( "-homo",   help="Calibrated homography (2k)", type=str, default="H_image_to_pitch.2k.npy")
 parser.add_argument( "-index",  help="Frame index to use",    type=int, default=50)
 
 args = parser.parse_args()
@@ -20,6 +21,7 @@ VIDEO_PATH   = args.input
 MAX_POINTS   = 8
 MIN_POINTS   = 4
 FRAME_INDEX  = args.index                            # which frame to use for calibration
+H_OUTPUT_4k  = args.homo4k
 H_OUTPUT     = args.homo
 img_pts_disp: List[SelectionPoint] = []
 img_pts_4k:   List[SelectionPoint] = []
@@ -190,10 +192,16 @@ def main():
   world_pts_arr     = np.array( [wp.coords for wp in world_pts],  dtype=np.float32 )
   
   H, mask = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
-  np.save( H_OUTPUT, H )
+  np.save( H_OUTPUT_4k, H )
+  print( f"\nSaved homography to {H_OUTPUT_4k}" )
+  print( "H =\n", H )
 
+  img_pts_arr    = np.array( [ip.coords for ip in img_pts_disp], dtype=np.float32 )
+  H, mask = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
+  np.save( H_OUTPUT, H )
   print( f"\nSaved homography to {H_OUTPUT}" )
   print( "H =\n", H )
+
 
 if __name__ == "__main__":
   main()

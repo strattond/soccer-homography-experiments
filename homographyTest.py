@@ -83,6 +83,8 @@ def pitch_to_overlay( X, Y, overlay_w, overlay_h ):
 def draw_player_on_pitch( pitch_img, X, Y, team ):
   h, w = pitch_img.shape[:2]
   px, py = pitch_to_overlay( X, Y, w, h )
+  
+  print( f"{X:.2f},{Y:.2f} => {px:.2f},{py:.2f} (inside {h}x{w})" )
 
   color = {
       "away": (255,0,255),
@@ -111,6 +113,10 @@ def extract_jersey( frame, x1, y1, x2, y2, person_mask ):
   return torso_img
 
 H = np.load(args.homo)
+print( f"Using homography {H}" )
+print("x range:", H[:,0].min(), H[:,0].max())
+print("y range:", H[:,1].min(), H[:,1].max())
+
 pitch_base = draw_empty_pitch( cfg=cfg )
 
 print( "Looping" )
@@ -168,6 +174,9 @@ while True:
     teams.append( team )
 
   mapped = positions_to_pitch( positions, H )
+  for m, p in zip( mapped, positions ):
+    print( f"XFormed {p} => {m}" )
+
   for (X, Y), team in zip(mapped, teams):
     draw_player_on_pitch( pitch_img, X, Y, team )
   # Draw on mini-pitch
@@ -190,7 +199,7 @@ while True:
   overlay_pitch( annotated_frame, pitch_img )
 
   x0, y0, _, _ = get_radar_location( annotated_frame, pitch_img )
-  draw_key_points( annotated_frame, cfg, x0, y0 )
+  #draw_key_points( annotated_frame, cfg, x0, y0 )
 
   # And write to disk
   out.write( annotated_frame )
