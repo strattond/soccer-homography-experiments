@@ -179,18 +179,20 @@ def overlay_pitch( frame, pitch_img, padding = 100, alpha = 0.7 ):
   blended = cv2.addWeighted( pitch_img, alpha, roi, 1 - alpha, 0 )
   frame[y0:y0 + ph, x0:x0 + pw] = blended
   
-#def sel_key_color( sel_points: List[SelectionPoint],
-#                   pt: str,
-#                   point_color: sv.Color         = sv.Color.YELLOW,
-#                   highlight_color: sv.Color     = sv.Color.GREEN,
-#                   sel_color: sv.Color           = sv.Color.from_hex( "#FF00FF" ),
-#                   padding: int                  = 50,
-#                   highlight_label = None
-#) -> sv.Color:
-#  if pt == highlight_label:
-#    return highlight_color
-#  elif 
-#    color = point_color if pt != highlight_label else highlight_color
+def sel_key_color( sel_points: List[SelectionPoint],
+                   pt: str,
+                   highlight_label,
+                   labels: List[str],
+                   point_color: sv.Color         = sv.Color.YELLOW,
+                   highlight_color: sv.Color     = sv.Color.GREEN,
+                   sel_color: sv.Color           = sv.Color.from_hex( "#FF00FF" )
+) -> sv.Color:
+  if pt == highlight_label:
+    return highlight_color
+  elif any(sel.index == labels.index(pt) for sel in sel_points):
+    return sel_color
+  else:
+    return point_color
   
 
 def draw_key_points(  existing: np.ndarray,
@@ -213,7 +215,8 @@ def draw_key_points(  existing: np.ndarray,
     mx = int(vertex[0] * scaleW + padding + offsetX)
     my = int(vertex[1] * scaleL + padding + offsetY)
 
-    color = point_color if pt != highlight_label else highlight_color
+    color = sel_key_color( sel_points, pt, highlight_label, cfg.labels, point_color, highlight_color, sel_color )
+    #color = point_color if pt != highlight_label else highlight_color
     radius = 5 if pt != highlight_label else 8
     cv2.circle( existing, (mx, my), radius, color.as_bgr(), -1 )
     cv2.putText( existing, pt, (mx + 5, my - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )

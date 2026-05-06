@@ -8,12 +8,13 @@ from pitch import SoccerPitchConfiguration, draw_empty_pitch, overlay_pitch, dra
 from ultralytics import YOLO, SAM
 
 parser = argparse.ArgumentParser( description="Homography test" )
-parser.add_argument( "-input",  help="Input video file",      type=str, default="test_homography_input.mp4" )
-parser.add_argument( "-output", help="Output video file",     type=str, default="test_homography_output.mp4")
-parser.add_argument( "-model",  help="YOLO model",            type=str, default=r"runs\detect\train16\weights\best.pt")
-parser.add_argument( "-homo",   help="Calibrated homography", type=str, default="H_image_to_pitch.npy")
-parser.add_argument( "-segm",   help="Segmentation model",    type=str, default="models/sam2.1_l.pt")
-parser.add_argument( "-limit",  help="Frame limit",           type=int, default=5)
+parser.add_argument( "-input",   help="Input video file",      type=str, default="test_homography_input.mp4" )
+parser.add_argument( "-output",  help="Output video file",     type=str, default="test_homography_output.mp4")
+parser.add_argument( "-model",   help="YOLO model",            type=str, default=r"runs\detect\train16\weights\best.pt")
+parser.add_argument( "-homo",    help="Calibrated homography", type=str, default="H_image_to_pitch.npy")
+parser.add_argument( "-segm",    help="Segmentation model",    type=str, default="models/sam2.1_l.pt")
+parser.add_argument( "-limit",   help="Frame limit",           type=int, default=5)
+parser.add_argument( "-padding", help="Padding around pitch",  type=int, default=50)
 
 args = parser.parse_args()
 cfg = SoccerPitchConfiguration()
@@ -41,6 +42,7 @@ new_h  = int( height * 0.5 )
 frame_limit: int = args.limit
 frame_wrap:  int = 25
 frame_count: int = 0
+padding:     int = args.padding
 
 BALL_CLASS_ID   = 32
 PLAYER_CLASS_ID = 0
@@ -73,18 +75,20 @@ def classify_team( hsv_patch ):
 
   return "unknown"
 
-def pitch_to_overlay( X, Y, overlay_w, overlay_h ):
+def pitch_to_overlay( X, Y, overlay_w, overlay_h, padding ):
   # Default FIFA size is 105 x 68
   # X: 0–105, Y: 0–68
-  px = int( (X / cfg.STD_PITCH_LENGTH) * overlay_w )
-  py = int( (Y / cfg.STD_PITCH_WIDTH) * overlay_h )
+  px = int( (X / cfg.STD_PITCH_LENGTH) * overlay_w ) + padding
+  py = int( (Y / cfg.STD_PITCH_WIDTH) * overlay_h ) + padding
   return px, py
 
-def draw_player_on_pitch( pitch_img, X, Y, team ):
+def draw_player_on_pitch( pitch_img, X, Y, team, padding ):
   h, w = pitch_img.shape[:2]
-  px, py = pitch_to_overlay( X, Y, w, h )
+  usedH = h - 2 * padding
+  usedW = w - 2 * padding
+  px, py = pitch_to_overlay( X, Y, usedW, usedH, padding )
   
-  print( f"{X:.2f},{Y:.2f} => {px:.2f},{py:.2f} (inside {h}x{w})" )
+  #print( f"{X:.2f},{Y:.2f} => {px:.2f},{py:.2f} (inside {usedH}x{usedW})" )
 
   color = {
       "away": (255,0,255),
@@ -174,11 +178,11 @@ while True:
     teams.append( team )
 
   mapped = positions_to_pitch( positions, H )
-  for m, p in zip( mapped, positions ):
-    print( f"XFormed {p} => {m}" )
+  #for m, p in zip( mapped, positions ):
+  #  print( f"XFormed {p} => {m}" )
 
   for (X, Y), team in zip(mapped, teams):
-    draw_player_on_pitch( pitch_img, X, Y, team )
+    draw_player_on_pitch( pitch_img, X, Y, team, padding )
   # Draw on mini-pitch
   # draw_player_on_pitch( pitch_img, X, Y, team )
 
