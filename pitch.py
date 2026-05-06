@@ -15,14 +15,14 @@ PITCH_WIDTH = 420
 # Standard FIFA dimensions https://publications.fifa.com/de/football-stadiums-guidelines/technical-guideline/stadium-guidelines/pitch-dimensions-and-surrounding-areas/
 @dataclass
 class SoccerPitchConfiguration:
-  width: int = 6800  # [cm]
-  length: int = 10500  # [cm]
-  penalty_box_width: int = 4023  # [cm] - From 44 yards (4023.36)
-  penalty_box_length: int = 1646  # [cm] - From 18 yards (1645.92)
-  goal_box_width: int = 1829  # [cm] - From 20 yards (8 + 6 + 6) - 1828.8
-  goal_box_length: int = 548  # [cm] - From 6 yards - 548.64
-  centre_circle_radius: int = 914  # [cm] - From 10 yards - 9.144
-  penalty_spot_distance: int = 1097  # [cm] - From 12 yards - 10.9728
+  width: int = 68.00  # [cm]
+  length: int = 105.00  # [cm]
+  penalty_box_width: int = 40.23  # [cm] - From 44 yards (4023.36)
+  penalty_box_length: int = 16.46  # [cm] - From 18 yards (1645.92)
+  goal_box_width: int = 18.29  # [cm] - From 20 yards (8 + 6 + 6) - 1828.8
+  goal_box_length: int = 5.48  # [cm] - From 6 yards - 548.64
+  centre_circle_radius: int = 9.14  # [cm] - From 10 yards - 9.144
+  penalty_spot_distance: int = 10.97  # [cm] - From 12 yards - 10.9728
 
   @property
   def vertices(self) -> List[Tuple[int, int]]:
@@ -105,14 +105,15 @@ class SoccerPitchConfiguration:
   ])
 
   @property
-  def STD_PITCH_LENGTH(self) -> int: return int(self.length / 100)
+  def STD_PITCH_LENGTH(self) -> float: return self.length
   @property
-  def STD_PITCH_WIDTH(self) -> int: return int(self.width / 100)
+  def STD_PITCH_WIDTH(self) -> float: return self.width
 
 def get_pitch_scale( cfg: SoccerPitchConfiguration,
                      width = PITCH_WIDTH,
                      height = PITCH_HEIGHT ):
-  return [ (width / cfg.STD_PITCH_LENGTH)/100, (height / cfg.STD_PITCH_WIDTH)/100 ]
+  return [ (width / cfg.STD_PITCH_LENGTH), (height / cfg.STD_PITCH_WIDTH) ]
+  #return [ (cfg.STD_PITCH_LENGTH / width), (cfg.STD_PITCH_WIDTH / height)]
 
 def draw_empty_pitch( cfg: SoccerPitchConfiguration,
                       width                         = PITCH_WIDTH,
@@ -121,7 +122,7 @@ def draw_empty_pitch( cfg: SoccerPitchConfiguration,
                       line_color: sv.Color          = sv.Color.WHITE,
                       padding: int                  = 50,
                       line_thickness: int           = 4,
-                      point_radius: int             = 8
+                      point_radius: int             = 1
 
 ) -> np.ndarray:
 
@@ -131,15 +132,19 @@ def draw_empty_pitch( cfg: SoccerPitchConfiguration,
   centreY        = int(height // 2 + padding)
   scaled_penalty = int(cfg.penalty_spot_distance * scaleL)
 
+  #print( f"Scale {scaleW}x{scaleL}" )
+  #print( f"Yard 10 {yard10}" )
   # Blank out the image
   pitch = np.ones( (height + 2 * padding, width + 2 * padding, 3), dtype=np.uint8 ) * np.array( background_color.as_bgr(), dtype=np.uint8 )
 
   for start, end in cfg.edges:
     point1 = (int(cfg.vertices[start - 1][0] * scaleW) + padding, int(cfg.vertices[start - 1][1] * scaleL) + padding)
     point2 = (int(cfg.vertices[end   - 1][0] * scaleW) + padding, int(cfg.vertices[end   - 1][1] * scaleL) + padding)
+    #print( f"Line {point1} => {point2}" )
     cv2.line( img=pitch, pt1=point1, pt2=point2, color=line_color.as_bgr(), thickness=line_thickness )
 
   centre_circle_center = ( centreX, centreY )
+  #print( f"Circle {centre_circle_center}")
   cv2.circle( img=pitch, center=centre_circle_center, radius=yard10, color=line_color.as_bgr(), thickness=line_thickness )
 
   penalty_spots = [
@@ -148,8 +153,10 @@ def draw_empty_pitch( cfg: SoccerPitchConfiguration,
   ]
   arc_angles = [ (-57, 57), (123, 237) ]
   for spot, (start,end) in zip(penalty_spots, arc_angles):
-    cv2.circle( img=pitch, center=spot, radius=int(point_radius * scaleW * 10), color=line_color.as_bgr(), thickness=-1 )
+    cv2.circle( img=pitch, center=spot, radius=int(point_radius * scaleW), color=line_color.as_bgr(), thickness=-1 )
+    #print( f"Circle {spot} radius {point_radius * scaleW}")
     cv2.ellipse( img=pitch, center=spot, axes=(yard10, yard10), angle=0, startAngle=start, endAngle=end, color=line_color.as_bgr(), thickness=2 )
+    #print( f"Ellipse {spot} axes {yard10},{yard10} {start} -> {end}")
 
   return pitch
 
@@ -161,6 +168,7 @@ def get_radar_location( frame, pitch_img, padding = 100):
   x0 = fw//2 - pw//2
   y0 = fh - ph - padding
 
+  #print( f"Radar location {x0},{y0} - {ph},{pw}" )
   return [x0, y0, ph, pw]
 
 def overlay_pitch( frame, pitch_img, padding = 100, alpha = 0.7 ):
@@ -170,15 +178,31 @@ def overlay_pitch( frame, pitch_img, padding = 100, alpha = 0.7 ):
   roi     = frame[y0:y0 + ph, x0:x0 + pw]
   blended = cv2.addWeighted( pitch_img, alpha, roi, 1 - alpha, 0 )
   frame[y0:y0 + ph, x0:x0 + pw] = blended
+  
+#def sel_key_color( sel_points: List[SelectionPoint],
+#                   pt: str,
+#                   point_color: sv.Color         = sv.Color.YELLOW,
+#                   highlight_color: sv.Color     = sv.Color.GREEN,
+#                   sel_color: sv.Color           = sv.Color.from_hex( "#FF00FF" ),
+#                   padding: int                  = 50,
+#                   highlight_label = None
+#) -> sv.Color:
+#  if pt == highlight_label:
+#    return highlight_color
+#  elif 
+#    color = point_color if pt != highlight_label else highlight_color
+  
 
 def draw_key_points(  existing: np.ndarray,
                       cfg: SoccerPitchConfiguration,
                       offsetX,
                       offsetY,
+                      sel_points: List[SelectionPoint],
                       width                         = PITCH_WIDTH,
                       height                        = PITCH_HEIGHT,
                       point_color: sv.Color         = sv.Color.YELLOW,
                       highlight_color: sv.Color     = sv.Color.GREEN,
+                      sel_color: sv.Color           = sv.Color.from_hex( "#FF00FF" ),
                       padding: int                  = 50,
                       highlight_label = None
                     ):
@@ -200,15 +224,16 @@ def draw_key_points(  existing: np.ndarray,
 
 def draw_sel_points(  existing: np.ndarray,
                       img_points: List[SelectionPoint],
+                      cfg: SoccerPitchConfiguration,
                       point_color: sv.Color         = sv.Color.RED
                     ):
 
   for pt in img_points:
-
     radius = 5
     i      = pt.index
     x, y   = pt.coords
+    label  = cfg.labels[i] if i != None else "Next"
     cv2.circle( existing, (x, y), radius, point_color.as_bgr(), -1 )
-    cv2.putText( existing, str(i), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )
+    cv2.putText( existing, label, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )
 
   return existing

@@ -138,10 +138,10 @@ def main():
     radar = blankField.copy()
     # Overlay selected points
     overlay_pitch( active, radar, alpha=0.25 )
-    draw_key_points( active, cfg, x0, y0 )
-    draw_sel_points( active, img_pts_disp )
+    draw_key_points( active, cfg, x0, y0, img_pts_disp )
+    draw_sel_points( active, img_pts_disp, cfg )
     if last_image_click != None:
-      draw_sel_points( active, [last_image_click], point_color=sv.Color.BLUE )
+      draw_sel_points( active, [last_image_click], cfg, point_color=sv.Color.BLUE )
 
     # Draw our map and selected points
     cv2.imshow( "Click to Calibrate", active )
@@ -190,17 +190,22 @@ def main():
 
   img_pts_4k_arr    = np.array( [ip.coords for ip in img_pts_4k], dtype=np.float32 )
   world_pts_arr     = np.array( [wp.coords for wp in world_pts],  dtype=np.float32 )
-  
-  H, mask = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
+  H, mask           = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
   np.save( H_OUTPUT_4k, H )
   print( f"\nSaved homography to {H_OUTPUT_4k}" )
-  print( "H =\n", H )
+  print( "H =" )
+  print( H )
+  print("x range:", H[:,0].min(), H[:,0].max())
+  print("y range:", H[:,1].min(), H[:,1].max())
 
   img_pts_arr    = np.array( [ip.coords for ip in img_pts_disp], dtype=np.float32 )
-  H, mask = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
+  H, mask        = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
   np.save( H_OUTPUT, H )
   print( f"\nSaved homography to {H_OUTPUT}" )
-  print( "H =\n", H )
+  print( "H =" )
+  print( H )
+  print("x range:", H[:,0].min(), H[:,0].max())
+  print("y range:", H[:,1].min(), H[:,1].max())
 
 
 if __name__ == "__main__":
