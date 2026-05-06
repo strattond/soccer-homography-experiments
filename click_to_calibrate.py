@@ -1,8 +1,11 @@
 import argparse
 import cv2
+import json
 import numpy as np
 import supervision as sv
+from dataTypes import SelectionPoint
 from pitch import SoccerPitchConfiguration, draw_empty_pitch, overlay_pitch, draw_key_points, draw_sel_points, get_radar_location, get_pitch_scale
+from typing import List
 
 parser = argparse.ArgumentParser( description="Click to Calibrate" )
 parser.add_argument( "-input",  help="Input video file",      type=str, default="test_homography_input.mp4" )
@@ -18,17 +21,17 @@ MAX_POINTS   = 8
 MIN_POINTS   = 4
 FRAME_INDEX  = args.index                            # which frame to use for calibration
 H_OUTPUT     = args.homo
-img_pts_disp = []
-img_pts_4k   = []
-world_pts    = []
+img_pts_disp: List[SelectionPoint] = []
+img_pts_4k:   List[SelectionPoint] = []
+world_pts:    List[SelectionPoint] = []
 scale_x      = None
 scale_y      = None
 cfg          = SoccerPitchConfiguration()
 radar_bounds = []
 
-last_image_click = None
-hover_point      = None
-sel_world_point  = None
+last_image_click: SelectionPoint = None
+hover_point: SelectionPoint      = None
+sel_world_point: SelectionPoint  = None
 
 def loadFrame():
   # --- grab calibration frame ---
@@ -53,7 +56,7 @@ def mouseHandler( event, x, y, flags, param ):
     if inside_map:
       mx = x - radar_bounds[0]
       my = y - radar_bounds[1]
-      _, hover_point = nearest_field_point( mx, my )
+      hover_point = nearest_field_point( mx, my )
     else:
       hover_point = None
 
@@ -66,28 +69,13 @@ def mouseHandler( event, x, y, flags, param ):
       mx = x - radar_bounds[0]
       my = y - radar_bounds[1]
       print( f"Map Click Offset   {mx},{my}" )
-      idx, sel_world_point = nearest_field_point( mx, my )
-      print( f"Map Click Selected {x},{y} - {sel_world_point} @ {idx}" )
+      sel_world_point = nearest_field_point( mx, my )
+      print( f"Map Click Selected {x},{y} - {sel_world_point.coords} @ {sel_world_point.index}" )
     else:
       print( f"Click {x},{y}" )
-      last_image_click = (x, y)
+      last_image_click = SelectionPoint( None, (x, y) )
 
-    ## Store in image space
-    #img_pts_disp.append( [x, y] )
-    #
-    ## Scale up and store in 4k space
-    #x4k = x * scale_x
-    #y4k = y * scale_y
-    #img_pts_4k.append( [x4k, y4k] )
-    #
-    # Take a copy ...
-    #img_copy = param.copy()
-    #for i, (px, py) in enumerate(img_pts_disp):
-    #  cv2.circle(  param, (px, py), 4, (0, 0, 255), -1 )
-    #  cv2.putText( param, str( i ), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1 )
-    #cv2.imshow( "Click to Calibrate", img_copy )
-
-def nearest_field_point( mx, my, padding = 50 ):
+def nearest_field_point( mx, my, padding = 50 ) -> SelectionPoint:
   best_pt   = None
   best_dist = None
   idx       = None
@@ -108,7 +96,7 @@ def nearest_field_point( mx, my, padding = 50 ):
         best_pt   = pt
         idx       = i
 
-  return (idx, best_pt)
+  return SelectionPoint( idx, best_pt )
 
 def main():
   global last_image_click, radar_bounds, sel_world_point, img_pts_disp, img_pts_4k, world_pts
@@ -147,11 +135,11 @@ def main():
     active = frame_disp.copy()
     radar = blankField.copy()
     # Overlay selected points
-    overlay_pitch( active, radar )
+    overlay_pitch( active, radar, alpha=0.25 )
     draw_key_points( active, cfg, x0, y0 )
-    draw_sel_points( active, cfg, x0, y0, img_pts_disp )
+    draw_sel_points( active, img_pts_disp )
     if last_image_click != None:
-      draw_sel_points( active, cfg, x0, y0, [last_image_click], point_color=sv.Color.BLUE )
+      draw_sel_points( active, [last_image_click], point_color=sv.Color.BLUE )
 
     # Draw our map and selected points
     cv2.imshow( "Click to Calibrate", active )
@@ -163,18 +151,17 @@ def main():
     if last_image_click and sel_world_point:
 
       # Store in image space
-      x, y = last_image_click
-      print( f"Storing click {x},{y}" )
-      img_pts_disp.append( [x, y] )
+      last_image_click.index = sel_world_point.index
+      img_pts_disp.append( last_image_click )
 
       # Scale up and store in 4k space
+      #idx, (x, y) = last_image_click
+      (x, y) = last_image_click.coords
       x4k = x * scale_x
       y4k = y * scale_y
-      print( f"Storing 4k click {x4k},{y4k}" )
-      img_pts_4k.append( [x4k, y4k] )
+      img_pts_4k.append( SelectionPoint( last_image_click.index, [x4k, y4k] ) )
 
-      wX, wY = sel_world_point
-      world_pts.append( [wX, wY] )
+      world_pts.append( sel_world_point )
 
       # Ensure reset for next go around
       last_image_click = None
@@ -194,13 +181,15 @@ def main():
       print(f"{p}")
 
   # Optionally save them
-  np.savetxt( "calibration_points_4k.txt", np.array( img_pts_4k ), fmt="%.2f" )
+  #np.savetxt( "calibration_points_4k.txt", img_pts_4k_arr, fmt="%.2f" )
+  with open( "calibration_points_4k.json", "w") as f:
+    json.dump( [p.__dict__ for p in img_pts_4k], f, indent=2 )
   print( "\nSaved to calibration_points_4k.txt" )
 
-  img_pts_4k    = np.array( img_pts_4k, dtype=np.float32 )
-  world_pts     = np.array( world_pts,  dtype=np.float32 )
-
-  H, mask = cv2.findHomography( img_pts_4k, world_pts, method=cv2.RANSAC )
+  img_pts_4k_arr    = np.array( [ip.coords for ip in img_pts_4k], dtype=np.float32 )
+  world_pts_arr     = np.array( [wp.coords for wp in world_pts],  dtype=np.float32 )
+  
+  H, mask = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
   np.save( H_OUTPUT, H )
 
   print( f"\nSaved homography to {H_OUTPUT}" )

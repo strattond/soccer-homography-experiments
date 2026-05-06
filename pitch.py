@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 import supervision as sv
 
+from dataTypes import SelectionPoint
+
 PITCH_HEIGHT = 272
 PITCH_WIDTH = 420
 
@@ -161,12 +163,11 @@ def get_radar_location( frame, pitch_img, padding = 100):
 
   return [x0, y0, ph, pw]
 
-def overlay_pitch( frame, pitch_img, padding = 100 ):
+def overlay_pitch( frame, pitch_img, padding = 100, alpha = 0.7 ):
 
   x0, y0, ph, pw = get_radar_location( frame, pitch_img, padding )
   # Copy existing part so we can alpha-blend
   roi     = frame[y0:y0 + ph, x0:x0 + pw]
-  alpha   = 0.7
   blended = cv2.addWeighted( pitch_img, alpha, roi, 1 - alpha, 0 )
   frame[y0:y0 + ph, x0:x0 + pw] = blended
 
@@ -198,20 +199,15 @@ def draw_key_points(  existing: np.ndarray,
   return existing
 
 def draw_sel_points(  existing: np.ndarray,
-                      cfg: SoccerPitchConfiguration,
-                      offsetX,
-                      offsetY,
-                      img_points,
-                      width                         = PITCH_WIDTH,
-                      height                        = PITCH_HEIGHT,
-                      point_color: sv.Color         = sv.Color.RED,
-                      highlight_color: sv.Color     = sv.Color.GREEN,
-                      padding: int                  = 50
+                      img_points: List[SelectionPoint],
+                      point_color: sv.Color         = sv.Color.RED
                     ):
 
-  for i, (x, y) in enumerate(img_points):
+  for pt in img_points:
 
     radius = 5
+    i      = pt.index
+    x, y   = pt.coords
     cv2.circle( existing, (x, y), radius, point_color.as_bgr(), -1 )
     cv2.putText( existing, str(i), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )
 
