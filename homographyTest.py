@@ -2,6 +2,7 @@ import argparse
 import cv2
 import numpy as np
 import supervision as sv
+from dataTypes import Homography
 from detectionadapter import DetectionAdapter
 from images import get_person_mask
 from pitch import SoccerPitchConfiguration, SoccerPitchColors, SoccerPitchImage
@@ -11,7 +12,7 @@ parser = argparse.ArgumentParser( description="Homography test" )
 parser.add_argument( "-input",   help="Input video file",      type=str, default="test_homography_input.mp4" )
 parser.add_argument( "-output",  help="Output video file",     type=str, default="test_homography_output.mp4")
 parser.add_argument( "-model",   help="YOLO model",            type=str, default=r"runs\detect\train16\weights\best.pt")
-parser.add_argument( "-homo",    help="Calibrated homography", type=str, default="H_image_to_pitch.npy")
+parser.add_argument( "-homo",    help="Calibrated homography", type=str, default="H_image_to_pitch.json")
 parser.add_argument( "-segm",    help="Segmentation model",    type=str, default="models/sam2.1_l.pt")
 parser.add_argument( "-limit",   help="Frame limit",           type=int, default=5)
 parser.add_argument( "-padding", help="Padding around pitch",  type=int, default=50)
@@ -20,6 +21,7 @@ args    = parser.parse_args()
 cfg     = SoccerPitchConfiguration()
 colors  = SoccerPitchColors()
 pitch   = SoccerPitchImage( cfg=cfg, colors=colors )
+data    = Homography()
 
 print( "Configuring paths" )
 input_video_path = args.input
@@ -118,10 +120,10 @@ def extract_jersey( frame, x1, y1, x2, y2, person_mask ):
 
   return torso_img
 
-H = np.load(args.homo)
-print( f"Using homography {H}" )
-print("x range:", H[:,0].min(), H[:,0].max())
-print("y range:", H[:,1].min(), H[:,1].max())
+data.load( args.homo )
+print( f"Using homography {data.homDisplay}" )
+print( "x range:", data.homDisplay[:,0].min(), data.homDisplay[:,0].max() )
+print( "y range:", data.homDisplay[:,1].min(), data.homDisplay[:,1].max() )
 
 pitch_base = pitch.draw_empty_pitch()
 
@@ -179,7 +181,7 @@ while True:
     positions.append( [0.5 * (x1 + x2), y2] )
     teams.append( team )
 
-  mapped = positions_to_pitch( positions, H )
+  mapped = positions_to_pitch( positions, data.homDisplay )
   #for m, p in zip( mapped, positions ):
   #  print( f"XFormed {p} => {m}" )
 
