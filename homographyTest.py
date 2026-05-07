@@ -4,7 +4,7 @@ import numpy as np
 import supervision as sv
 from detectionadapter import DetectionAdapter
 from images import get_person_mask
-from pitch import SoccerPitchConfiguration, draw_empty_pitch, overlay_pitch, draw_key_points, get_radar_location
+from pitch import SoccerPitchConfiguration, SoccerPitchColors, SoccerPitchImage
 from ultralytics import YOLO, SAM
 
 parser = argparse.ArgumentParser( description="Homography test" )
@@ -16,8 +16,10 @@ parser.add_argument( "-segm",    help="Segmentation model",    type=str, default
 parser.add_argument( "-limit",   help="Frame limit",           type=int, default=5)
 parser.add_argument( "-padding", help="Padding around pitch",  type=int, default=50)
 
-args = parser.parse_args()
-cfg = SoccerPitchConfiguration()
+args    = parser.parse_args()
+cfg     = SoccerPitchConfiguration()
+colors  = SoccerPitchColors()
+pitch   = SoccerPitchImage( cfg=cfg, colors=colors )
 
 print( "Configuring paths" )
 input_video_path = args.input
@@ -87,7 +89,7 @@ def draw_player_on_pitch( pitch_img, X, Y, team, padding ):
   usedH = h - 2 * padding
   usedW = w - 2 * padding
   px, py = pitch_to_overlay( X, Y, usedW, usedH, padding )
-  
+
   #print( f"{X:.2f},{Y:.2f} => {px:.2f},{py:.2f} (inside {usedH}x{usedW})" )
 
   color = {
@@ -121,7 +123,7 @@ print( f"Using homography {H}" )
 print("x range:", H[:,0].min(), H[:,0].max())
 print("y range:", H[:,1].min(), H[:,1].max())
 
-pitch_base = draw_empty_pitch( cfg=cfg )
+pitch_base = pitch.draw_empty_pitch()
 
 print( "Looping" )
 while True:
@@ -200,9 +202,9 @@ while True:
   # Copy our frame
   annotated_frame = new_frame.copy()
   # Overlay it with pitch stuff
-  overlay_pitch( annotated_frame, pitch_img )
+  pitch.overlay_pitch( annotated_frame, pitch_img )
 
-  x0, y0, _, _ = get_radar_location( annotated_frame, pitch_img )
+  x0, y0, _, _ = pitch.get_radar_location( annotated_frame )
   #draw_key_points( annotated_frame, cfg, x0, y0 )
 
   # And write to disk
