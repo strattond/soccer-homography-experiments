@@ -3,7 +3,7 @@ import cv2
 import json
 import numpy as np
 import supervision as sv
-from dataTypes import Homography, SelectionPoint
+from dataTypes import Homography, Point2D, SelectionPoint
 from pitch import SoccerPitchConfiguration, SoccerPitchColors, SoccerPitchImage
 from typing import List
 
@@ -73,7 +73,7 @@ def mouseHandler( event, x, y, flags, param ):
       #print( f"Map Click Selected {x},{y} - {sel_world_point.coords} @ {sel_world_point.index}" )
     else:
       #print( f"Click {x},{y}" )
-      last_image_click = SelectionPoint( None, (x, y) )
+      last_image_click = SelectionPoint( None, Point2D(x, y) )
 
 def main():
   global last_image_click, radar_bounds, sel_world_point, data
@@ -81,13 +81,13 @@ def main():
   orig_h, orig_w = img.shape[:2]
 
   # Compute display scaling
-  data.setSourceDimensions( orig_h, orig_w )
+  data.setSourceDimensions( Point2D( orig_h, orig_w ) )
 
   # Resize for display
-  frame_disp = cv2.resize( img, data.displayDimensions, interpolation=cv2.INTER_AREA )
+  frame_disp = cv2.resize( img, (data.display.x, data.display.y), interpolation=cv2.INTER_AREA )
 
   print( f"Original: {orig_w}x{orig_h}" )
-  print( f"Displayed: {data.displayWidth}x{data.displayHeight}" )
+  print( f"Displayed: {data.display.x}x{data.display.y}" )
   print( f"Scale factors: x={data.scaleUpX:.4f}, y={data.scaleUpY:.4f}" )
 
   cv2.namedWindow( "Click to Calibrate", cv2.WINDOW_NORMAL )

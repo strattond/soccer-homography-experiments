@@ -2,7 +2,7 @@ import argparse
 import cv2
 import numpy as np
 import supervision as sv
-from dataTypes import Homography
+from dataTypes import Homography, VideoData
 from detectionadapter import DetectionAdapter
 from images import get_person_mask
 from pitch import SoccerPitchConfiguration, SoccerPitchColors, SoccerPitchImage
@@ -35,12 +35,9 @@ model = YOLO( args.model, verbose=False )
 # Get Video Information
 print( "Getting video information" )
 cap    = cv2.VideoCapture( input_video_path )
-width  = int( cap.get( cv2.CAP_PROP_FRAME_WIDTH ) )
-height = int( cap.get( cv2.CAP_PROP_FRAME_HEIGHT ) )
-fourcc = int( cap.get( cv2.CAP_PROP_FOURCC ) )
-fps    = int( cap.get( cv2.CAP_PROP_FPS ) )
-new_w  = int( width * 0.5 )
-new_h  = int( height * 0.5 )
+vidData = VideoData( cap )
+new_w  = int( vidData.width * 0.5 )
+new_h  = int( vidData.height * 0.5 )
 
 # Progress resources
 frame_limit: int = args.limit
@@ -53,7 +50,7 @@ PLAYER_CLASS_ID = 0
 PLAYER_RADIUS   = 10
 
 print( "Configuring Writer" )
-out = cv2.VideoWriter( output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (new_w, new_h) )
+out = cv2.VideoWriter( output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), vidData.fps, (new_w, new_h) )
 
 # Helper functions
 def positions_to_pitch( positions, H ):

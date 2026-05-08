@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from dataTypes import SelectionPoint
+from dataTypes import Point2D, SelectionPoint
 
 # From https://raw.githubusercontent.com/roboflow/sports/refs/heads/main/sports/configs/soccer.py
 # But with modifications for size accuracy
@@ -234,7 +234,8 @@ class SoccerPitchImage:
     for pt in img_points:
       radius = 5
       i      = pt.index
-      x, y   = map( int, pt.coords )
+      x      = int( pt.coords.x )
+      y      = int( pt.coords.y )
       label  = self.cfg.labels[i] if i != None else "Next"
       cv2.circle( existing, (x, y), radius, point_color.as_bgr(), -1 )
       cv2.putText( existing, label, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )
@@ -250,7 +251,8 @@ class SoccerPitchImage:
     scaleW, scaleL  = self.get_pitch_scale
     radius = 5
     i      = hover_point.index
-    x, y   = map( int, hover_point.coords )
+    x      = int( hover_point.coords.x )
+    y      = int( hover_point.coords.y )
     targX  = int(x * scaleW + x0 + self.padding)
     targY  = int(y * scaleL + y0 + self.padding)
     label  = self.cfg.labels[i] if i != None else "Next"
@@ -280,5 +282,5 @@ class SoccerPitchImage:
           best_pt   = pt
           idx       = i
 
-    return SelectionPoint( idx, best_pt )
+    return SelectionPoint( idx, Point2D( best_pt[0], best_pt[1] ) )
 
