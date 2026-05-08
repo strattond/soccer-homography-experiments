@@ -206,7 +206,7 @@ class SoccerPitchImage:
                         existing: np.ndarray,
                         offsetX,
                         offsetY,
-                        sel_points: List[SelectionPoint],
+                        sel_points: List[SelectionPoint], # Not using Location here
                         highlight_label = None
                       ):
 
@@ -228,14 +228,15 @@ class SoccerPitchImage:
   def draw_sel_points(  self,
                         existing: np.ndarray,
                         img_points: List[SelectionPoint],
-                        point_color = sv.Color.YELLOW
+                        point_color = sv.Color.YELLOW,
+                        scale: float = 1.0
                     ):
 
     for pt in img_points:
       radius = 5
       i      = pt.index
-      x      = int( pt.coords.x )
-      y      = int( pt.coords.y )
+      x      = int( pt.coords.x * scale )
+      y      = int( pt.coords.y * scale )
       label  = self.cfg.labels[i] if i != None else "Next"
       cv2.circle( existing, (x, y), radius, point_color.as_bgr(), -1 )
       cv2.putText( existing, label, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )

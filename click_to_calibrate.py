@@ -3,7 +3,7 @@ import cv2
 import json
 import numpy as np
 import supervision as sv
-from dataTypes import Homography, Point2D, SelectionPoint
+from dataTypes import Homography, Point2D, SelectionPoint, VideoData, ViewTransform
 from pitch import SoccerPitchConfiguration, SoccerPitchColors, SoccerPitchImage
 from typing import List
 
@@ -15,7 +15,6 @@ parser.add_argument( "-index",  help="Frame index to use",    type=int, default=
 args = parser.parse_args()
 
 VIDEO_PATH   = args.input
-MAX_POINTS   = 8
 MIN_POINTS   = 4
 FRAME_INDEX  = args.index                            # which frame to use for calibration
 H_OUTPUT     = args.homo
@@ -26,16 +25,21 @@ pitch        = SoccerPitchImage( cfg=cfg, colors=colors )
 radar_bounds = []
 
 last_image_click: SelectionPoint = None
-hover_point: SelectionPoint      = None
-sel_world_point: SelectionPoint  = None
+hover_point:      SelectionPoint = None
+sel_world_point:  SelectionPoint = None
+view:             ViewTransform  = None
 
-data.load( "H_image_to_pitch.json" )
+#data.load( "H_image_to_pitch.json" )
 
 def loadFrame():
+  global view
   # --- grab calibration frame ---
   cap = cv2.VideoCapture( VIDEO_PATH )
   if not cap.isOpened():
     raise SystemExit( f"Could not open {VIDEO_PATH}" )
+
+  vidData = VideoData( cap )
+  view    = ViewTransform( vidData )
 
   cap.set( cv2.CAP_PROP_POS_FRAMES, FRAME_INDEX )
   ret, raw_img = cap.read()
@@ -54,25 +58,17 @@ def mouseHandler( event, x, y, flags, param ):
     if inside_map:
       mx = x - radar_bounds[0]
       my = y - radar_bounds[1]
-      #print( f"Map Hover Offset   {mx},{my}" )
       hover_point = pitch.nearest_field_point( mx, my )
-      #print( f"Map Hover Selected {x},{y} - {hover_point.coords} @ {hover_point.index}" )
     else:
       hover_point = None
 
   if event == cv2.EVENT_LBUTTONDOWN:
-    if len(data.img_pts_disp) >= MAX_POINTS:
-      print("Already collected max points.")
-      return
 
     if inside_map and last_image_click:
       mx = x - radar_bounds[0]
       my = y - radar_bounds[1]
-      #print( f"Map Click Offset   {mx},{my}" )
       sel_world_point = pitch.nearest_field_point( mx, my )
-      #print( f"Map Click Selected {x},{y} - {sel_world_point.coords} @ {sel_world_point.index}" )
     else:
-      #print( f"Click {x},{y}" )
       last_image_click = SelectionPoint( None, Point2D(x, y) )
 
 def main():
@@ -81,7 +77,7 @@ def main():
   orig_h, orig_w = img.shape[:2]
 
   # Compute display scaling
-  data.setSourceDimensions( Point2D( orig_h, orig_w ) )
+  data.setSourceDimensions( Point2D( orig_w, orig_h ) )
 
   # Resize for display
   frame_disp = cv2.resize( img, (data.display.x, data.display.y), interpolation=cv2.INTER_AREA )
@@ -107,8 +103,8 @@ def main():
     radar = blankField.copy()
     # Overlay selected points
     pitch.overlay_pitch( active, radar, alpha=0.25 )
-    pitch.draw_key_points( active, x0, y0, data.img_pts_disp )
-    pitch.draw_sel_points( active, data.img_pts_disp )
+    pitch.draw_key_points( active, x0, y0, data.img_pts_4k )
+    pitch.draw_sel_points( active, data.img_pts_4k, scale=0.5 )
     if last_image_click != None:
       pitch.draw_sel_points( active, [last_image_click], point_color=sv.Color.BLUE )
     if hover_point != None:
@@ -133,14 +129,10 @@ def main():
 
   cv2.destroyAllWindows()
 
-  if len( data.img_pts_disp ) < MIN_POINTS:
+  if len( data.img_pts_4k ) < MIN_POINTS:
     raise SystemExit( f"Need at least {MIN_POINTS} points for homography." )
 
-  print( "\nClick space points:" )
-  for p in data.img_pts_disp:
-      print(f"{p}")
-
-  print( "\nFinal 4K-space points:" )
+  print( "\nFinal space points:" )
   for p in data.img_pts_4k:
       print(f"{p}")
 

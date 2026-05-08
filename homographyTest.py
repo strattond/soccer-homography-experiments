@@ -1,8 +1,9 @@
 import argparse
+from typing import List
 import cv2
 import numpy as np
 import supervision as sv
-from dataTypes import Homography, VideoData
+from dataTypes import Homography, Point2D, SelectionPoint, VideoData, ViewTransform
 from detectionadapter import DetectionAdapter
 from images import get_person_mask
 from pitch import SoccerPitchConfiguration, SoccerPitchColors, SoccerPitchImage
@@ -34,10 +35,12 @@ model = YOLO( args.model, verbose=False )
 
 # Get Video Information
 print( "Getting video information" )
-cap    = cv2.VideoCapture( input_video_path )
-vidData = VideoData( cap )
-new_w  = int( vidData.width * 0.5 )
-new_h  = int( vidData.height * 0.5 )
+cap        = cv2.VideoCapture( input_video_path )
+vidData    = VideoData( cap )
+view       = ViewTransform( vidData )
+view.scale = 0.5
+new_w      = int( vidData.width * view.scale )
+new_h      = int( vidData.height * view.scale )
 
 # Progress resources
 frame_limit: int = args.limit
@@ -118,10 +121,8 @@ def extract_jersey( frame, x1, y1, x2, y2, person_mask ):
   return torso_img
 
 data.load( args.homo )
-print( f"Using homography {data.homDisplay}" )
-print( "x range:", data.homDisplay[:,0].min(), data.homDisplay[:,0].max() )
-print( "y range:", data.homDisplay[:,1].min(), data.homDisplay[:,1].max() )
-
+print( f"Using homography\n {data.hom4k}" )
+hom2k      = data.computeScaledHomography( view )
 pitch_base = pitch.draw_empty_pitch()
 
 print( "Looping" )
@@ -178,7 +179,7 @@ while True:
     positions.append( [0.5 * (x1 + x2), y2] )
     teams.append( team )
 
-  mapped = positions_to_pitch( positions, data.homDisplay )
+  mapped = positions_to_pitch( positions, hom2k )
   #for m, p in zip( mapped, positions ):
   #  print( f"XFormed {p} => {m}" )
 

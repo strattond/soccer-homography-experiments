@@ -14,27 +14,60 @@ class Point2D:
     if not isinstance(other, Point2D):
       return NotImplemented
     return Point2D( self.x + other.x, self.y + other.y )
-    
+
   def __sub__(self, other):
     if not isinstance(other, Point2D):
       return NotImplemented
     return Point2D( self.x - other.x, self.y - other.y )
-  
+
   def __iter__(self):
     yield self.x
     yield self.y
 
   def to_numpy(self) -> np.ndarray:
     return np.array( [int(self.x), int(self.y)], dtype=np.float32 )
-  
+
 @dataclass
 class SelectionPoint:
   index: int = None
   coords: Point2D = field( default_factory=lambda: Point2D( None, None ) )
 
 @dataclass
+class VideoData:
+  width: int
+  height: int
+  fourcc: int
+  fps: int
+
+  def __init__( self, cap: cv2.VideoCapture ):
+    self.width  = int( cap.get( cv2.CAP_PROP_FRAME_WIDTH ) )
+    self.height = int( cap.get( cv2.CAP_PROP_FRAME_HEIGHT ) )
+    self.fourcc = int( cap.get( cv2.CAP_PROP_FOURCC ) )
+    self.fps    = int( cap.get( cv2.CAP_PROP_FPS ) )
+
+@dataclass
+class ViewTransform:
+  dimensions: Point2D
+  scale: float
+  offset: Point2D
+
+  def __init__( self, cap: VideoData ):
+    self.dimensions = Point2D( cap.width, cap.height )
+    self.scale      = 1.0
+    self.offset     = Point2D( 0, 0 )
+
+  def toImage( self, x, y ) -> Tuple[float, float]:
+    ix = (x - self.offset.x) / self.scale
+    iy = (y - self.offset.y) / self.scale
+    return (ix, iy)
+
+  def toDisplay( self, x, y ) -> Tuple[float, float]:
+    ix = x * self.scale + self.offset.x
+    iy = y * self.scale + self.offset.y
+    return (ix, iy)
+
+@dataclass
 class Homography:
-  img_pts_disp:  List[SelectionPoint] = field( default_factory=lambda: [] )
   img_pts_4k:    List[SelectionPoint] = field( default_factory=lambda: [] )
   world_pts:     List[SelectionPoint] = field( default_factory=lambda: [] )
   display:       Point2D              = field( default_factory=lambda: Point2D( 1920, 1080 ) )
@@ -42,7 +75,6 @@ class Homography:
   scaleUpX:      int                  = None
   scaleUpY:      int                  = None
   scaleDown:     float                = None
-  homDisplay:    MatLike              = None
   hom4k:         MatLike              = None
 
   def setSourceDimensions( self, orig: Point2D ):
@@ -54,19 +86,30 @@ class Homography:
     self.scaleUpX = self.source.x / self.display.x
     self.scaleUpY = self.source.y / self.display.y
 
-
   def scaleUp( self, dimensions: Point2D ) -> Point2D:
+    print( f"Scaling {dimensions.x},{dimensions.y} to {dimensions.x * self.scaleUpX}, {dimensions.y * self.scaleUpY}")
     return Point2D( dimensions.x * self.scaleUpX, dimensions.y * self.scaleUpY )
 
-  def storeClickPair( self, image: SelectionPoint, world: SelectionPoint ):
-      self.img_pts_disp.append( image )
+  def getScaledPoints( self, transform: ViewTransform ) -> List[SelectionPoint]:
+    img_pts_scaled: List[SelectionPoint] = []
+    for ip in self.img_pts_4k:
+      img_pts_scaled.append( SelectionPoint( ip.index, Point2D( ip.coords.x * transform.scale, ip.coords.y * transform.scale ) ) )
+    return img_pts_scaled
 
+  def computeScaledHomography( self, transform: ViewTransform ) -> List[SelectionPoint]:
+    img_pts_scaled = self.getScaledPoints( transform )
+    img_pts_arr    = np.array( [ip.coords.to_numpy() for ip in img_pts_scaled], dtype=np.float32 )
+    world_pts_arr  = np.array( [wp.coords.to_numpy() for wp in self.world_pts], dtype=np.float32 )
+    homScaled, _   = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
+    return homScaled
+
+  def storeClickPair( self, image: SelectionPoint, world: SelectionPoint ):
       # Scale up and store in 4k space
       self.addScaledPair( image )
 
       self.world_pts.append( world )
 
-      if len(self.img_pts_disp ) >= 4:
+      if len(self.img_pts_4k) >= 4:
         self.compute()
 
   def addScaledPair( self, image: SelectionPoint ):
@@ -75,19 +118,14 @@ class Homography:
 
   def compute( self ):
     img_pts_4k_arr     = np.array( [ip.coords.to_numpy() for ip in self.img_pts_4k], dtype=np.float32 )
-    img_pts_arr        = np.array( [ip.coords.to_numpy() for ip in self.img_pts_disp], dtype=np.float32 )
     world_pts_arr      = np.array( [wp.coords.to_numpy() for wp in self.world_pts],  dtype=np.float32 )
     self.hom4k, _      = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
-    self.homDisplay, _ = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
 
   def save( self, path ):
     data = {
-      "homography": {
-        "display": self.homDisplay.tolist(),
-        "maxRes": self.homDisplay.tolist()
-      },
+      "homography": self.hom4k.tolist(),
       "points": {
-        "image": [asdict(p) for p in self.img_pts_disp],
+        "image": [asdict(p) for p in self.img_pts_4k],
         "world": [asdict(p) for p in self.world_pts]
       },
       "sizes": {
@@ -105,21 +143,19 @@ class Homography:
         return Point2D(c["x"], c["y"])
     else:
         return Point2D(*c)
-      
-      
+
+
   def load( self, path ):
     with open( path, "r" ) as f:
         data = json.load(f)
 
     # --- Homography ---
-    print( "Loading display homography")
-    self.homDisplay = np.array( data["homography"]["display"], dtype=np.float64 )
     print( "Loading source  homography")
-    self.homMaxRes  = np.array( data["homography"]["maxRes"],  dtype=np.float64 )
+    self.hom4k  = np.array( data["homography"],  dtype=np.float64 )
 
     # --- Points ---
     print( "Loading image points")
-    self.img_pts_disp = [
+    self.img_pts_4k = [
       SelectionPoint(
         index=d["index"],
         coords=self.load_point(d)
@@ -127,7 +163,6 @@ class Homography:
       for d in data["points"]["image"]
     ]
     print( "Loading world points homography" )
-    #self.img_pts_disp = [SelectionPoint(**d) for d in data["points"]["image"]]
     self.world_pts = [
       SelectionPoint(
         index=d["index"],
@@ -135,7 +170,6 @@ class Homography:
       )
       for d in data["points"]["world"]
     ]
-    #self.world_pts    = [SelectionPoint(**d) for d in data["points"]["world"]]
 
     # --- Sizes ---
     print( "Loading display size")
@@ -145,40 +179,3 @@ class Homography:
 
     self.recalcScale()
 
-    for p in self.img_pts_disp:
-      self.addScaledPair( p )
-
-@dataclass
-class VideoData:
-  width: int 
-  height: int
-  fourcc: int
-  fps: int   
-
-  def __init__( self, cap: cv2.VideoCapture ):
-    self.width  = int( cap.get( cv2.CAP_PROP_FRAME_WIDTH ) )
-    self.height = int( cap.get( cv2.CAP_PROP_FRAME_HEIGHT ) )
-    self.fourcc = int( cap.get( cv2.CAP_PROP_FOURCC ) )
-    self.fps    = int( cap.get( cv2.CAP_PROP_FPS ) )
-
-@dataclass
-class ViewTransform:
-  dimensions: Point2D
-  scale: float
-  offset: Point2D
-  
-  def __init( self, cap: VideoData ):
-    self.dimensions = Point2D( cap.width, cap.height )
-    self.scale      = 1.0
-    self.offset     = Point2D( 0, 0 )
-    
-  def toImage( self, x, y ) -> Tuple[float, float]:
-    ix = (x - self.offset.x) / self.scale
-    iy = (y - self.offset.y) / self.scale
-    return (ix, iy)
-  
-  def toDisplay( self, x, y ) -> Tuple[float, float]:
-    ix = x * self.scale + self.offset.x
-    iy = y * self.scale + self.offset.y
-    return (ix, iy)
-  
