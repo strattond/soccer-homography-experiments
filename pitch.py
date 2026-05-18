@@ -281,11 +281,11 @@ class SoccerPitchImage:
 
     return existing
 
-  def calc_point_offset( self, hover_point: SelectionPoint ) -> Point2D:
+  def calc_point_offset( self, target_point: SelectionPoint ) -> Point2D:
 
     scaleW, scaleL = self.get_pitch_scale
-    x = int( hover_point.coords.x )
-    y = int( hover_point.coords.y )
+    x = int( target_point.coords.x )
+    y = int( target_point.coords.y )
     return Point2D( int( x*scaleW + self.padding ), int( y*scaleL + self.padding ) )
 
   def nearest_field_point( self, mx, my ) -> SelectionPoint:

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import cv2
+
 from dataTypes import Homography, SelectionPoint, ViewTransform
 from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 
@@ -15,9 +17,10 @@ class AppState:
   sel_world_point: SelectionPoint = None
   view: ViewTransform = None
   data: Homography = None
-  cfg: SoccerPitchConfiguration= None
-  colors: SoccerPitchColors= None
-  pitch: SoccerPitchImage= None
+  cfg: SoccerPitchConfiguration = None
+  colors: SoccerPitchColors = None
+  pitch: SoccerPitchImage = None
+  cap: cv2.VideoCapture = None
 
   def __init__( self ):
     self.cfg = SoccerPitchConfiguration()

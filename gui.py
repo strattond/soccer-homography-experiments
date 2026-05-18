@@ -1,9 +1,12 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk
+import cv2
 
+from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
 from appState import AppState
+from dataTypes import Homography, VideoData
 
 
 class App:
@@ -25,12 +28,11 @@ class App:
 
     # selector
     self.selector = tk.Canvas( self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d1d5db" )
-    self.selector.place( x=0, y=50, width=1440, height=810 )
+    self.selector.place( x=50, y=50, width=1280, height=720 )
 
     # radarMap
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
     self.radarMap.place( x=1460, y=50, width=420 + 20, height=272 + 20 )
-    self.radarMap.bind( "<Motion>", self.on_radar_hover )
 
     # livePreview
     self.livePreview = tk.Canvas( self.root, bg="#bfbfbf", highlightthickness=1, highlightbackground="#d1d5db" )
@@ -92,6 +94,8 @@ class App:
         self.appState.pitch
     )
 
+    self.mainImageController = MainCanvasController( self.selector, self.on_main_click, self.on_main_hover )
+
   # ==========================================
   # Event Handlers - Implement your logic here
   # ==========================================
@@ -99,9 +103,15 @@ class App:
   def cmdLoadHomography( self ):
     """
     Handle cmdLoadHomography event
-    TODO: Implement your logic here
     """
-    pass
+    filetypes = ( ( 'Homography files', '*.json' ),)
+
+    filename = filedialog.askopenfilename( title='Open homography', initialdir='.', filetypes=filetypes )
+    if filename is not None:
+      self.appState.data = Homography()
+      self.appState.data.load( filename )
+      self.resetClicks()
+      self.radarMapController.update_selection_markers( self.appState.data.world_pts )
 
   def btnSaveHomography( self ):
     """
@@ -122,7 +132,19 @@ class App:
     Handle cmdLoadVideo event
     TODO: Implement your logic here
     """
-    pass
+    filetypes = ( ( 'Video files', [ '*.mp4', '*.mkv' ] ),)
+
+    filename = filedialog.askopenfilename( title='Open video', initialdir='.', filetypes=filetypes )
+    if filename is not None:
+      if self.appState.cap is not None:
+        self.appState.cap.release()
+      
+      self.appState.cap = cv2.VideoCapture( filename )
+      if self.appState.cap.isOpened():
+        vidData = VideoData( self.appState.cap )
+        self.sldVideoFrame.config( to=vidData.frames )
+        self.mainImageController.load( self.appState.cap, vidData )
+        self.mainImageController.set_frame( 0 )
 
   def cmdRunYoloDetection( self ):
     """
@@ -131,19 +153,16 @@ class App:
     """
     pass
 
-  #def renderFieldPoints( self ):
-  #  copy = self.appState.pitch.empty.copy()
-  #  pitch.draw_key_points( active, x0, y0, data.img_pts_4k )
-  #  pitch.draw_sel_points( active, data.img_pts_4k, scale=0.5 )
-  #  pass
+  def resetClicks( self ):
+    self.last_image_click = None
+    self.hover_point = None
+    self.sel_world_point = None
 
-  def on_radar_hover( self, event ):
-    rx, ry = event.x, event.y
-    nearest = self.appState.pitch.nearest_field_point( rx, ry )
-    x, y = self.appState.pitch.calc_point_offset( nearest )
-    self.radarMap.coords( self.hover_marker, x - 6, y - 6, x + 6, y + 6 )
-    self.radarMap.itemconfig( self.hover_marker, state="normal" )
-    #self.update_radar_hover(rx, ry)
+  def on_main_click( self, x: int, y: int ):
+    pass
+
+  def on_main_hover( self, x: int, y: int ):
+    pass
 
 
 if __name__ == "__main__":

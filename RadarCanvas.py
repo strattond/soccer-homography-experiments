@@ -2,6 +2,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import List
 from PIL import Image, ImageTk
+from supervision import Color
 
 from dataTypes import SelectionPoint
 from pitch import SoccerPitchConfiguration, SoccerPitchImage
@@ -24,13 +25,15 @@ class RadarCanvas:
     self.pitch_photo = pitch_photo
     self.cfg: SoccerPitchConfiguration = cfg
     self.pitch: SoccerPitchImage = pitch
-    self.selected: SelectionPoint = None
+    self.selected: List[SelectionPoint] = []
+    self.mapping: SelectionPoint = None
 
     # Build layers
     self.createLayers()
     self.drawPitch()
     self.drawKeypoints()
-    self.createHoverMarker()
+    self.hover_item = self.createSingleMarker( self.pitch.colors.hover_color )
+    self.mapping_item = self.createSingleMarker( self.pitch.colors.sel_color, "mapping" )
 
     # Bind events
     self.canvas.bind( "<Motion>", self.on_hover )
@@ -47,14 +50,8 @@ class RadarCanvas:
     self.canvas.addtag_withtag( "pitch", "pitch" )
     self.canvas.addtag_withtag( "keypoints", "keypoints" )
     self.canvas.addtag_withtag( "selection", "selection" )
+    self.canvas.addtag_withtag( "mapping", "mapping" )
     self.canvas.addtag_withtag( "hover", "hover" )
-
-  # -------------------------------------------------------------
-  # Draw pitch image (bottom layer)
-  # -------------------------------------------------------------
-  def _draw_pitch( self ):
-    self.pitch_item = self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
-    self.canvas.tag_lower( "pitch" )
 
   # -------------------------------------------------------------
   # Draw keypoints (static layer)
@@ -83,11 +80,12 @@ class RadarCanvas:
   # -------------------------------------------------------------
   # Hover marker (top layer)
   # -------------------------------------------------------------
-  def createHoverMarker( self ):
-    self.hover_item = self.canvas.create_oval(
-        0, 0, 0, 0, fill=self.pitch.colors.hover_color.as_hex(), outline="black", width=2, tags=( "hover",)
+  def createSingleMarker( self, color: Color, tag: str = "hover" ) -> int:
+    item = self.canvas.create_oval(
+        0, 0, 0, 0, fill=color.as_hex(), outline="black", width=2, tags=( tag,)
     )
-    self.canvas.itemconfig( self.hover_item, state="hidden" )
+    self.canvas.itemconfig( item, state="hidden" )
+    return item
 
   # -------------------------------------------------------------
   # Event handlers
@@ -103,17 +101,29 @@ class RadarCanvas:
   def on_click( self, event ):
 
     rx, ry = event.x, event.y
-    self.selected = self.pitch.nearest_field_point( rx, ry )
+    self.mapping = self.pitch.nearest_field_point( rx, ry )
+    x, y = self.pitch.calc_point_offset( self.mapping )
+    self.canvas.coords( self.mapping_item, x - 6, y - 6, x + 6, y + 6 )
+    self.canvas.itemconfig( self.mapping_item, state="normal" )
 
   # -------------------------------------------------------------
-  # Selection markers
+  # Mapped selection markers
   # -------------------------------------------------------------
-  def _draw_selection_marker( self, label, mx, my ):
-    sid = self.canvas.create_oval( mx - 8, my - 8, mx + 8, my + 8, outline="cyan", width=2, tags=( "selection", label ) )
-    self.selection_items[ label ] = sid
-    self.canvas.tag_raise( "selection", "keypoints" )
+  def update_selection_markers( self, selected: List[SelectionPoint] ):
+    self.canvas.delete( "selection" )
+    self.selected = selected
+    color = self.pitch.colors.highlight_color.as_hex()
+    for vertex in self.selected:
+      mx, my = self.pitch.calc_point_offset( vertex )
 
-  def _remove_selection_marker( self, label ):
-    if label in self.selection_items:
-      self.canvas.delete( self.selection_items[ label ] )
-      del self.selection_items[ label ]
+      radius = 6
+      self.canvas.create_oval(
+          mx - radius,
+          my - radius,
+          mx + radius,
+          my + radius,
+          fill=color,
+          outline="black",
+          width=1,
+          tags=( "selection" )
+      )

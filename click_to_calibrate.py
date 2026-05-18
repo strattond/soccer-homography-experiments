@@ -105,9 +105,9 @@ def main():
     pitch.overlay_pitch( active, radar, alpha=0.25 )
     pitch.draw_key_points( active, x0, y0, data.img_pts_4k )
     pitch.draw_sel_points( active, data.img_pts_4k, scale=0.5 )
-    if last_image_click != None:
+    if last_image_click is not None:
       pitch.draw_sel_points( active, [last_image_click], point_color=sv.Color.BLUE )
-    if hover_point != None:
+    if hover_point is not None:
       pitch.draw_hover_point( active, hover_point )
 
     # Draw our map and selected points
