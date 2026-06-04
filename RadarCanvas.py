@@ -19,25 +19,37 @@ class RadarCanvas:
       - redraw of only changed items
     """
 
-  def __init__( self, canvas: tk.Canvas, pitch_photo, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage ):
+  def __init__(
+      self,
+      canvas: tk.Canvas,
+      pitch_photo,
+      cfg: SoccerPitchConfiguration,
+      pitch: SoccerPitchImage,
+      on_click=None,
+      on_hover=None
+  ):
 
     self.canvas: tk.Canvas = canvas
     self.pitch_photo = pitch_photo
     self.cfg: SoccerPitchConfiguration = cfg
     self.pitch: SoccerPitchImage = pitch
-    self.selected: List[SelectionPoint] = []
+    self.selected: List[ SelectionPoint ] = []
     self.mapping: SelectionPoint = None
+
+    # Callbacks
+    self.on_click = on_click
+    self.on_hover = on_hover
 
     # Build layers
     self.createLayers()
     self.drawPitch()
     self.drawKeypoints()
-    self.hover_item = self.createSingleMarker( self.pitch.colors.hover_color )
+    self.hover_item = self.createSingleMarker( self.pitch.colors.hover_color, "hover" )
     self.mapping_item = self.createSingleMarker( self.pitch.colors.sel_color, "mapping" )
 
     # Bind events
-    self.canvas.bind( "<Motion>", self.on_hover )
-    self.canvas.bind( "<Button-1>", self.on_click )
+    self.canvas.bind( "<Motion>", self.handle_hover )
+    self.canvas.bind( "<Button-1>", self.handle_click )
 
   def drawPitch( self ):
     self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
@@ -78,38 +90,40 @@ class RadarCanvas:
       i += 1
 
   # -------------------------------------------------------------
-  # Hover marker (top layer)
+  # Single marker on nominated layer
   # -------------------------------------------------------------
   def createSingleMarker( self, color: Color, tag: str = "hover" ) -> int:
-    item = self.canvas.create_oval(
-        0, 0, 0, 0, fill=color.as_hex(), outline="black", width=2, tags=( tag,)
-    )
+    item = self.canvas.create_oval( 0, 0, 0, 0, fill=color.as_hex(), outline="black", width=2, tags=( tag,) )
     self.canvas.itemconfig( item, state="hidden" )
     return item
 
   # -------------------------------------------------------------
   # Event handlers
   # -------------------------------------------------------------
-  def on_hover( self, event ):
+  def handle_hover( self, event ):
 
     rx, ry = event.x, event.y
     nearest = self.pitch.nearest_field_point( rx, ry )
     x, y = self.pitch.calc_point_offset( nearest )
     self.canvas.coords( self.hover_item, x - 6, y - 6, x + 6, y + 6 )
     self.canvas.itemconfig( self.hover_item, state="normal" )
+    if self.on_hover:
+      self.on_hover( rx, ry )
 
-  def on_click( self, event ):
+  def handle_click( self, event ):
 
     rx, ry = event.x, event.y
     self.mapping = self.pitch.nearest_field_point( rx, ry )
     x, y = self.pitch.calc_point_offset( self.mapping )
     self.canvas.coords( self.mapping_item, x - 6, y - 6, x + 6, y + 6 )
     self.canvas.itemconfig( self.mapping_item, state="normal" )
+    if self.on_click:
+      self.on_click( rx, ry, self.mapping )
 
   # -------------------------------------------------------------
   # Mapped selection markers
   # -------------------------------------------------------------
-  def update_selection_markers( self, selected: List[SelectionPoint] ):
+  def update_selection_markers( self, selected: List[ SelectionPoint ] ):
     self.canvas.delete( "selection" )
     self.selected = selected
     color = self.pitch.colors.highlight_color.as_hex()
@@ -118,12 +132,5 @@ class RadarCanvas:
 
       radius = 6
       self.canvas.create_oval(
-          mx - radius,
-          my - radius,
-          mx + radius,
-          my + radius,
-          fill=color,
-          outline="black",
-          width=1,
-          tags=( "selection" )
+          mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" )
       )

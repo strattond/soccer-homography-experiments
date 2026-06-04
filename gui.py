@@ -6,7 +6,7 @@ import cv2
 from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
 from appState import AppState
-from dataTypes import Homography, VideoData
+from dataTypes import Homography, SelectionPoint, VideoData
 
 
 class App:
@@ -94,7 +94,9 @@ class App:
         self.appState.pitch
     )
 
-    self.mainImageController = MainCanvasController( self.selector, self.on_main_click, self.on_main_hover )
+    self.mainImageController = MainCanvasController(
+        self.selector, self.appState.cfg, self.appState.pitch, self.on_main_click, self.on_main_hover
+    )
 
   # ==========================================
   # Event Handlers - Implement your logic here
@@ -110,8 +112,8 @@ class App:
     if filename is not None:
       self.appState.data = Homography()
       self.appState.data.load( filename )
-      self.resetClicks()
       self.radarMapController.update_selection_markers( self.appState.data.world_pts )
+      self.mainImageController.update_selection_markers( self.appState.data.img_pts_4k )
 
   def btnSaveHomography( self ):
     """
@@ -138,7 +140,7 @@ class App:
     if filename is not None:
       if self.appState.cap is not None:
         self.appState.cap.release()
-      
+
       self.appState.cap = cv2.VideoCapture( filename )
       if self.appState.cap.isOpened():
         vidData = VideoData( self.appState.cap )
@@ -152,18 +154,30 @@ class App:
     TODO: Implement your logic here
     """
     pass
+  
+  def mapping_check( self ):
+    if self.appState.last_image_click is not None and self.appState.sel_world_point is not None:
+      # We have a map!  Construct a mapping pair
+      self.mainImageController.resetMapping()
+      self.radarMapController.resetMapping()
+      self.appState.last_image_click = None
+      self.appState.sel_world_point = None
 
-  def resetClicks( self ):
-    self.last_image_click = None
-    self.hover_point = None
-    self.sel_world_point = None
-
-  def on_main_click( self, x: int, y: int ):
-    pass
+  def on_main_click( self, x: int, y: int, point: SelectionPoint ):
+    print( "Clicked ", str( x ), "x", str( y ) )
+    self.appState.last_image_click = point
+    self.mapping_check()
 
   def on_main_hover( self, x: int, y: int ):
     pass
 
+  def on_radar_click( self, x: int, y: int, point: SelectionPoint ):
+    print( "Clicked ", str( x ), "x", str( y ) )
+    self.appState.sel_world_point = point
+    self.mapping_check()
+
+  def on_radar_hover( self, x: int, y: int ):
+    pass
 
 if __name__ == "__main__":
   root = tk.Tk()

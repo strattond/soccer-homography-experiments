@@ -1,8 +1,11 @@
 import tkinter as tk
+from typing import List
 from PIL import Image, ImageTk
 import cv2
+from supervision import Color
 
-from dataTypes import VideoData, ViewTransform
+from dataTypes import Point2D, SelectionPoint, VideoData, ViewTransform
+from pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 
 class MainCanvasController:
@@ -16,10 +19,14 @@ class MainCanvasController:
       - hover callbacks
     """
 
-  def __init__( self, canvas: tk.Canvas, on_click=None, on_hover=None ):
+  def __init__( self, canvas: tk.Canvas, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage, on_click=None, on_hover=None ):
 
     self.canvas = canvas
     self.cap: cv2.VideoCapture = None
+    self.cfg: SoccerPitchConfiguration = cfg
+    self.pitch: SoccerPitchImage = pitch
+    self.selected: List[SelectionPoint] = []
+    self.mapping: SelectionPoint = None
 
     # Callbacks
     self.on_click = on_click
@@ -36,6 +43,7 @@ class MainCanvasController:
     self.frame_photo = ImageTk.PhotoImage( self.rsz_image )
     self.frame_item = self.canvas.create_image( 0, 0, anchor="nw", image=self.frame_photo, tags=( "frame",) )
     self.frame_num = 0
+    self.mapping_item = self.createSingleMarker( self.pitch.colors.sel_color, "mapping" )
 
     # Bind events
     self.canvas.bind( "<Button-1>", self.handle_click )
@@ -53,6 +61,7 @@ class MainCanvasController:
     # These tags define your layer stack
     self.canvas.addtag_withtag( "frame", "frame" )
     self.canvas.addtag_withtag( "selection", "selection" )
+    self.canvas.addtag_withtag( "mapping", "mapping" )
     
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
@@ -78,14 +87,27 @@ class MainCanvasController:
     self.canvas.itemconfig( self.frame_item, image=self.frame_photo )
     
   # -------------------------------------------------------------
+  # Single marker on nominated layer
+  # -------------------------------------------------------------
+  def createSingleMarker( self, color: Color, tag: str = "hover" ) -> int:
+    item = self.canvas.create_oval( 0, 0, 0, 0, fill=color.as_hex(), outline="black", width=2, tags=( tag,) )
+    self.canvas.itemconfig( item, state="hidden" )
+    return item
+
+  # -------------------------------------------------------------
   # Event handlers
   # -------------------------------------------------------------
   def handle_click( self, event ):
     if self.cap is None:
       return
     ix, iy = self.transform.toImage( event.x, event.y )
+    
+    self.mapping = SelectionPoint( None, Point2D( ix, iy ) )
+    self.canvas.coords( self.mapping_item, event.x - 6, event.y - 6, event.x + 6, event.y + 6 )
+    self.canvas.itemconfig( self.mapping_item, state="normal" )
+    
     if self.on_click:
-      self.on_click( ix, iy )
+      self.on_click( ix, iy, self.mapping )
 
   def handle_hover( self, event ):
     if self.cap is None:
@@ -164,3 +186,19 @@ class MainCanvasController:
     self.cap = cap
     self.transform = ViewTransform( vidData )
     self.transform.scale = 1280 / vidData.width
+
+  # -------------------------------------------------------------
+  # Mapped selection markers
+  # -------------------------------------------------------------
+  def update_selection_markers( self, selected: List[ SelectionPoint ] ):
+    self.canvas.delete( "selection" )
+    self.selected = selected
+    color = self.pitch.colors.highlight_color.as_hex()
+    points = self.transform.getScaledPoints( selected )
+    for vertex in points:
+      mx, my = vertex.coords
+
+      radius = 6
+      self.canvas.create_oval(
+          mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" )
+      )

@@ -74,12 +74,17 @@ class ViewTransform:
     ix = x * self.scale + self.offset.x
     iy = y * self.scale + self.offset.y
     return ( ix, iy )
-  
-  def scaledDimensions( self ) ->Tuple[ int, int ]:
+
+  def scaledDimensions( self ) -> Tuple[ int, int ]:
     iwdth = int( self.dimensions.x * self.scale )
     ihght = int( self.dimensions.y * self.scale )
-    return (iwdth, ihght)
-    
+    return ( iwdth, ihght )
+
+  def getScaledPoints( self, points: List[ SelectionPoint ] ) -> List[ SelectionPoint ]:
+    img_pts_scaled: List[ SelectionPoint ] = []
+    for ip in points:
+      img_pts_scaled.append( SelectionPoint( ip.index, Point2D( ip.coords.x * self.scale, ip.coords.y * self.scale ) ) )
+    return img_pts_scaled
 
 
 @dataclass
@@ -106,16 +111,8 @@ class Homography:
     print( f"Scaling {dimensions.x},{dimensions.y} to {dimensions.x * self.scaleUpX}, {dimensions.y * self.scaleUpY}" )
     return Point2D( dimensions.x * self.scaleUpX, dimensions.y * self.scaleUpY )
 
-  def getScaledPoints( self, transform: ViewTransform ) -> List[ SelectionPoint ]:
-    img_pts_scaled: List[ SelectionPoint ] = []
-    for ip in self.img_pts_4k:
-      img_pts_scaled.append(
-          SelectionPoint( ip.index, Point2D( ip.coords.x * transform.scale, ip.coords.y * transform.scale ) )
-      )
-    return img_pts_scaled
-
   def computeScaledHomography( self, transform: ViewTransform ) -> List[ SelectionPoint ]:
-    img_pts_scaled = self.getScaledPoints( transform )
+    img_pts_scaled = transform.getScaledPoints( self.img_pts_4k )
     img_pts_arr = np.array( [ ip.coords.to_numpy() for ip in img_pts_scaled ], dtype=np.float32 )
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
     homScaled, _ = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
