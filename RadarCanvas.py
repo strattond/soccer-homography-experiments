@@ -1,7 +1,4 @@
 import tkinter as tk
-from dataclasses import dataclass
-from typing import List
-from PIL import Image, ImageTk
 from supervision import Color
 
 from dataTypes import SelectionPoint
@@ -33,8 +30,8 @@ class RadarCanvas:
     self.pitch_photo = pitch_photo
     self.cfg: SoccerPitchConfiguration = cfg
     self.pitch: SoccerPitchImage = pitch
-    self.selected: List[ SelectionPoint ] = []
-    self.mapping: SelectionPoint = None
+    self.selected: list[ SelectionPoint ] = []
+    self.mapping: SelectionPoint | None = None
 
     # Callbacks
     self.on_click = on_click
@@ -104,7 +101,7 @@ class RadarCanvas:
 
     rx, ry = event.x, event.y
     nearest = self.pitch.nearest_field_point( rx, ry )
-    x, y = self.pitch.calc_point_offset( nearest )
+    x, y = self.pitch.calc_point_offset( nearest ) if nearest else ( 0, 0 )
     self.canvas.coords( self.hover_item, x - 6, y - 6, x + 6, y + 6 )
     self.canvas.itemconfig( self.hover_item, state="normal" )
     if self.on_hover:
@@ -114,7 +111,7 @@ class RadarCanvas:
 
     rx, ry = event.x, event.y
     self.mapping = self.pitch.nearest_field_point( rx, ry )
-    x, y = self.pitch.calc_point_offset( self.mapping )
+    x, y = self.pitch.calc_point_offset( self.mapping ) if self.mapping else ( 0, 0 )
     self.canvas.coords( self.mapping_item, x - 6, y - 6, x + 6, y + 6 )
     self.canvas.itemconfig( self.mapping_item, state="normal" )
     if self.on_click:
@@ -123,7 +120,7 @@ class RadarCanvas:
   # -------------------------------------------------------------
   # Mapped selection markers
   # -------------------------------------------------------------
-  def update_selection_markers( self, selected: List[ SelectionPoint ] ):
+  def update_selection_markers( self, selected: list[ SelectionPoint ] ):
     self.canvas.delete( "selection" )
     self.selected = selected
     color = self.pitch.colors.highlight_color.as_hex()

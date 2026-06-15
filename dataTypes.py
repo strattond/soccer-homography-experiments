@@ -31,8 +31,8 @@ class Point2D:
 
 @dataclass
 class SelectionPoint:
-  index: int = None
-  coords: Point2D = field( default_factory=lambda: Point2D( None, None ) )
+  index: int | None = None
+  coords: Point2D = field( default_factory=lambda: Point2D() )
 
 
 @dataclass
@@ -53,17 +53,17 @@ class VideoData:
 
 @dataclass
 class ViewTransform:
-  dimensions: Point2D = field( default_factory=lambda: Point2D( None, None ) )
+  dimensions: Point2D = field( default_factory=lambda: Point2D() )
   scale: float = 1.0
-  offset: Point2D = field( default_factory=lambda: Point2D( 0, 0 ) )
+  offset: Point2D = field( default_factory=lambda: Point2D() )
 
-  def __init__( self, cap: VideoData = None ):
+  def __init__( self, cap: VideoData | None = None ):
     if cap is not None:
       self.dimensions = Point2D( cap.width, cap.height )
     else:
-      self.dimensions = Point2D( None, None )
+      self.dimensions = Point2D()
     self.scale = 1.0
-    self.offset = Point2D( 0, 0 )
+    self.offset = Point2D()
 
   def toImage( self, x, y ) -> Tuple[ float, float ]:
     ix = ( x - self.offset.x ) / self.scale
@@ -83,7 +83,7 @@ class ViewTransform:
   def getScaledPoints( self, points: List[ SelectionPoint ] ) -> List[ SelectionPoint ]:
     img_pts_scaled: List[ SelectionPoint ] = []
     for ip in points:
-      img_pts_scaled.append( SelectionPoint( ip.index, Point2D( ip.coords.x * self.scale, ip.coords.y * self.scale ) ) )
+      img_pts_scaled.append( SelectionPoint( ip.index, Point2D( int(ip.coords.x * self.scale), int(ip.coords.y * self.scale) ) ) )
     return img_pts_scaled
 
 
@@ -92,11 +92,11 @@ class Homography:
   img_pts_4k: List[ SelectionPoint ] = field( default_factory=lambda: [] )
   world_pts: List[ SelectionPoint ] = field( default_factory=lambda: [] )
   display: Point2D = field( default_factory=lambda: Point2D( 1920, 1080 ) )
-  source: Point2D = field( default_factory=lambda: Point2D( None, None ) )
-  scaleUpX: int = None
-  scaleUpY: int = None
-  scaleDown: float = None
-  hom4k: MatLike = None
+  source: Point2D = field( default_factory=lambda: Point2D() )
+  scaleUpX: float = 0
+  scaleUpY: float = 0
+  scaleDown: float = 0
+  hom4k: MatLike | None = None
 
   def setSourceDimensions( self, orig: Point2D ):
     self.source = Point2D( orig.x, orig.y )
@@ -109,9 +109,9 @@ class Homography:
 
   def scaleUp( self, dimensions: Point2D ) -> Point2D:
     print( f"Scaling {dimensions.x},{dimensions.y} to {dimensions.x * self.scaleUpX}, {dimensions.y * self.scaleUpY}" )
-    return Point2D( dimensions.x * self.scaleUpX, dimensions.y * self.scaleUpY )
+    return Point2D( int(dimensions.x * self.scaleUpX), int(dimensions.y * self.scaleUpY) )
 
-  def computeScaledHomography( self, transform: ViewTransform ) -> List[ SelectionPoint ]:
+  def computeScaledHomography( self, transform: ViewTransform ) -> MatLike:
     img_pts_scaled = transform.getScaledPoints( self.img_pts_4k )
     img_pts_arr = np.array( [ ip.coords.to_numpy() for ip in img_pts_scaled ], dtype=np.float32 )
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
@@ -138,7 +138,7 @@ class Homography:
 
   def save( self, path ):
     data = {
-        "homography": self.hom4k.tolist(),
+        "homography": self.hom4k.tolist() if self.hom4k else None,
         "points": {
             "image": [ asdict( p ) for p in self.img_pts_4k ],
             "world": [ asdict( p ) for p in self.world_pts ]

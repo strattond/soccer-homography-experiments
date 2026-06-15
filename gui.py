@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import filedialog
 from PIL import Image, ImageTk
 import cv2
 
@@ -55,15 +55,11 @@ class App:
     self.lblHomography.place( x=50, y=20, width=200, height=24 )
 
     # btnLoadHomography
-    self.btnLoadHomography = tk.Button(
-        self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography
-    )
+    self.btnLoadHomography = tk.Button( self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography )
     self.btnLoadHomography.place( x=1460, y=700, width=180, height=36 )
 
     # btnSaveHomography
-    self.btnSaveHomography = tk.Button(
-        self.root, text="Save Homography", font=( "Arial", 12 ), command=self.btnSaveHomography
-    )
+    self.btnSaveHomography = tk.Button( self.root, text="Save Homography", font=( "Arial", 12 ), command=self.cmdSaveHomography )
     self.btnSaveHomography.place( x=1650, y=700, width=180, height=36 )
 
     # btnLoadBoundingBoxes
@@ -115,7 +111,7 @@ class App:
       self.radarMapController.update_selection_markers( self.appState.data.world_pts )
       self.mainImageController.update_selection_markers( self.appState.data.img_pts_4k )
 
-  def btnSaveHomography( self ):
+  def cmdSaveHomography( self ):
     """
     Handle btnSaveHomography event
     TODO: Implement your logic here
@@ -158,8 +154,6 @@ class App:
   def mapping_check( self ):
     if self.appState.last_image_click is not None and self.appState.sel_world_point is not None:
       # We have a map!  Construct a mapping pair
-      self.mainImageController.resetMapping()
-      self.radarMapController.resetMapping()
       self.appState.last_image_click = None
       self.appState.sel_world_point = None
 

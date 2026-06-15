@@ -1,5 +1,4 @@
 import tkinter as tk
-from typing import List
 from PIL import Image, ImageTk
 import cv2
 from supervision import Color
@@ -22,11 +21,11 @@ class MainCanvasController:
   def __init__( self, canvas: tk.Canvas, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage, on_click=None, on_hover=None ):
 
     self.canvas = canvas
-    self.cap: cv2.VideoCapture = None
+    self.cap: cv2.VideoCapture | None = None
     self.cfg: SoccerPitchConfiguration = cfg
     self.pitch: SoccerPitchImage = pitch
-    self.selected: List[SelectionPoint] = []
-    self.mapping: SelectionPoint = None
+    self.selected: list[SelectionPoint] = []
+    self.mapping: SelectionPoint | None = None
 
     # Callbacks
     self.on_click = on_click
@@ -34,7 +33,7 @@ class MainCanvasController:
 
     # State
     self.transform = ViewTransform()
-    self.drag_start = None
+    self.drag_start: tuple[ int | None, int | None ] = ( None, None )
 
     # Canvas items
     self.createLayers()
@@ -69,6 +68,9 @@ class MainCanvasController:
   def set_frame( self, frame_index: int ):
     print( f"Moving to {frame_index}" )
     self.frame_num = frame_index
+    if not self.cap:
+      print( "Capture not supplied" )
+      return
     self.cap.set( cv2.CAP_PROP_POS_FRAMES, frame_index )
     ret, raw_img = self.cap.read()
     if not ret:
@@ -102,7 +104,7 @@ class MainCanvasController:
       return
     ix, iy = self.transform.toImage( event.x, event.y )
     
-    self.mapping = SelectionPoint( None, Point2D( ix, iy ) )
+    self.mapping = SelectionPoint( None, Point2D( int(ix), int(iy) ) )
     self.canvas.coords( self.mapping_item, event.x - 6, event.y - 6, event.x + 6, event.y + 6 )
     self.canvas.itemconfig( self.mapping_item, state="normal" )
     
@@ -190,7 +192,7 @@ class MainCanvasController:
   # -------------------------------------------------------------
   # Mapped selection markers
   # -------------------------------------------------------------
-  def update_selection_markers( self, selected: List[ SelectionPoint ] ):
+  def update_selection_markers( self, selected: list[ SelectionPoint ] ):
     self.canvas.delete( "selection" )
     self.selected = selected
     color = self.pitch.colors.highlight_color.as_hex()

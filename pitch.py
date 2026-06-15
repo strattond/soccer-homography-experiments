@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from tkinter import Canvas
-from typing import List, Tuple
 import cv2
 import numpy as np
 import supervision as sv
@@ -14,17 +13,17 @@ from dataTypes import Point2D, SelectionPoint
 # Standard FIFA dimensions https://publications.fifa.com/de/football-stadiums-guidelines/technical-guideline/stadium-guidelines/pitch-dimensions-and-surrounding-areas/
 @dataclass
 class SoccerPitchConfiguration:
-  width: int = 68.00  # [cm]
-  length: int = 105.00  # [cm]
-  penalty_box_width: int = 40.23  # [cm] - From 44 yards (4023.36)
-  penalty_box_length: int = 16.46  # [cm] - From 18 yards (1645.92)
-  goal_box_width: int = 18.29  # [cm] - From 20 yards (8 + 6 + 6) - 1828.8
-  goal_box_length: int = 5.48  # [cm] - From 6 yards - 548.64
-  centre_circle_radius: int = 9.14  # [cm] - From 10 yards - 9.144
-  penalty_spot_distance: int = 10.97  # [cm] - From 12 yards - 10.9728
+  width: float = 68.00  # [cm]
+  length: float = 105.00  # [cm]
+  penalty_box_width: float = 40.23  # [cm] - From 44 yards (4023.36)
+  penalty_box_length: float = 16.46  # [cm] - From 18 yards (1645.92)
+  goal_box_width: float = 18.29  # [cm] - From 20 yards (8 + 6 + 6) - 1828.8
+  goal_box_length: float = 5.48  # [cm] - From 6 yards - 548.64
+  centre_circle_radius: float = 9.14  # [cm] - From 10 yards - 9.144
+  penalty_spot_distance: float = 10.97  # [cm] - From 12 yards - 10.9728
 
   @property
-  def vertices( self ) -> List[ Tuple[ int, int ] ]:
+  def vertices( self ) -> list[ tuple[ float, float ] ]:
     return [ ( 0, 0 ),  # 1
              ( 0, ( self.width - self.penalty_box_width ) / 2 ),  # 2
              ( 0, ( self.width - self.goal_box_width ) / 2 ),  # 3
@@ -59,21 +58,21 @@ class SoccerPitchConfiguration:
              ( self.length / 2 + self.centre_circle_radius, self.width / 2 ),  # 32
             ]
 
-  edges: List[ Tuple[ int, int ] ] = field(
+  edges: list[ tuple[ int, int ] ] = field(
       default_factory=lambda: [ ( 1, 2 ), ( 2, 3 ), ( 3, 4 ), ( 4, 5 ), ( 5, 6 ), ( 7, 8 ), ( 10, 11 ), ( 11, 12 ), ( 12, 13 ),
                                 ( 14, 15 ), ( 15, 16 ), ( 16, 17 ), ( 18, 19 ), ( 19, 20 ), ( 20, 21 ), ( 23, 24 ), ( 25, 26 ),
                                 ( 26, 27 ), ( 27, 28 ), ( 28, 29 ), ( 29, 30 ), ( 1, 14 ), ( 2, 10 ), ( 3, 7 ), ( 4, 8 ),
                                 ( 5, 13 ), ( 6, 17 ), ( 14, 25 ), ( 18, 26 ), ( 23, 27 ), ( 24, 28 ), ( 21, 29 ), ( 17, 30 ) ]
   )
 
-  labels: List[ str ] = field(
+  labels: list[ str ] = field(
       default_factory=lambda: [
           "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "15", "16", "17", "18", "20", "21",
           "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "14", "19"
       ]
   )
 
-  colors: List[ str ] = field(
+  colors: list[ str ] = field(
       default_factory=lambda: [
           "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493",
           "#FF1493", "#FF1493", "#FF1493", "#00BFFF", "#00BFFF", "#00BFFF", "#00BFFF", "#FF6347", "#FF6347", "#FF6347",
@@ -111,7 +110,7 @@ class SoccerPitchImage:
   point_radius: int = 1
   cfg: SoccerPitchConfiguration = field( default_factory=SoccerPitchConfiguration )
   colors: SoccerPitchColors = field( default_factory=SoccerPitchColors )
-  empty: np.ndarray = None  # The empty pitch once constructed
+  empty: np.ndarray = field( init = False )  # The empty pitch once constructed
 
   @property
   def get_pitch_scale( self ):
@@ -179,7 +178,7 @@ class SoccerPitchImage:
 
   def get_radar_location( self, frame ):
     fh, fw = frame.shape[ :2 ]
-    ph, pw = self.empty.shape[ :2 ]
+    ph, pw = self.empty.shape[ :2 ] if self.empty else ( 0, 0 )
 
     # bottom-middle placement
     x0 = fw//2 - pw//2
@@ -195,7 +194,7 @@ class SoccerPitchImage:
     blended = cv2.addWeighted( pitch_img, alpha, roi, 1 - alpha, 0 )
     frame[ y0:y0 + ph, x0:x0 + pw ] = blended
 
-  def sel_key_color( self, sel_points: List[ SelectionPoint ], pt: str, highlight_label ) -> sv.Color:
+  def sel_key_color( self, sel_points: list[ SelectionPoint ], pt: str, highlight_label ) -> sv.Color:
     if pt == highlight_label:
       return self.colors.highlight_color
     elif any( sel.index == self.cfg.labels.index( pt ) for sel in sel_points ):
@@ -203,31 +202,9 @@ class SoccerPitchImage:
     else:
       return self.colors.point_color
 
-  def draw_key_points(
-      self,
-      existing: np.ndarray,
-      offsetX,
-      offsetY,
-      sel_points: List[ SelectionPoint ],  # Not using Location here
-      highlight_label=None
-  ):
-
-    scaleW, scaleL = self.get_pitch_scale
-    i = 0
-    for vertex, pt in zip( self.cfg.vertices, self.cfg.labels ):
-      mx = int( vertex[ 0 ] * scaleW + self.padding + offsetX )
-      my = int( vertex[ 1 ] * scaleL + self.padding + offsetY )
-
-      color = self.sel_key_color( sel_points, pt, highlight_label )
-      radius = 5 if pt != highlight_label else 8
-      cv2.circle( existing, ( mx, my ), radius, color.as_bgr(), -1 )
-      cv2.putText( existing, pt, ( mx + 5, my - 5 ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors.point_color.as_bgr(), 1 )
-      i += 1
-
-    return existing
-
   def draw_key_points( self, existing: Canvas ):
 
+    print( "draw_key_points with Canvas" )
     scaleW, scaleL = self.get_pitch_scale
     i = 0
     for vertex, pt in zip( self.cfg.vertices, self.cfg.labels ):
@@ -251,7 +228,7 @@ class SoccerPitchImage:
     return existing
 
   def draw_sel_points(
-      self, existing: np.ndarray, img_points: List[ SelectionPoint ], point_color=sv.Color.YELLOW, scale: float = 1.0
+      self, existing: np.ndarray, img_points: list[ SelectionPoint ], point_color=sv.Color.YELLOW, scale: float = 1.0
   ):
 
     for pt in img_points:
@@ -259,7 +236,7 @@ class SoccerPitchImage:
       i = pt.index
       x = int( pt.coords.x * scale )
       y = int( pt.coords.y * scale )
-      label = self.cfg.labels[ i ] if i != None else "Next"
+      label = self.cfg.labels[ i ] if i is not None else "Next"
       cv2.circle( existing, ( x, y ), radius, point_color.as_bgr(), -1 )
       cv2.putText( existing, label, ( x + 5, y - 5 ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )
 
@@ -275,7 +252,7 @@ class SoccerPitchImage:
     y = int( hover_point.coords.y )
     targX = int( x*scaleW + x0 + self.padding )
     targY = int( y*scaleL + y0 + self.padding )
-    label = self.cfg.labels[ i ] if i != None else "Next"
+    label = self.cfg.labels[ i ] if i is not None else "Next"
     cv2.circle( existing, ( targX, targY ), radius, self.colors.hover_color.as_bgr(), -1 )
     cv2.putText( existing, label, ( targX + 5, targY - 5 ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors.hover_color.as_bgr(), 1 )
 
@@ -289,7 +266,7 @@ class SoccerPitchImage:
     return Point2D( int( x*scaleW + self.padding ), int( y*scaleL + self.padding ) )
 
   def nearest_field_point( self, mx, my ) -> SelectionPoint:
-    best_pt = None
+    best_pt = self.cfg.vertices[0]
     best_dist = None
     idx = None
 
@@ -309,4 +286,4 @@ class SoccerPitchImage:
           best_pt = pt
           idx = i
 
-    return SelectionPoint( idx, Point2D( best_pt[ 0 ], best_pt[ 1 ] ) )
+    return SelectionPoint( idx, Point2D( int( best_pt[ 0 ] ), int( best_pt[ 1 ] ) ) )
