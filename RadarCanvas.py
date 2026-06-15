@@ -100,8 +100,8 @@ class RadarCanvas:
   def handle_hover( self, event ):
 
     rx, ry = event.x, event.y
-    nearest = self.pitch.nearest_field_point( rx, ry )
-    x, y = self.pitch.calc_point_offset( nearest ) if nearest else ( 0, 0 )
+    nearest = self.pitch.nearestFieldPoint( rx, ry )
+    x, y = self.pitch.calcPointOffset( nearest ) if nearest else ( 0, 0 )
     self.canvas.coords( self.hover_item, x - 6, y - 6, x + 6, y + 6 )
     self.canvas.itemconfig( self.hover_item, state="normal" )
     if self.on_hover:
@@ -110,8 +110,8 @@ class RadarCanvas:
   def handle_click( self, event ):
 
     rx, ry = event.x, event.y
-    self.mapping = self.pitch.nearest_field_point( rx, ry )
-    x, y = self.pitch.calc_point_offset( self.mapping ) if self.mapping else ( 0, 0 )
+    self.mapping = self.pitch.nearestFieldPoint( rx, ry )
+    x, y = self.pitch.calcPointOffset( self.mapping ) if self.mapping else ( 0, 0 )
     self.canvas.coords( self.mapping_item, x - 6, y - 6, x + 6, y + 6 )
     self.canvas.itemconfig( self.mapping_item, state="normal" )
     if self.on_click:
@@ -120,12 +120,12 @@ class RadarCanvas:
   # -------------------------------------------------------------
   # Mapped selection markers
   # -------------------------------------------------------------
-  def update_selection_markers( self, selected: list[ SelectionPoint ] ):
+  def updateSelectionMarkers( self, selected: list[ SelectionPoint ] ):
     self.canvas.delete( "selection" )
     self.selected = selected
     color = self.pitch.colors.highlight_color.as_hex()
     for vertex in self.selected:
-      mx, my = self.pitch.calc_point_offset( vertex )
+      mx, my = self.pitch.calcPointOffset( vertex )
 
       radius = 6
       self.canvas.create_oval(

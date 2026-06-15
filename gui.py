@@ -26,9 +26,13 @@ class App:
   def _create_widgets( self ):
     """Create and place all widgets"""
 
-    # selector
-    self.selector = tk.Canvas( self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d1d5db" )
-    self.selector.place( x=50, y=50, width=1280, height=720 )
+    # imagePreview
+    self.imagePreview = tk.Canvas( self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d1d5db" )
+    self.imagePreview.place( x=50, y=50, width=1280, height=720 )
+
+    # lblImagePreview
+    self.lblImagePreview = tk.Label( self.root, text="Test Label", fg="#000000", font=( "Arial", 12 ), anchor="w" )
+    self.lblImagePreview.place( x=50, y=720 + 50, width=1280, height=24 )
 
     # radarMap
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
@@ -55,11 +59,15 @@ class App:
     self.lblHomography.place( x=50, y=20, width=200, height=24 )
 
     # btnLoadHomography
-    self.btnLoadHomography = tk.Button( self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography )
+    self.btnLoadHomography = tk.Button(
+        self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography
+    )
     self.btnLoadHomography.place( x=1460, y=700, width=180, height=36 )
 
     # btnSaveHomography
-    self.btnSaveHomography = tk.Button( self.root, text="Save Homography", font=( "Arial", 12 ), command=self.cmdSaveHomography )
+    self.btnSaveHomography = tk.Button(
+        self.root, text="Save Homography", font=( "Arial", 12 ), command=self.cmdSaveHomography
+    )
     self.btnSaveHomography.place( x=1650, y=700, width=180, height=36 )
 
     # btnLoadBoundingBoxes
@@ -77,7 +85,6 @@ class App:
     self.btnLoadVideo.place( x=1460, y=800, width=180, height=36 )
 
     # sliderVideoFrame
-    # TODO: Implement slider widget
     self.sldVideoFrame = tk.Scale( self.root, from_=0, to=100, orient='horizontal' )
     self.sldVideoFrame.place( x=1650, y=860, width=200, height=240 )
 
@@ -87,11 +94,11 @@ class App:
 
     self.radarMapController = RadarCanvas(
         self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg,
-        self.appState.pitch
+        self.appState.pitch, self.on_radar_click, self.on_radar_hover
     )
 
     self.mainImageController = MainCanvasController(
-        self.selector, self.appState.cfg, self.appState.pitch, self.on_main_click, self.on_main_hover
+        self.imagePreview, self.appState.cfg, self.appState.pitch, self.on_main_click, self.on_main_hover, self.on_main_view_change
     )
 
   # ==========================================
@@ -99,17 +106,16 @@ class App:
   # ==========================================
 
   def cmdLoadHomography( self ):
-    """
-    Handle cmdLoadHomography event
-    """
     filetypes = ( ( 'Homography files', '*.json' ),)
 
     filename = filedialog.askopenfilename( title='Open homography', initialdir='.', filetypes=filetypes )
     if filename is not None:
+      # Reset the homography
       self.appState.data = Homography()
+      # And then load it
       self.appState.data.load( filename )
-      self.radarMapController.update_selection_markers( self.appState.data.world_pts )
-      self.mainImageController.update_selection_markers( self.appState.data.img_pts_4k )
+      self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
+      self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
 
   def cmdSaveHomography( self ):
     """
@@ -126,10 +132,6 @@ class App:
     pass
 
   def cmdLoadVideo( self ):
-    """
-    Handle cmdLoadVideo event
-    TODO: Implement your logic here
-    """
     filetypes = ( ( 'Video files', [ '*.mp4', '*.mkv' ] ),)
 
     filename = filedialog.askopenfilename( title='Open video', initialdir='.', filetypes=filetypes )
@@ -142,7 +144,7 @@ class App:
         vidData = VideoData( self.appState.cap )
         self.sldVideoFrame.config( to=vidData.frames )
         self.mainImageController.load( self.appState.cap, vidData )
-        self.mainImageController.set_frame( 0 )
+        self.mainImageController.setFrame( 0 )
 
   def cmdRunYoloDetection( self ):
     """
@@ -150,33 +152,46 @@ class App:
     TODO: Implement your logic here
     """
     pass
-  
+
   def mapping_check( self ):
     if self.appState.last_image_click is not None and self.appState.sel_world_point is not None:
       # We have a map!  Construct a mapping pair
+      print( f"Adding a world point {self.appState.sel_world_point} at {self.appState.last_image_click}" )
+      self.appState.data.world_pts.append( self.appState.sel_world_point )
+      self.appState.data.img_pts_4k.append( self.appState.last_image_click )
       self.appState.last_image_click = None
       self.appState.sel_world_point = None
+      self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
+      self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
 
   def on_main_click( self, x: int, y: int, point: SelectionPoint ):
-    print( "Clicked ", str( x ), "x", str( y ) )
+    print( "Main  Click ", str( x ), "x", str( y ) )
     self.appState.last_image_click = point
     self.mapping_check()
 
   def on_main_hover( self, x: int, y: int ):
     pass
 
+  def on_main_view_change( self ):
+    print( "View Change " )
+    xf = self.mainImageController.transform
+    self.lblImagePreview.config( text= f"Zoom: {xf.scale}, Offset: {xf.offset.x}, {xf.offset.y}" )
+    self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
+    self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
+
   def on_radar_click( self, x: int, y: int, point: SelectionPoint ):
-    print( "Clicked ", str( x ), "x", str( y ) )
+    print( "Radar Click ", str( x ), "x", str( y ) )
     self.appState.sel_world_point = point
     self.mapping_check()
 
   def on_radar_hover( self, x: int, y: int ):
     pass
 
+
 if __name__ == "__main__":
   root = tk.Tk()
   appState = AppState()
   appState.pitch.padding = 10
-  appState.pitch.draw_empty_pitch()
+  appState.pitch.makeEmptyPitch()
   app = App( root, appState )
   root.mainloop()

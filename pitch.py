@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from tkinter import Canvas
 import cv2
 import numpy as np
 import supervision as sv
@@ -13,73 +12,92 @@ from dataTypes import Point2D, SelectionPoint
 # Standard FIFA dimensions https://publications.fifa.com/de/football-stadiums-guidelines/technical-guideline/stadium-guidelines/pitch-dimensions-and-surrounding-areas/
 @dataclass
 class SoccerPitchConfiguration:
-  width: float = 68.00  # [cm]
-  length: float = 105.00  # [cm]
-  penalty_box_width: float = 40.23  # [cm] - From 44 yards (4023.36)
-  penalty_box_length: float = 16.46  # [cm] - From 18 yards (1645.92)
-  goal_box_width: float = 18.29  # [cm] - From 20 yards (8 + 6 + 6) - 1828.8
-  goal_box_length: float = 5.48  # [cm] - From 6 yards - 548.64
-  centre_circle_radius: float = 9.14  # [cm] - From 10 yards - 9.144
-  penalty_spot_distance: float = 10.97  # [cm] - From 12 yards - 10.9728
+  # yapf: disable
+  width:                  float = 68.00  # [cm]
+  length:                 float = 105.00  # [cm]
+  penalty_box_width:      float = 40.23  # [cm] - From 44 yards (4023.36)
+  penalty_box_length:     float = 16.46  # [cm] - From 18 yards (1645.92)
+  goal_box_width:         float = 18.29  # [cm] - From 20 yards (8 + 6 + 6) - 1828.8
+  goal_box_length:        float = 5.48  # [cm] - From 6 yards - 548.64
+  centre_circle_radius:   float = 9.14  # [cm] - From 10 yards - 9.144
+  penalty_spot_distance:  float = 10.97  # [cm] - From 12 yards - 10.9728
 
   @property
   def vertices( self ) -> list[ tuple[ float, float ] ]:
-    return [ ( 0, 0 ),  # 1
-             ( 0, ( self.width - self.penalty_box_width ) / 2 ),  # 2
-             ( 0, ( self.width - self.goal_box_width ) / 2 ),  # 3
-             ( 0, ( self.width + self.goal_box_width ) / 2 ),  # 4
-             ( 0, ( self.width + self.penalty_box_width ) / 2 ),  # 5
-             ( 0, self.width ),  # 6
-             ( self.goal_box_length, ( self.width - self.goal_box_width ) / 2 ),  # 7
-             ( self.goal_box_length, ( self.width + self.goal_box_width ) / 2 ),  # 8
-             ( self.penalty_spot_distance, self.width / 2 ),  # 9
-             ( self.penalty_box_length, ( self.width - self.penalty_box_width ) / 2 ),  # 10
-             ( self.penalty_box_length, ( self.width - self.goal_box_width ) / 2 ),  # 11
-             ( self.penalty_box_length, ( self.width + self.goal_box_width ) / 2 ),  # 12
-             ( self.penalty_box_length, ( self.width + self.penalty_box_width ) / 2 ),  # 13
-             ( self.length / 2, 0 ),  # 14
-             ( self.length / 2, self.width / 2 - self.centre_circle_radius ),  # 15
-             ( self.length / 2, self.width / 2 + self.centre_circle_radius ),  # 16
-             ( self.length / 2, self.width ),  # 17
-             ( self.length - self.penalty_box_length, ( self.width - self.penalty_box_width ) / 2 ),  # 18
-             ( self.length - self.penalty_box_length, ( self.width - self.goal_box_width ) / 2 ),  # 19
-             ( self.length - self.penalty_box_length, ( self.width + self.goal_box_width ) / 2 ),  # 20
-             ( self.length - self.penalty_box_length, ( self.width + self.penalty_box_width ) / 2 ),  # 21
-             ( self.length - self.penalty_spot_distance, self.width / 2 ),  # 22
-             ( self.length - self.goal_box_length, ( self.width - self.goal_box_width ) / 2 ),  # 23
-             ( self.length - self.goal_box_length, ( self.width + self.goal_box_width ) / 2 ),  # 24
-             ( self.length, 0 ),  # 25
-             ( self.length, ( self.width - self.penalty_box_width ) / 2 ),  # 26
-             ( self.length, ( self.width - self.goal_box_width ) / 2 ),  # 27
-             ( self.length, ( self.width + self.goal_box_width ) / 2 ),  # 28
-             ( self.length, ( self.width + self.penalty_box_width ) / 2 ),  # 29
-             ( self.length, self.width ),  # 30
-             ( self.length / 2 - self.centre_circle_radius, self.width / 2 ),  # 31
-             ( self.length / 2 + self.centre_circle_radius, self.width / 2 ),  # 32
+    pbw = self.penalty_box_width
+    pbl = self.penalty_box_length
+    gbw = self.goal_box_width
+    gbl = self.goal_box_length
+    ccr = self.centre_circle_radius
+    psd = self.penalty_spot_distance
+    return [ ( 0,                         0                        ),  # 1
+             ( 0,                         ( self.width - pbw ) / 2 ),  # 2
+             ( 0,                         ( self.width - gbw ) / 2 ),  # 3
+             ( 0,                         ( self.width + gbw ) / 2 ),  # 4
+             ( 0,                         ( self.width + pbw ) / 2 ),  # 5
+             ( 0,                         self.width               ),  # 6
+             ( gbl,                       ( self.width - gbw ) / 2 ),  # 7
+             ( gbl,                       ( self.width + gbw ) / 2 ),  # 8
+             ( psd,                       self.width / 2           ),  # 9
+             ( pbl,                       ( self.width - pbw ) / 2 ),  # 10
+             ( pbl,                       ( self.width - gbw ) / 2 ),  # 11
+             ( pbl,                       ( self.width + gbw ) / 2 ),  # 12
+             ( pbl,                       ( self.width + pbw ) / 2 ),  # 13
+             ( self.length / 2,           0                        ),  # 14
+             ( self.length / 2,           self.width / 2 - ccr     ),  # 15
+             ( self.length / 2,           self.width / 2 + ccr     ),  # 16
+             ( self.length / 2,           self.width               ),  # 17
+             ( self.length - pbl,         ( self.width - pbw ) / 2 ),  # 18
+             ( self.length - pbl,         ( self.width - gbw ) / 2 ),  # 19
+             ( self.length - pbl,         ( self.width + gbw ) / 2 ),  # 20
+             ( self.length - pbl,         ( self.width + pbw ) / 2 ),  # 21
+             ( self.length - psd,         self.width / 2           ),  # 22
+             ( self.length - gbl,         ( self.width - gbw ) / 2 ),  # 23
+             ( self.length - gbl,         ( self.width + gbw ) / 2 ),  # 24
+             ( self.length,               0                        ),  # 25
+             ( self.length,               ( self.width - pbw ) / 2 ),  # 26
+             ( self.length,               ( self.width - gbw ) / 2 ),  # 27
+             ( self.length,               ( self.width + gbw ) / 2 ),  # 28
+             ( self.length,               ( self.width + pbw ) / 2 ),  # 29
+             ( self.length,               self.width               ),  # 30
+             ( self.length / 2 - ccr,     self.width / 2           ),  # 31
+             ( self.length / 2 + ccr,     self.width / 2           ),  # 32
+             ( psd + ccr,                 self.width / 2           ),  # 33
+             ( self.length - (psd + ccr), self.width / 2           ),  # 34
             ]
 
   edges: list[ tuple[ int, int ] ] = field(
-      default_factory=lambda: [ ( 1, 2 ), ( 2, 3 ), ( 3, 4 ), ( 4, 5 ), ( 5, 6 ), ( 7, 8 ), ( 10, 11 ), ( 11, 12 ), ( 12, 13 ),
-                                ( 14, 15 ), ( 15, 16 ), ( 16, 17 ), ( 18, 19 ), ( 19, 20 ), ( 20, 21 ), ( 23, 24 ), ( 25, 26 ),
-                                ( 26, 27 ), ( 27, 28 ), ( 28, 29 ), ( 29, 30 ), ( 1, 14 ), ( 2, 10 ), ( 3, 7 ), ( 4, 8 ),
-                                ( 5, 13 ), ( 6, 17 ), ( 14, 25 ), ( 18, 26 ), ( 23, 27 ), ( 24, 28 ), ( 21, 29 ), ( 17, 30 ) ]
+      default_factory=lambda: [ (  1,  2 ), (  2,  3 ), (  3,  4 ), (  4,  5 ), (  5,  6 ), (  7,  8 ),
+                                ( 10, 11 ), ( 11, 12 ), ( 12, 13 ), ( 14, 15 ), ( 15, 16 ), ( 16, 17 ),
+                                ( 18, 19 ), ( 19, 20 ), ( 20, 21 ), ( 23, 24 ), ( 25, 26 ), ( 26, 27 ),
+                                ( 27, 28 ), ( 28, 29 ), ( 29, 30 ), (  1, 14 ), (  2, 10 ), (  3,  7 ),
+                                (  4,  8 ), (  5, 13 ), (  6, 17 ), ( 14, 25 ), ( 18, 26 ), ( 23, 27 ),
+                                ( 24, 28 ), ( 21, 29 ), ( 17, 30 )
+                              ]
   )
 
   labels: list[ str ] = field(
       default_factory=lambda: [
-          "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "15", "16", "17", "18", "20", "21",
-          "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "14", "19"
+          "01", "02", "03", "04", "05", "06",
+          "07", "08", "09", "10", "11", "12",
+          "13", "15", "16", "17", "18", "20",
+          "21", "22", "23", "24", "25", "26",
+          "27", "28", "29", "30", "31", "32",
+          "14", "19", "33", "34"
       ]
   )
 
   colors: list[ str ] = field(
       default_factory=lambda: [
-          "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493",
-          "#FF1493", "#FF1493", "#FF1493", "#00BFFF", "#00BFFF", "#00BFFF", "#00BFFF", "#FF6347", "#FF6347", "#FF6347",
-          "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347",
+          "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493",
+          "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493",
+          "#FF1493", "#00BFFF", "#00BFFF", "#00BFFF", "#00BFFF", "#FF6347",
+          "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347",
+          "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347",
           "#00BFFF", "#00BFFF"
       ]
   )
+  # yapf: enable
 
   @property
   def STD_PITCH_LENGTH( self ) -> float:
@@ -92,25 +110,29 @@ class SoccerPitchConfiguration:
 
 @dataclass
 class SoccerPitchColors:
+  # yapf: disable
   background_color: sv.Color = sv.Color( 34, 139, 34 )
-  line_color: sv.Color = sv.Color.WHITE
-  point_color: sv.Color = sv.Color.YELLOW
-  highlight_color: sv.Color = sv.Color.GREEN
-  hover_color: sv.Color = sv.Color.RED
-  sel_color: sv.Color = sv.Color.from_hex( "#FF00FF" )
+  line_color:       sv.Color = sv.Color.WHITE
+  point_color:      sv.Color = sv.Color.YELLOW
+  highlight_color:  sv.Color = sv.Color.GREEN
+  hover_color:      sv.Color = sv.Color.RED
+  sel_color:        sv.Color = sv.Color.from_hex( "#FF00FF" )
+  # yapf: enable
 
 
 @dataclass
 class SoccerPitchImage:
   # Our pitch is on it's side
-  width: int = 420  # [px]
-  height: int = 272  # [px]
-  padding: int = 50  # [px]
-  line_thickness: int = 4
-  point_radius: int = 1
-  cfg: SoccerPitchConfiguration = field( default_factory=SoccerPitchConfiguration )
-  colors: SoccerPitchColors = field( default_factory=SoccerPitchColors )
-  empty: np.ndarray = field( init = False )  # The empty pitch once constructed
+  # yapf: disable
+  width:          int = 420  # [px]
+  height:         int = 272  # [px]
+  padding:        int =  50  # [px]
+  line_thickness: int =   4
+  point_radius:   int =   1
+  cfg:            SoccerPitchConfiguration = field( default_factory=SoccerPitchConfiguration )
+  colors:         SoccerPitchColors        = field( default_factory=SoccerPitchColors )
+  empty:          np.ndarray               = field( init = False )  # The empty pitch once constructed
+  # yapf: enable
 
   @property
   def get_pitch_scale( self ):
@@ -120,7 +142,7 @@ class SoccerPitchImage:
   def get_pitch_centre( self ):
     return [ int( self.width // 2 + self.padding ), int( self.height // 2 + self.padding ) ]
 
-  def draw_empty_pitch( self ) -> np.ndarray:
+  def makeEmptyPitch( self ) -> np.ndarray:
 
     scaleW, scaleL = self.get_pitch_scale
     centreX, centreY = self.get_pitch_centre
@@ -176,97 +198,15 @@ class SoccerPitchImage:
 
     return self.empty
 
-  def get_radar_location( self, frame ):
-    fh, fw = frame.shape[ :2 ]
-    ph, pw = self.empty.shape[ :2 ] if self.empty else ( 0, 0 )
-
-    # bottom-middle placement
-    x0 = fw//2 - pw//2
-    y0 = fh - ph - ( self.padding * 2 )
-
-    return [ x0, y0, ph, pw ]
-
-  def overlay_pitch( self, frame, pitch_img, alpha=0.7 ):
-
-    x0, y0, ph, pw = self.get_radar_location( frame )
-    # Copy existing part so we can alpha-blend
-    roi = frame[ y0:y0 + ph, x0:x0 + pw ]
-    blended = cv2.addWeighted( pitch_img, alpha, roi, 1 - alpha, 0 )
-    frame[ y0:y0 + ph, x0:x0 + pw ] = blended
-
-  def sel_key_color( self, sel_points: list[ SelectionPoint ], pt: str, highlight_label ) -> sv.Color:
-    if pt == highlight_label:
-      return self.colors.highlight_color
-    elif any( sel.index == self.cfg.labels.index( pt ) for sel in sel_points ):
-      return self.colors.sel_color
-    else:
-      return self.colors.point_color
-
-  def draw_key_points( self, existing: Canvas ):
-
-    print( "draw_key_points with Canvas" )
-    scaleW, scaleL = self.get_pitch_scale
-    i = 0
-    for vertex, pt in zip( self.cfg.vertices, self.cfg.labels ):
-      mx = int( vertex[ 0 ] * scaleW + self.padding )
-      my = int( vertex[ 1 ] * scaleL + self.padding )
-
-      radius = 6
-      existing.create_oval(
-          mx - radius,
-          my - radius,
-          mx + radius,
-          my + radius,
-          fill=self.colors.point_color.as_hex(),
-          outline="black",
-          width=1,
-          tags=( "keypoints" )
-      )
-      existing.create_text( mx + 10, my - 10, text=pt, fill="white", font=( "Arial", 12 ) )
-      i += 1
-
-    return existing
-
-  def draw_sel_points(
-      self, existing: np.ndarray, img_points: list[ SelectionPoint ], point_color=sv.Color.YELLOW, scale: float = 1.0
-  ):
-
-    for pt in img_points:
-      radius = 5
-      i = pt.index
-      x = int( pt.coords.x * scale )
-      y = int( pt.coords.y * scale )
-      label = self.cfg.labels[ i ] if i is not None else "Next"
-      cv2.circle( existing, ( x, y ), radius, point_color.as_bgr(), -1 )
-      cv2.putText( existing, label, ( x + 5, y - 5 ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, point_color.as_bgr(), 1 )
-
-    return existing
-
-  def draw_hover_point( self, existing: np.ndarray, hover_point: SelectionPoint ):
-
-    x0, y0, ph, pw = self.get_radar_location( existing )
-    scaleW, scaleL = self.get_pitch_scale
-    radius = 5
-    i = hover_point.index
-    x = int( hover_point.coords.x )
-    y = int( hover_point.coords.y )
-    targX = int( x*scaleW + x0 + self.padding )
-    targY = int( y*scaleL + y0 + self.padding )
-    label = self.cfg.labels[ i ] if i is not None else "Next"
-    cv2.circle( existing, ( targX, targY ), radius, self.colors.hover_color.as_bgr(), -1 )
-    cv2.putText( existing, label, ( targX + 5, targY - 5 ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.colors.hover_color.as_bgr(), 1 )
-
-    return existing
-
-  def calc_point_offset( self, target_point: SelectionPoint ) -> Point2D:
+  def calcPointOffset( self, target_point: SelectionPoint ) -> Point2D:
 
     scaleW, scaleL = self.get_pitch_scale
     x = int( target_point.coords.x )
     y = int( target_point.coords.y )
     return Point2D( int( x*scaleW + self.padding ), int( y*scaleL + self.padding ) )
 
-  def nearest_field_point( self, mx, my ) -> SelectionPoint:
-    best_pt = self.cfg.vertices[0]
+  def nearestFieldPoint( self, mx, my ) -> SelectionPoint:
+    best_pt = self.cfg.vertices[ 0 ]
     best_dist = None
     idx = None
 

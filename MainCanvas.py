@@ -18,18 +18,27 @@ class MainCanvasController:
       - hover callbacks
     """
 
-  def __init__( self, canvas: tk.Canvas, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage, on_click=None, on_hover=None ):
+  def __init__(
+      self,
+      canvas: tk.Canvas,
+      cfg: SoccerPitchConfiguration,
+      pitch: SoccerPitchImage,
+      on_click=None,
+      on_hover=None,
+      on_view_change=None
+  ):
 
     self.canvas = canvas
     self.cap: cv2.VideoCapture | None = None
     self.cfg: SoccerPitchConfiguration = cfg
     self.pitch: SoccerPitchImage = pitch
-    self.selected: list[SelectionPoint] = []
+    self.selected: list[ SelectionPoint ] = []
     self.mapping: SelectionPoint | None = None
 
     # Callbacks
     self.on_click = on_click
     self.on_hover = on_hover
+    self.on_view_change = on_view_change
 
     # State
     self.transform = ViewTransform()
@@ -45,27 +54,27 @@ class MainCanvasController:
     self.mapping_item = self.createSingleMarker( self.pitch.colors.sel_color, "mapping" )
 
     # Bind events
-    self.canvas.bind( "<Button-1>", self.handle_click )
-    self.canvas.bind( "<Motion>", self.handle_hover )
-    self.canvas.bind( "<ButtonPress-3>", self.start_pan )
-    self.canvas.bind( "<B3-Motion>", self.do_pan )
+    self.canvas.bind( "<Button-1>", self.handleClick )
+    self.canvas.bind( "<Motion>", self.handleHover )
+    self.canvas.bind( "<ButtonPress-3>", self.startPan )
+    self.canvas.bind( "<B3-Motion>", self.doPan )
 
     # Mouse wheel (Windows/macOS)
-    self.canvas.bind( "<MouseWheel>", self.do_zoom )
+    self.canvas.bind( "<MouseWheel>", self.doZoom )
     # Linux scroll
-    self.canvas.bind( "<Button-4>", self.do_zoom )
-    self.canvas.bind( "<Button-5>", self.do_zoom )
+    self.canvas.bind( "<Button-4>", self.doZoom )
+    self.canvas.bind( "<Button-5>", self.doZoom )
 
   def createLayers( self ):
     # These tags define your layer stack
     self.canvas.addtag_withtag( "frame", "frame" )
     self.canvas.addtag_withtag( "selection", "selection" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
-    
+
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
   # -------------------------------------------------------------
-  def set_frame( self, frame_index: int ):
+  def setFrame( self, frame_index: int ):
     print( f"Moving to {frame_index}" )
     self.frame_num = frame_index
     if not self.cap:
@@ -80,14 +89,14 @@ class MainCanvasController:
     self.pil_image = Image.fromarray( cv2.cvtColor( raw_img, cv2.COLOR_BGR2RGB ) )
 
     # Reset transforms when loading a new frame
-    self.set_resized_image()
-    self.apply_transform()
+    self.setResizedImage()
+    self.applyTransform()
 
-  def set_resized_image( self ):
+  def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
     self.frame_photo = ImageTk.PhotoImage( self.rsz_image )
     self.canvas.itemconfig( self.frame_item, image=self.frame_photo )
-    
+
   # -------------------------------------------------------------
   # Single marker on nominated layer
   # -------------------------------------------------------------
@@ -99,19 +108,19 @@ class MainCanvasController:
   # -------------------------------------------------------------
   # Event handlers
   # -------------------------------------------------------------
-  def handle_click( self, event ):
+  def handleClick( self, event ):
     if self.cap is None:
       return
     ix, iy = self.transform.toImage( event.x, event.y )
-    
-    self.mapping = SelectionPoint( None, Point2D( int(ix), int(iy) ) )
+
+    self.mapping = SelectionPoint( None, Point2D( int( ix ), int( iy ) ) )
     self.canvas.coords( self.mapping_item, event.x - 6, event.y - 6, event.x + 6, event.y + 6 )
     self.canvas.itemconfig( self.mapping_item, state="normal" )
-    
+
     if self.on_click:
       self.on_click( ix, iy, self.mapping )
 
-  def handle_hover( self, event ):
+  def handleHover( self, event ):
     if self.cap is None:
       return
     ix, iy = self.transform.toImage( event.x, event.y )
@@ -121,12 +130,12 @@ class MainCanvasController:
   # -------------------------------------------------------------
   # Panning
   # -------------------------------------------------------------
-  def start_pan( self, event ):
+  def startPan( self, event ):
     if self.cap is None:
       return
     self.drag_start = ( event.x, event.y )
 
-  def do_pan( self, event ):
+  def doPan( self, event ):
     if self.cap is None:
       return
     dx = event.x - self.drag_start[ 0 ]
@@ -134,12 +143,12 @@ class MainCanvasController:
     self.transform.offset.x += dx
     self.transform.offset.y += dy
     self.drag_start = ( event.x, event.y )
-    self.apply_transform()
+    self.applyTransform()
 
   # -------------------------------------------------------------
   # Zooming
   # -------------------------------------------------------------
-  def do_zoom( self, event ):
+  def doZoom( self, event ):
     if self.cap is None:
       return
     old_zoom = self.transform.scale
@@ -150,11 +159,11 @@ class MainCanvasController:
     else:
       # Linux
       factor = 1.1 if event.num == 4 else 0.9
-      
+
     newValue = self.transform.scale * factor
     if newValue < 0.1:
       return
-    
+
     if newValue > 10:
       return
 
@@ -165,24 +174,21 @@ class MainCanvasController:
     # Zoom around cursor
     cx, cy = event.x, event.y
     self.transform.offset.x = cx - ( cx - self.transform.offset.x ) * ( self.transform.scale / old_zoom )
-    self.transform.offset.x = cx - ( cx - self.transform.offset.x ) * ( self.transform.scale / old_zoom )
     self.transform.offset.y = cy - ( cy - self.transform.offset.y ) * ( self.transform.scale / old_zoom )
 
-    self.apply_transform()
+    self.applyTransform()
 
   # -------------------------------------------------------------
   # Apply transform to canvas
   # -------------------------------------------------------------
-  def apply_transform( self ):
+  def applyTransform( self ):
     # Reset transform
     print( f"Offset {self.transform.offset.x}, {self.transform.offset.y}" )
     self.canvas.coords( self.frame_item, self.transform.offset.x, self.transform.offset.y )
     print( f"Scale  {self.transform.scale:.3f}x{self.transform.scale:.3f}" )
-    self.set_resized_image()
-    #self.canvas.scale( "frame", 0, 0, self.transform.scale, self.transform.scale )
-
-    # Ensure scroll region matches new bounds
-    #self.canvas.configure( scrollregion=self.canvas.bbox( "all" ) )
+    self.setResizedImage()
+    if self.on_view_change is not None:
+      self.on_view_change()
 
   def load( self, cap: cv2.VideoCapture, vidData: VideoData ):
     self.cap = cap
@@ -192,7 +198,7 @@ class MainCanvasController:
   # -------------------------------------------------------------
   # Mapped selection markers
   # -------------------------------------------------------------
-  def update_selection_markers( self, selected: list[ SelectionPoint ] ):
+  def updateSelectionMarkers( self, selected: list[ SelectionPoint ] ):
     self.canvas.delete( "selection" )
     self.selected = selected
     color = self.pitch.colors.highlight_color.as_hex()
