@@ -2,7 +2,6 @@ import cv2
 import json
 import numpy as np
 from dataclasses import dataclass, field, asdict
-from typing import List, Tuple
 from cv2.typing import MatLike
 
 
@@ -65,23 +64,23 @@ class ViewTransform:
     self.scale = 1.0
     self.offset = Point2D()
 
-  def toImage( self, x, y ) -> Tuple[ float, float ]:
+  def toImage( self, x, y ) -> tuple[ float, float ]:
     ix = ( x - self.offset.x ) / self.scale
     iy = ( y - self.offset.y ) / self.scale
     return ( ix, iy )
 
-  def toDisplay( self, x, y ) -> Tuple[ float, float ]:
+  def toDisplay( self, x, y ) -> tuple[ float, float ]:
     ix = x * self.scale + self.offset.x
     iy = y * self.scale + self.offset.y
     return ( ix, iy )
 
-  def scaledDimensions( self ) -> Tuple[ int, int ]:
+  def scaledDimensions( self ) -> tuple[ int, int ]:
     iwdth = int( self.dimensions.x * self.scale )
     ihght = int( self.dimensions.y * self.scale )
     return ( iwdth, ihght )
 
-  def getScaledPoints( self, points: List[ SelectionPoint ] ) -> List[ SelectionPoint ]:
-    img_pts_scaled: List[ SelectionPoint ] = []
+  def getScaledPoints( self, points: list[ SelectionPoint ] ) -> list[ SelectionPoint ]:
+    img_pts_scaled: list[ SelectionPoint ] = []
     for ip in points:
       img_pts_scaled.append( SelectionPoint( ip.index, Point2D( int(ip.coords.x * self.scale), int(ip.coords.y * self.scale) ) ) )
     return img_pts_scaled
@@ -89,8 +88,8 @@ class ViewTransform:
 
 @dataclass
 class Homography:
-  img_pts_4k: List[ SelectionPoint ] = field( default_factory=lambda: [] )
-  world_pts: List[ SelectionPoint ] = field( default_factory=lambda: [] )
+  img_pts_4k: list[ SelectionPoint ] = field( default_factory=lambda: [] )
+  world_pts: list[ SelectionPoint ] = field( default_factory=lambda: [] )
   display: Point2D = field( default_factory=lambda: Point2D( 1920, 1080 ) )
   source: Point2D = field( default_factory=lambda: Point2D() )
   scaleUpX: float = 0

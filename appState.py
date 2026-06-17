@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 
 import cv2
+from ultralytics import YOLO
 
-from dataTypes import Homography, SelectionPoint, ViewTransform
+from dataTypes import Homography, SelectionPoint
 from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 
 
@@ -20,6 +21,7 @@ class AppState:
   colors:           SoccerPitchColors        = field( default_factory=SoccerPitchColors )
   pitch:            SoccerPitchImage         = field( init=False )
   cap:              cv2.VideoCapture | None  = None
+  model:            YOLO | None              = None
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )

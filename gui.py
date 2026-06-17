@@ -1,8 +1,10 @@
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, ttk
 from PIL import Image, ImageTk
 import cv2
+from ultralytics import YOLO
 
+from LivePreview import LivePreview
 from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
 from appState import AppState
@@ -31,8 +33,40 @@ class App:
     self.imagePreview.place( x=50, y=50, width=1280, height=720 )
 
     # lblImagePreview
-    self.lblImagePreview = tk.Label( self.root, text="Test Label", fg="#000000", font=( "Arial", 12 ), anchor="w" )
-    self.lblImagePreview.place( x=50, y=720 + 50, width=1280, height=24 )
+    self.lblImagePreview = tk.Label( self.root, text="Image Preview", fg="#000000", font=( "Arial", 12 ) )
+    self.lblImagePreview.place( x=50, y=720 + 56, width=600, height=24 )
+
+    self.tblPreview = ttk.Treeview( root, columns=( "Property", "Value" ), show="headings" )
+    self.tblPreview.place( x=50, y=720 + 80, width=600, height=160 )
+
+    self.tblPreview.heading( "Property", text="Property" )
+    self.tblPreview.heading( "Value", text="Value" )
+
+    initialData = [ ( "Zoom", "" ), ( "Offset X", "" ), ( "Offset Y", "" ) ]
+    self.tblPreview.tag_configure( "oddrow", background="#661111", foreground="white" )
+    self.tblPreview.tag_configure( "evenrow", background="#993333", foreground="white" )
+
+    self.constantRowIDs = []
+    for i, row in enumerate( initialData ):
+      tag = "evenrow" if i % 2 == 0 else "oddrow"
+      iid = self.tblPreview.insert( "", tk.END, values=row, tags=( tag,) )
+      self.constantRowIDs.append( iid )
+
+    # lblHomographyData
+    self.lblHmographyData = tk.Label( self.root, text="Homography Data", fg="#000000", font=( "Arial", 12 ) )
+    self.lblHmographyData.place( x=730, y=720 + 56, width=600, height=24 )
+
+    self.tblHomographyData = ttk.Treeview(
+        root, columns=( "Field Point", "World Position", "Image Position" ), show="headings"
+    )
+    self.tblHomographyData.place( x=730, y=720 + 80, width=600, height=160 )
+
+    self.tblHomographyData.heading( "Field Point", text="Field Point" )
+    self.tblHomographyData.heading( "World Position", text="World Position" )
+    self.tblHomographyData.heading( "Image Position", text="Image Position" )
+
+    self.tblHomographyData.tag_configure( "oddrow", background="#661111", foreground="white" )
+    self.tblHomographyData.tag_configure( "evenrow", background="#993333", foreground="white" )
 
     # radarMap
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
@@ -40,7 +74,7 @@ class App:
 
     # livePreview
     self.livePreview = tk.Canvas( self.root, bg="#bfbfbf", highlightthickness=1, highlightbackground="#d1d5db" )
-    self.livePreview.place( x=1460, y=400, width=420, height=272 )
+    self.livePreview.place( x=1460, y=400, width=420 + 20, height=272 + 20 )
 
     # lblRadar
     self.lblRadar = tk.Label(
@@ -98,8 +132,11 @@ class App:
     )
 
     self.mainImageController = MainCanvasController(
-        self.imagePreview, self.appState.cfg, self.appState.pitch, self.on_main_click, self.on_main_hover, self.on_main_view_change
+        self.imagePreview, self.appState.cfg, self.appState.pitch, self.on_main_click, self.on_main_hover,
+        self.on_main_view_change
     )
+
+    self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState )
 
   # ==========================================
   # Event Handlers - Implement your logic here
@@ -116,13 +153,14 @@ class App:
       self.appState.data.load( filename )
       self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
       self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
+      self.refreshHomographyData()
 
   def cmdSaveHomography( self ):
-    """
-    Handle btnSaveHomography event
-    TODO: Implement your logic here
-    """
-    pass
+    filetypes = ( ( 'Homography files', '*.json' ),)
+    filename = filedialog.asksaveasfilename( title='Save homography', initialdir='.', filetypes=filetypes )
+    if filename is not None:
+      # And then load it
+      self.appState.data.save( filename )
 
   def cmdLoadBB( self ):
     """
@@ -151,18 +189,23 @@ class App:
     Handle cmdRunYoloDetection event
     TODO: Implement your logic here
     """
+    # Step 1 - load the model
+    self.appState.model = YOLO( r"runs\detect\train16\weights\best.pt", verbose=False )
     pass
 
   def mapping_check( self ):
-    if self.appState.last_image_click is not None and self.appState.sel_world_point is not None:
-      # We have a map!  Construct a mapping pair
-      print( f"Adding a world point {self.appState.sel_world_point} at {self.appState.last_image_click}" )
-      self.appState.data.world_pts.append( self.appState.sel_world_point )
-      self.appState.data.img_pts_4k.append( self.appState.last_image_click )
-      self.appState.last_image_click = None
-      self.appState.sel_world_point = None
-      self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
-      self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
+    if self.appState.last_image_click is None or self.appState.sel_world_point is None:
+      return
+
+    # We have a map!  Construct a mapping pair
+    print( f"Adding a world point {self.appState.sel_world_point} at {self.appState.last_image_click}" )
+    self.appState.data.world_pts.append( self.appState.sel_world_point )
+    self.appState.data.img_pts_4k.append( self.appState.last_image_click )
+    self.appState.last_image_click = None
+    self.appState.sel_world_point = None
+    self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
+    self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
+    self.refreshHomographyData()
 
   def on_main_click( self, x: int, y: int, point: SelectionPoint ):
     print( "Main  Click ", str( x ), "x", str( y ) )
@@ -175,7 +218,10 @@ class App:
   def on_main_view_change( self ):
     print( "View Change " )
     xf = self.mainImageController.transform
-    self.lblImagePreview.config( text= f"Zoom: {xf.scale}, Offset: {xf.offset.x}, {xf.offset.y}" )
+    updates = [ ( "Zoom", f"{xf.scale:.3f}" ), ( "Offset X", f"{xf.offset.x:.3f}" ), ( "Offset Y", f"{xf.offset.y:.3f}" ) ]
+    for iid, new_values in zip( self.constantRowIDs, updates ):
+      self.tblPreview.item( iid, values=new_values )
+
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
 
@@ -186,6 +232,18 @@ class App:
 
   def on_radar_hover( self, x: int, y: int ):
     pass
+
+  def refreshHomographyData( self ):
+    for iid in self.tblHomographyData.get_children():
+      self.tblHomographyData.delete( iid )
+
+    for i, ( sel, world ) in enumerate( zip( self.appState.data.img_pts_4k, self.appState.data.world_pts ) ):
+      tag = "evenrow" if i % 2 == 0 else "oddrow"
+      row = (
+          str( self.appState.cfg.labels[ world.index ] ) if ( self.appState.cfg and world.index is not None ) else "",
+          f"{world.coords.x:.3f},{world.coords.y:.3f}", f"{sel.coords.x},{sel.coords.y}"
+      )
+      self.tblHomographyData.insert( "", tk.END, values=row, tags=( tag,) )
 
 
 if __name__ == "__main__":
