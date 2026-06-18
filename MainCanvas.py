@@ -5,6 +5,8 @@ from cv2.typing import MatLike
 from PIL import Image, ImageTk
 from supervision import Color
 
+from LineDetector import LineDetector
+from appState import AppState
 from dataTypes import Point2D, SelectionPoint, VideoData, ViewTransform
 from pitch import SoccerPitchConfiguration, SoccerPitchImage
 
@@ -20,20 +22,13 @@ class MainCanvasController:
       - hover callbacks
     """
 
-  def __init__(
-      self,
-      canvas: tk.Canvas,
-      cfg: SoccerPitchConfiguration,
-      pitch: SoccerPitchImage,
-      on_click=None,
-      on_hover=None,
-      on_view_change=None
-  ):
+  def __init__( self, canvas: tk.Canvas, appState: AppState, on_click=None, on_hover=None, on_view_change=None ):
 
     self.canvas = canvas
+    self.appState = appState
     self.cap: cv2.VideoCapture | None = None
-    self.cfg: SoccerPitchConfiguration = cfg
-    self.pitch: SoccerPitchImage = pitch
+    self.cfg: SoccerPitchConfiguration = appState.cfg
+    self.pitch: SoccerPitchImage = appState.pitch
     self.selected: list[ SelectionPoint ] = []
     self.mapping: SelectionPoint | None = None
 
@@ -71,6 +66,7 @@ class MainCanvasController:
     # These tags define your layer stack
     self.canvas.addtag_withtag( "frame", "frame" )
     self.canvas.addtag_withtag( "hough", "hough" )
+    self.canvas.addtag_withtag( "tracking", "tracking" )
     self.canvas.addtag_withtag( "selection", "selection" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
 
@@ -78,10 +74,8 @@ class MainCanvasController:
   # Load a video frame (PIL Image)
   # -------------------------------------------------------------
   def setFrame( self, frame_index: int ):
-    print( f"Moving to {frame_index}" )
     self.frame_num = frame_index
     if not self.cap:
-      print( "Capture not supplied" )
       return
     self.cap.set( cv2.CAP_PROP_POS_FRAMES, frame_index )
     ret, raw_img = self.cap.read()
@@ -95,70 +89,24 @@ class MainCanvasController:
     self.setResizedImage()
     self.applyTransform()
 
-    #self.applyHoughTransform()
+    self.applyHoughTransform()
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
     self.frame_photo = ImageTk.PhotoImage( self.rsz_image )
     self.canvas.itemconfig( self.frame_item, image=self.frame_photo )
 
-  def getSkyMask( self, image: MatLike ):
-    _, binary = cv2.threshold( image, 0, 255, cv2.THRESH_OTSU )
-    contours, _ = cv2.findContours( binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE )
-    if contours:
-      sky_contour = max( contours, key=cv2.contourArea )
-      sky_mask_clean = np.zeros_like( image )
-      cv2.drawContours( sky_mask_clean, [ sky_contour ], -1, 255, thickness=cv2.FILLED )
-      return sky_mask_clean
-    else:
-      return binary
-
-  def blurIt( self, image: MatLike ):
-    return cv2.bilateralFilter( image, d=9, sigmaColor=75, sigmaSpace=75 )
-
-  def enhanceIt( self, image: MatLike ):
-    clahe = cv2.createCLAHE( clipLimit=2.0, tileGridSize=( 8, 8 ) )
-    return clahe.apply( image )
-
-  def getHoughEdges( self, image: MatLike ):
-    return cv2.Canny( image, 50, 150 )
-
-  def getHoughLines( self, edges ):
-    return cv2.HoughLinesP( edges, 1, np.pi / 180, threshold=80, minLineLength=50, maxLineGap=10 )
-
-  def getScharrEdges( self, image: MatLike ):
-    grad_x = cv2.Scharr( image, cv2.CV_32F, 1, 0 )
-    grad_y = cv2.Scharr( image, cv2.CV_32F, 0, 1 )
-    mag = cv2.magnitude( grad_x, grad_y )
-    mag = cv2.convertScaleAbs( mag )
-    smooth = cv2.normalize( mag, mag, 0, 255, cv2.NORM_MINMAX )
-    return cv2.adaptiveThreshold( smooth, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 15, -5 )
-
-  def rebuildEdges( self, edges ):
-    kernel = cv2.getStructuringElement( cv2.MORPH_RECT, ( 9, 9 ) )
-    return cv2.morphologyEx( edges, cv2.MORPH_CLOSE, kernel )
-
-  def drawOnMask( self, lines, image: MatLike ):
-    mask = np.zeros_like( image, dtype=np.uint8 )
-    for line in lines:
-      x1, y1, x2, y2 = map( int, line[ 0 ] )
-      cv2.line( mask, ( x1, y1 ), ( x2, y2 ), 255, 2 )
-    return mask
-
   def applyHoughTransform( self ):
-    lsd = cv2.createLineSegmentDetector( refine=cv2.LSD_REFINE_ADV )
-    gray = cv2.cvtColor( np.array( self.rsz_image ), cv2.COLOR_BGR2GRAY )
-    skyMask = self.getSkyMask( gray )
-    img_no_sky = cv2.bitwise_and( gray, gray, mask=cv2.bitwise_not( skyMask ) )
-    img_no_sky = self.blurIt( img_no_sky )
-    img_no_sky = self.enhanceIt( img_no_sky )
-    lines, _, _, _ = lsd.detect( img_no_sky )
-    masked = self.drawOnMask( lines, img_no_sky )
-    edges = self.rebuildEdges( masked )
-    lines = self.getHoughLines( edges )
-
     self.canvas.delete( 'hough' )
-    self.nosky = ImageTk.PhotoImage( Image.fromarray( img_no_sky ) )
+    if not self.appState.imgOpts.showHough:
+      return
+
+    # Grayscale it
+    gray = cv2.cvtColor( np.array( self.rsz_image ), cv2.COLOR_BGR2GRAY )
+    detector = LineDetector( self.appState.imgOpts )
+    lines = detector.getLines( gray )
+
+    self.nosky = ImageTk.PhotoImage( Image.fromarray( gray ) )
     self.canvas.create_image( 0, 0, anchor="nw", image=self.nosky, tags=( "hough",) )
     if lines is None:
       return
@@ -237,8 +185,6 @@ class MainCanvasController:
 
     self.transform.scale = newValue
 
-    print( f"Zooming from {old_zoom:.3f} to {self.transform.scale:.3f}" )
-
     # Zoom around cursor
     cx, cy = event.x, event.y
     self.transform.offset.x = cx - ( cx - self.transform.offset.x ) * ( self.transform.scale / old_zoom )
@@ -251,9 +197,7 @@ class MainCanvasController:
   # -------------------------------------------------------------
   def applyTransform( self ):
     # Reset transform
-    print( f"Offset {self.transform.offset.x}, {self.transform.offset.y}" )
     self.canvas.coords( self.frame_item, self.transform.offset.x, self.transform.offset.y )
-    print( f"Scale  {self.transform.scale:.3f}x{self.transform.scale:.3f}" )
     self.setResizedImage()
     if self.on_view_change is not None:
       self.on_view_change()
@@ -275,6 +219,7 @@ class MainCanvasController:
       mx, my = vertex.coords
 
       radius = 6
-      self.canvas.create_oval(
-          mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" )
-      )
+      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" ) )
+
+  def refreshHough( self ):
+    self.applyHoughTransform()

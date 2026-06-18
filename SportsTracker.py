@@ -3,33 +3,12 @@ from dataclasses import dataclass, field
 import cv2
 from ultralytics import YOLO
 
+from appState import AppState
 from dataTypes import Homography, SelectionPoint
-from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
-
-
 @dataclass
-class ImageOptions:
-  # Checkbox - Show Hough layer
-  showHough: bool = True
-  # Checkbox - blur for edge detection
-  preBlur: bool = True
-  # Checkbox - try to remove sky
-  removeSky: bool = True
-  # Checkbox - apply CLAHE enhancement
-  edgeEnhance: bool = True
-  # Checkbox - close edges
-  closeEdges: bool = True
-  # Combo box - edge type - Canny, Scharr
-  edgeType: str = 'Canny'
-  # Combo box - line type - Hough, LineSegmentDetector
-  lineType: str = 'LineSegmentDetector'
-
-
-@dataclass
-class AppState:
+class SportsTracker:
   # yapf: disable
-  input:            str                      = "test_homography_input.mp4"
-  homogFile:        str                      = "H_image_to_pitch.json"
+  appState:         AppState                 = field( init=False )
   frameIndex:       int                      = 50
   last_image_click: SelectionPoint | None    = None
   hover_point:      SelectionPoint | None    = None
@@ -44,3 +23,7 @@ class AppState:
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )
+
+  def __init__( self, imgOpts: ImageOptions ) -> None:
+    self.imgOpts = imgOpts
+

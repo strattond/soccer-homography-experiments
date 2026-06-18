@@ -107,7 +107,6 @@ class Homography:
     self.scaleUpY = self.source.y / self.display.y
 
   def scaleUp( self, dimensions: Point2D ) -> Point2D:
-    print( f"Scaling {dimensions.x},{dimensions.y} to {dimensions.x * self.scaleUpX}, {dimensions.y * self.scaleUpY}" )
     return Point2D( int(dimensions.x * self.scaleUpX), int(dimensions.y * self.scaleUpY) )
 
   def computeScaledHomography( self, transform: ViewTransform ) -> MatLike:
@@ -163,19 +162,14 @@ class Homography:
       data = json.load( f )
 
     # --- Homography ---
-    print( "Loading source  homography" )
     self.hom4k = np.array( data[ "homography" ], dtype=np.float64 )
 
     # --- Points ---
-    print( "Loading image points" )
     self.img_pts_4k = [ SelectionPoint( index=d[ "index" ], coords=self.load_point( d ) ) for d in data[ "points" ][ "image" ] ]
-    print( "Loading world points homography" )
     self.world_pts = [ SelectionPoint( index=d[ "index" ], coords=self.load_point( d ) ) for d in data[ "points" ][ "world" ] ]
 
     # --- Sizes ---
-    print( "Loading display size" )
     self.display = Point2D( *data[ "sizes" ][ "display" ] )
-    print( "Loading source size" )
     self.source = Point2D( *data[ "sizes" ][ "source" ] )
 
     self.recalcScale()

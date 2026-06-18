@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog
 from PIL import Image, ImageTk
 import cv2
 from ultralytics import YOLO
 
+from Configuration import Configuration
 from LivePreview import LivePreview
 from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
@@ -32,41 +33,8 @@ class App:
     self.imagePreview = tk.Canvas( self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d1d5db" )
     self.imagePreview.place( x=50, y=50, width=1280, height=720 )
 
-    # lblImagePreview
-    self.lblImagePreview = tk.Label( self.root, text="Image Preview", fg="#000000", font=( "Arial", 12 ) )
-    self.lblImagePreview.place( x=50, y=720 + 56, width=600, height=24 )
-
-    self.tblPreview = ttk.Treeview( root, columns=( "Property", "Value" ), show="headings" )
-    self.tblPreview.place( x=50, y=720 + 80, width=600, height=160 )
-
-    self.tblPreview.heading( "Property", text="Property" )
-    self.tblPreview.heading( "Value", text="Value" )
-
-    initialData = [ ( "Zoom", "" ), ( "Offset X", "" ), ( "Offset Y", "" ) ]
-    self.tblPreview.tag_configure( "oddrow", background="#661111", foreground="white" )
-    self.tblPreview.tag_configure( "evenrow", background="#993333", foreground="white" )
-
-    self.constantRowIDs = []
-    for i, row in enumerate( initialData ):
-      tag = "evenrow" if i % 2 == 0 else "oddrow"
-      iid = self.tblPreview.insert( "", tk.END, values=row, tags=( tag,) )
-      self.constantRowIDs.append( iid )
-
-    # lblHomographyData
-    self.lblHmographyData = tk.Label( self.root, text="Homography Data", fg="#000000", font=( "Arial", 12 ) )
-    self.lblHmographyData.place( x=730, y=720 + 56, width=600, height=24 )
-
-    self.tblHomographyData = ttk.Treeview(
-        root, columns=( "Field Point", "World Position", "Image Position" ), show="headings"
-    )
-    self.tblHomographyData.place( x=730, y=720 + 80, width=600, height=160 )
-
-    self.tblHomographyData.heading( "Field Point", text="Field Point" )
-    self.tblHomographyData.heading( "World Position", text="World Position" )
-    self.tblHomographyData.heading( "Image Position", text="Image Position" )
-
-    self.tblHomographyData.tag_configure( "oddrow", background="#661111", foreground="white" )
-    self.tblHomographyData.tag_configure( "evenrow", background="#993333", foreground="white" )
+    # Tabular data
+    self.tabData = Configuration( parent=self.root, state=self.appState, on_change=self.on_options_change )
 
     # radarMap
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
@@ -77,9 +45,7 @@ class App:
     self.livePreview.place( x=1460, y=400, width=420 + 20, height=272 + 20 )
 
     # lblRadar
-    self.lblRadar = tk.Label(
-        self.root, text="Bird's eye view (point matcher)", fg="#000000", font=( "Arial", 12 ), anchor="center"
-    )
+    self.lblRadar = tk.Label( self.root, text="Bird's eye view (point matcher)", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblRadar.place( x=1460, y=20, width=250, height=24 )
 
     # lblLivePreview
@@ -87,21 +53,15 @@ class App:
     self.lblLivePreview.place( x=1460, y=350, width=100, height=24 )
 
     # lblHomography
-    self.lblHomography = tk.Label(
-        self.root, text="Homography Point Matcher", fg="#000000", font=( "Arial", 12 ), anchor="center"
-    )
+    self.lblHomography = tk.Label( self.root, text="Homography Point Matcher", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblHomography.place( x=50, y=20, width=200, height=24 )
 
     # btnLoadHomography
-    self.btnLoadHomography = tk.Button(
-        self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography
-    )
+    self.btnLoadHomography = tk.Button( self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography )
     self.btnLoadHomography.place( x=1460, y=700, width=180, height=36 )
 
     # btnSaveHomography
-    self.btnSaveHomography = tk.Button(
-        self.root, text="Save Homography", font=( "Arial", 12 ), command=self.cmdSaveHomography
-    )
+    self.btnSaveHomography = tk.Button( self.root, text="Save Homography", font=( "Arial", 12 ), command=self.cmdSaveHomography, state=tk.DISABLED )
     self.btnSaveHomography.place( x=1650, y=700, width=180, height=36 )
 
     # btnLoadBoundingBoxes
@@ -109,10 +69,12 @@ class App:
     self.btnLoadBoundingBoxes.place( x=1460, y=750, width=180, height=36 )
 
     # btnRunYoloDetection
-    self.btnRunYoloDetection = tk.Button(
-        self.root, text="Run Detection", font=( "Arial", 12 ), command=self.cmdRunYoloDetection
-    )
+    self.btnRunYoloDetection = tk.Button( self.root, text="Run Detection", font=( "Arial", 12 ), command=self.cmdRunYoloDetection, state=tk.DISABLED )
     self.btnRunYoloDetection.place( x=1650, y=750, width=180, height=36 )
+
+    # btnRunYoloVidDetection
+    self.btnRunYoloVidDetection = tk.Button( self.root, text="Run Detection (video)", font=( "Arial", 12 ), command=self.cmdRunYoloVidDetection, state=tk.DISABLED )
+    self.btnRunYoloVidDetection.place( x=1650, y=800, width=180, height=36 )
 
     # btnLoadVideo
     self.btnLoadVideo = tk.Button( self.root, text="Load Video", font=( "Arial", 12 ), command=self.cmdLoadVideo )
@@ -127,15 +89,10 @@ class App:
     self.lblVideoFrameSlider.place( x=1460, y=860, width=100, height=24 )
 
     self.radarMapController = RadarCanvas(
-        self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg,
-        self.appState.pitch, self.on_radar_click, self.on_radar_hover
+        self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg, self.appState.pitch, self.on_radar_click, self.on_radar_hover
     )
 
-    self.mainImageController = MainCanvasController(
-        self.imagePreview, self.appState.cfg, self.appState.pitch, self.on_main_click, self.on_main_hover,
-        self.on_main_view_change
-    )
-
+    self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState )
 
   # ==========================================
@@ -183,22 +140,43 @@ class App:
         self.sldVideoFrame.config( to=vidData.frames )
         self.mainImageController.load( self.appState.cap, vidData )
         self.mainImageController.setFrame( 0 )
+        self.checkButtonState()
 
+  def checkButtonState( self ):
+    cappable = self.appState.cap is not None and self.appState.cap.isOpened()
+    homoable = len(self.appState.data.world_pts) >= 4
+    self.btnRunYoloDetection.config(state=tk.NORMAL if cappable and homoable else tk.DISABLED)
+    self.btnRunYoloVidDetection.config(state=tk.NORMAL if cappable and homoable else tk.DISABLED)
+    self.btnSaveHomography.config(state=tk.NORMAL if homoable else tk.DISABLED)
+        
   def cmdRunYoloDetection( self ):
     """
     Handle cmdRunYoloDetection event
     TODO: Implement your logic here
     """
     # Step 1 - load the model
-    self.appState.model = YOLO( r"runs\detect\train16\weights\best.pt", verbose=False )
+    self.allocateModelTracking()
     pass
 
+  def cmdRunYoloVidDetection( self ):
+    """
+    Handle cmdRunYoloDetection event
+    TODO: Implement your logic here
+    """
+    self.allocateModelTracking()
+    pass
+
+  def allocateModelTracking( self ):
+    if self.appState.model is not None:
+      # Already allocated
+      return
+    self.appState.model = YOLO( r"runs\detect\train16\weights\best.pt", verbose=False )
+        
   def mapping_check( self ):
     if self.appState.last_image_click is None or self.appState.sel_world_point is None:
       return
 
     # We have a map!  Construct a mapping pair
-    print( f"Adding a world point {self.appState.sel_world_point} at {self.appState.last_image_click}" )
     self.appState.data.world_pts.append( self.appState.sel_world_point )
     self.appState.data.img_pts_4k.append( self.appState.last_image_click )
     self.appState.last_image_click = None
@@ -208,7 +186,6 @@ class App:
     self.refreshHomographyData()
 
   def on_main_click( self, x: int, y: int, point: SelectionPoint ):
-    print( "Main  Click ", str( x ), "x", str( y ) )
     self.appState.last_image_click = point
     self.mapping_check()
 
@@ -216,34 +193,25 @@ class App:
     pass
 
   def on_main_view_change( self ):
-    print( "View Change " )
     xf = self.mainImageController.transform
-    updates = [ ( "Zoom", f"{xf.scale:.3f}" ), ( "Offset X", f"{xf.offset.x:.3f}" ), ( "Offset Y", f"{xf.offset.y:.3f}" ) ]
-    for iid, new_values in zip( self.constantRowIDs, updates ):
-      self.tblPreview.item( iid, values=new_values )
+
+    self.tabData.refreshImagePreview( xf )
 
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
 
   def on_radar_click( self, x: int, y: int, point: SelectionPoint ):
-    print( "Radar Click ", str( x ), "x", str( y ) )
     self.appState.sel_world_point = point
     self.mapping_check()
 
   def on_radar_hover( self, x: int, y: int ):
     pass
 
-  def refreshHomographyData( self ):
-    for iid in self.tblHomographyData.get_children():
-      self.tblHomographyData.delete( iid )
+  def on_options_change( self ):
+    self.mainImageController.refreshHough()
 
-    for i, ( sel, world ) in enumerate( zip( self.appState.data.img_pts_4k, self.appState.data.world_pts ) ):
-      tag = "evenrow" if i % 2 == 0 else "oddrow"
-      row = (
-          str( self.appState.cfg.labels[ world.index ] ) if ( self.appState.cfg and world.index is not None ) else "",
-          f"{world.coords.x:.3f},{world.coords.y:.3f}", f"{sel.coords.x},{sel.coords.y}"
-      )
-      self.tblHomographyData.insert( "", tk.END, values=row, tags=( tag,) )
+  def refreshHomographyData( self ):
+    self.tabData.refreshHomographyData()
 
 
 if __name__ == "__main__":
