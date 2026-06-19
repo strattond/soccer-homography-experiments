@@ -33,7 +33,7 @@ class App:
     self.imagePreview = tk.Canvas( self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d1d5db" )
     self.imagePreview.place( x=50, y=50, width=1280, height=720 )
 
-    # Tabular data
+    # Tabular data + line detection options
     self.tabData = Configuration( parent=self.root, state=self.appState, on_change=self.on_options_change )
 
     # radarMap
