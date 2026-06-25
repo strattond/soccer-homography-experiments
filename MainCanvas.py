@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import tkinter as tk
-from cv2.typing import MatLike
 from PIL import Image, ImageTk
 from supervision import Color
 

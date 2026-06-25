@@ -2,13 +2,15 @@ import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
 import cv2
-from ultralytics import YOLO
+import numpy as np
 
 from Configuration import Configuration
 from LivePreview import LivePreview
 from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
+from SportsTracker import SportsTracker
 from appState import AppState
+from components import Slider
 from dataTypes import Homography, SelectionPoint, VideoData
 
 
@@ -20,6 +22,7 @@ class App:
     self.root.geometry( "1920x1080" )
     self.root.resizable( True, True )
     self.appState: AppState = appState
+    self.tracking: SportsTracker | None = None
 
     # Initialize variables
 
@@ -81,8 +84,9 @@ class App:
     self.btnLoadVideo.place( x=1460, y=800, width=180, height=36 )
 
     # sliderVideoFrame
-    self.sldVideoFrame = tk.Scale( self.root, from_=0, to=100, orient='horizontal' )
-    self.sldVideoFrame.place( x=1650, y=860, width=200, height=240 )
+    #self.sldVideoFrame = tk.Scale( self.root, from_=0, to=100, orient='horizontal', command=self.cmdUpdateVideoFrame )
+    #self.sldVideoFrame.place( x=1650, y=860, width=200, height=240 )
+    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=860, width=200, height=240 )
 
     # lblVideoFrameSlider
     self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 12 ), anchor="center" )
@@ -137,18 +141,23 @@ class App:
       self.appState.cap = cv2.VideoCapture( filename )
       if self.appState.cap.isOpened():
         vidData = VideoData( self.appState.cap )
-        self.sldVideoFrame.config( to=vidData.frames )
+        self.sldVideoFrame.setMax( vidData.frames )
         self.mainImageController.load( self.appState.cap, vidData )
         self.mainImageController.setFrame( 0 )
         self.checkButtonState()
 
+  def cmdUpdateVideoFrame( self, value ):
+
+    self.mainImageController.setFrame( int( value ) )
+
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
-    homoable = len(self.appState.data.world_pts) >= 4
-    self.btnRunYoloDetection.config(state=tk.NORMAL if cappable and homoable else tk.DISABLED)
-    self.btnRunYoloVidDetection.config(state=tk.NORMAL if cappable and homoable else tk.DISABLED)
-    self.btnSaveHomography.config(state=tk.NORMAL if homoable else tk.DISABLED)
-        
+    homoable = len( self.appState.data.world_pts ) >= 4
+    self.btnRunYoloDetection.config( state=tk.NORMAL if cappable and homoable else tk.DISABLED )
+    self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable and homoable else tk.DISABLED )
+    self.btnSaveHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
+    self.sldVideoFrame.setEnabled( cappable )
+
   def cmdRunYoloDetection( self ):
     """
     Handle cmdRunYoloDetection event
@@ -156,7 +165,8 @@ class App:
     """
     # Step 1 - load the model
     self.allocateModelTracking()
-    pass
+    if self.tracking is not None:
+      self.tracking.track( np.array( self.mainImageController.pil_image.convert( "BGR" ) ), self.mainImageController.frame_num )
 
   def cmdRunYoloVidDetection( self ):
     """
@@ -167,11 +177,11 @@ class App:
     pass
 
   def allocateModelTracking( self ):
-    if self.appState.model is not None:
+    if self.tracking is not None:
       # Already allocated
       return
-    self.appState.model = YOLO( r"runs\detect\train16\weights\best.pt", verbose=False )
-        
+    self.tracking = SportsTracker( self.appState.mdlOpts )
+
   def mapping_check( self ):
     if self.appState.last_image_click is None or self.appState.sel_world_point is None:
       return
