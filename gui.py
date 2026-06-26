@@ -153,7 +153,7 @@ class App:
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
     homoable = len( self.appState.data.world_pts ) >= 4
-    self.btnRunYoloDetection.config( state=tk.NORMAL if cappable and homoable else tk.DISABLED )
+    self.btnRunYoloDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable and homoable else tk.DISABLED )
     self.btnSaveHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
@@ -166,7 +166,10 @@ class App:
     # Step 1 - load the model
     self.allocateModelTracking()
     if self.tracking is not None:
-      self.tracking.track( np.array( self.mainImageController.pil_image.convert( "BGR" ) ), self.mainImageController.frame_num )
+      image = np.array( self.mainImageController.pil_image.convert( "RGB" ) )
+      result_rgb = cv2.cvtColor( image, cv2.COLOR_RGB2BGR )
+
+      self.tracking.track( result_rgb, self.mainImageController.frame_num )
 
   def cmdRunYoloVidDetection( self ):
     """

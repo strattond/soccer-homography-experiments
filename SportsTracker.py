@@ -44,7 +44,7 @@ class SportsTracker:
     self.mdlOpts = mdlOpts
     modelName = "yolo26" + mdlOpts.size + ".pt"
     self.model = YOLO( modelName, verbose=False )
-    self.tracker = TRACKTRACK( args={ 'with_reid': mdlOpts.withReID, 'reid_model': 'auto'} )
+    #self.tracker = TRACKTRACK( args={ 'with_reid': mdlOpts.withReID, 'reid_model': 'auto'} )
 
   def track( self, image, index ):
     #new_frame = cv2.resize( image, (new_w, new_h))
@@ -62,9 +62,11 @@ class SportsTracker:
     ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
     player_dets = np.hstack( ( players.xyxy, players.confidence[ :, None ], players.class_id[ :, None ] ) )
     positions = []
-    teams     = []
+    teams = []
     for det in player_dets:
       x1f, y1f, x2f, y2f, conf, cid = det
 
       # Team colour classifier
-      x1, y1, x2, y2 = map(int, (x1f, y1f, x2f, y2f))
+      x1, y1, x2, y2 = map( int, ( x1f, y1f, x2f, y2f ) )
+
+      print( f"Player box {str( x1 )},{str( y1 )} x {str( x2 )},{str( y2 )}" )
