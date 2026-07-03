@@ -5,6 +5,7 @@ from PIL import Image, ImageTk
 from supervision import Color
 
 from LineDetector import LineDetector
+from SportsTracker import Track
 from appState import AppState
 from dataTypes import Point2D, SelectionPoint, VideoData, ViewTransform
 from pitch import SoccerPitchConfiguration, SoccerPitchImage
@@ -218,7 +219,18 @@ class MainCanvasController:
       mx, my = vertex.coords
 
       radius = 6
-      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" ) )
+      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection", ) )
 
   def refreshHough( self ):
     self.applyHoughTransform()
+
+  def updateBoundingBoxes( self, tracks: dict[ int, Track ], index: int ):
+    self.canvas.delete( "tracking" )
+    for track in tracks:
+      box = tracks[ track ].getByIndex( index )
+      if box is not None:
+        tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
+        brx, bry = self.transform.toDisplay( box.x2, box.y2 )
+        #self.canvas.create_rectangle( box.x1, box.y1, box.x2, box.y2, outline='yellow', width=5, tags=( "tracking" ) )
+        # Now we need to scale the box coordinates to our image
+        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "tracking", ) )

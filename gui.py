@@ -159,17 +159,16 @@ class App:
     self.sldVideoFrame.setEnabled( cappable )
 
   def cmdRunYoloDetection( self ):
-    """
-    Handle cmdRunYoloDetection event
-    TODO: Implement your logic here
-    """
+
     # Step 1 - load the model
     self.allocateModelTracking()
     if self.tracking is not None:
+      # Step 2 - convert the image 
       image = np.array( self.mainImageController.pil_image.convert( "RGB" ) )
       result_rgb = cv2.cvtColor( image, cv2.COLOR_RGB2BGR )
-
+      # Step 3 - run the tracking
       self.tracking.track( result_rgb, self.mainImageController.frame_num )
+      self.mainImageController.updateBoundingBoxes( self.tracking.tracks, self.mainImageController.frame_num )
 
   def cmdRunYoloVidDetection( self ):
     """

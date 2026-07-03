@@ -9,7 +9,7 @@ from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 @dataclass
 class ImageOptions:
   # yapf: disable
-  showHough:   bool = True                  # Checkbox - Show Hough layer
+  showHough:   bool = False                 # Checkbox - Show Hough layer
   preBlur:     bool = True                  # Checkbox - blur for edge detection
   removeSky:   bool = True                  # Checkbox - try to remove sky
   edgeEnhance: bool = True                  # Checkbox - apply CLAHE enhancement

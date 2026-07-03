@@ -8,20 +8,15 @@ from dataTypes import ViewTransform
 
 @dataclass
 class UIOptions:
-  # Checkbox - Show Hough layer
-  showHough: BooleanVar = field( default_factory=tk.BooleanVar )
-  # Checkbox - blur for edge detection
-  preBlur: BooleanVar = field( default_factory=tk.BooleanVar )
-  # Checkbox - try to remove sky
-  removeSky: BooleanVar = field( default_factory=tk.BooleanVar )
-  # Checkbox - apply CLAHE enhancement
-  edgeEnhance: BooleanVar = field( default_factory=tk.BooleanVar )
-  # Checkbox - close edges
-  closeEdges: BooleanVar = field( default_factory=tk.BooleanVar )
-  # Combo box - edge type - Canny, Scharr
-  edgeType: StringVar = field( default_factory=tk.StringVar )
-  # Combo box - line type - Hough, LineSegmentDetector
-  lineType: StringVar = field( default_factory=tk.StringVar )
+  # yapf: disable
+  showHough:   BooleanVar = field( default_factory=tk.BooleanVar ) # Checkbox - Show Hough layer
+  preBlur:     BooleanVar = field( default_factory=tk.BooleanVar ) # Checkbox - blur for edge detection
+  removeSky:   BooleanVar = field( default_factory=tk.BooleanVar ) # Checkbox - try to remove sky
+  edgeEnhance: BooleanVar = field( default_factory=tk.BooleanVar ) # Checkbox - apply CLAHE enhancement
+  closeEdges:  BooleanVar = field( default_factory=tk.BooleanVar ) # Checkbox - close edges
+  edgeType:    StringVar  = field( default_factory=tk.StringVar )  # Combo box - edge type - Canny, Scharr
+  lineType:    StringVar  = field( default_factory=tk.StringVar )  # Combo box - line type - Hough, LineSegmentDetector
+  # yapf: enable
 
 
 class Configuration:
