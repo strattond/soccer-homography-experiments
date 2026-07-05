@@ -71,14 +71,21 @@ class SportsTracker:
   def __post_init__( self ) -> None:
     modelName = "yolo26" + self.mdlOpts.size + ".pt"
     self.model = YOLO( modelName, verbose=True )
-    #self.tracker = TRACKTRACK( args={ 'with_reid': mdlOpts.withReID, 'reid_model': 'auto'} )
+    args = {
+      'with_reid': self.mdlOpts.withReID,
+      'reid_model': 'auto',
+      'track_buffer': 100
+    }
+    self.tracker = TRACKTRACK( args=args )
+    print( self.tracker )
+    
 
   def track( self, image, index ):
     #new_frame = cv2.resize( image, (new_w, new_h))
 
     new_frame = image
     #  Predicting
-    results = self.model.track( new_frame, verbose=False, tracker='track_custom.yaml' )
+    results = self.model.track( new_frame, verbose=False, tracker='track_custom.yaml', with_reid=False )
     # Process results
     detections = DetectionAdapter( results )
     keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
