@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from ultralytics.trackers import TRACKTRACK
 
 from appState import ModelOptions
 from dataTypes import Homography
@@ -22,6 +21,7 @@ class Person:
   name:  str = ""
   pType: int = 0     # 0 - home, 1 - away, 2 - official
   # yapf: enable
+
 
 @dataclass
 class TrackData:
@@ -42,6 +42,7 @@ class TrackData:
     self.conf = conf
     self.index = index
 
+
 @dataclass
 class Track:
   # yapf: disable
@@ -57,12 +58,12 @@ class Track:
 
     return None
 
+
 @dataclass
 class SportsTracker:
   # yapf: disable
   mdlOpts:          ModelOptions
   model:            YOLO                     = field( init=False )
-  tracker:          TRACKTRACK               = field( init=False )
   data:             Homography               = field( init=False )
   cap:              cv2.VideoCapture         = field( init=False )
   tracks:           dict[int, Track]         = field( default_factory=dict )
@@ -71,29 +72,21 @@ class SportsTracker:
   def __post_init__( self ) -> None:
     modelName = "yolo26" + self.mdlOpts.size + ".pt"
     self.model = YOLO( modelName, verbose=True )
-    args = {
-      'with_reid': self.mdlOpts.withReID,
-      'reid_model': 'auto',
-      'track_buffer': 100
-    }
-    self.tracker = TRACKTRACK( args=args )
-    print( self.tracker )
-    
 
   def track( self, image, index ):
     #new_frame = cv2.resize( image, (new_w, new_h))
 
     new_frame = image
     #  Predicting
-    results = self.model.track( new_frame, verbose=False, tracker='track_custom.yaml', with_reid=False )
+    results = self.model.track( new_frame, verbose=False, tracker='track_custom.yaml' )
     # Process results
     detections = DetectionAdapter( results )
     keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
     all_mask = [ cid in keep_ids for cid in detections.class_id ]
     detections = detections[ all_mask ]
-    #balls = detections[ detections.class_id == BALL_CLASS_ID ]
+    balls = detections[ detections.class_id == BALL_CLASS_ID ]
     players = detections[ detections.class_id == PLAYER_CLASS_ID ]
-    #ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
+    ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
     player_dets = np.hstack( ( players.xyxy, players.confidence[ :, None ], players.class_id[ :, None ], players.trackID[ :, None ] ) )
     for det in player_dets:
       x1f, y1f, x2f, y2f, conf, cidf, tidf = det
