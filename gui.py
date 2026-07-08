@@ -203,7 +203,7 @@ class App:
             if data.type == OutputType.BBOX and data.data is not None:
               if data.data.tid not in self.appState.tracks:
                 self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
-              self.appState.tracks[ data.data.tid ].boxes.append( data.data )
+              self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
             elif data.type == OutputType.NEW_FRAME:
               self.progressBar[ 'value' ] += 1
               pass

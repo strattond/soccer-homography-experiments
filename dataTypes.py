@@ -82,7 +82,7 @@ class ViewTransform:
   def getScaledPoints( self, points: list[ SelectionPoint ] ) -> list[ SelectionPoint ]:
     img_pts_scaled: list[ SelectionPoint ] = []
     for ip in points:
-      img_pts_scaled.append( SelectionPoint( ip.index, Point2D( int(ip.coords.x * self.scale), int(ip.coords.y * self.scale) ) ) )
+      img_pts_scaled.append( SelectionPoint( ip.index, Point2D( int( ip.coords.x * self.scale ), int( ip.coords.y * self.scale ) ) ) )
     return img_pts_scaled
 
 
@@ -107,7 +107,7 @@ class Homography:
     self.scaleUpY = self.source.y / self.display.y
 
   def scaleUp( self, dimensions: Point2D ) -> Point2D:
-    return Point2D( int(dimensions.x * self.scaleUpX), int(dimensions.y * self.scaleUpY) )
+    return Point2D( int( dimensions.x * self.scaleUpX ), int( dimensions.y * self.scaleUpY ) )
 
   def computeScaledHomography( self, transform: ViewTransform ) -> MatLike:
     img_pts_scaled = transform.getScaledPoints( self.img_pts_4k )
@@ -174,6 +174,7 @@ class Homography:
 
     self.recalcScale()
 
+
 @dataclass
 class Person:
   # yapf: disable
@@ -186,7 +187,6 @@ class Person:
 @dataclass
 class TrackData:
   # yapf: disable
-  tid:   int
   x1:    int
   y1:    int
   x2:    int
@@ -195,14 +195,25 @@ class TrackData:
   index: int
   # yapf: enable
 
-  def __init__( self, tid: int, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
-    self.tid = tid
+  def __init__( self, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
     self.x1 = x1
     self.x2 = x2
     self.y1 = y1
     self.y2 = y2
     self.conf = conf
     self.index = index
+
+
+@dataclass
+class RawTrackData:
+  # yapf: disable
+  tid:   int
+  data:  TrackData
+  # yapf: enable
+
+  def __init__( self, tid: int, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
+    self.tid = tid
+    self.data = TrackData( x1, y1, x2, y2, conf, index )
 
 
 @dataclass
@@ -219,5 +230,3 @@ class Track:
         return box
 
     return None
-
-

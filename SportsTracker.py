@@ -1,6 +1,6 @@
 from appState import ModelOptions
 from dataclasses import dataclass, field
-from dataTypes import Homography, TrackData
+from dataTypes import Homography, RawTrackData
 from detectionadapter import DetectionAdapter
 from enum import Enum, auto
 from log import logger
@@ -40,7 +40,7 @@ class Command:
 @dataclass
 class Output:
   type: OutputType
-  data: TrackData | None = None
+  data: RawTrackData | None = None
 
 
 # This will be responsible for loading the model, performing detections and tracking, and so on
@@ -134,7 +134,9 @@ class SportsTracker:
 
       #  Predicting
       self.out_queue.put( Output( type=OutputType.NEW_FRAME ) )
-      results = self.model.track( frame, verbose=False, tracker='track_custom.yaml' )
+      print( "Tracking" )
+      results = self.model.track( source=frame, verbose=True, tracker='track_custom.yaml' )
+      print( "Tracked" )
 
       # Process results
       detections = DetectionAdapter( results )
@@ -152,7 +154,7 @@ class SportsTracker:
         x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
 
         logger.info( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
-        self.out_queue.put( Output( type=OutputType.BBOX, data=TrackData( tid, x1, y1, x2, y2, conf, self.index ) ) )
+        self.out_queue.put( Output( type=OutputType.BBOX, data=RawTrackData( tid, x1, y1, x2, y2, conf, self.index ) ) )
 
       self.index += 1
       if self.index > self.range[ 1 ]:
