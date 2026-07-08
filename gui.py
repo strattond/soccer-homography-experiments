@@ -96,7 +96,7 @@ class App:
     self.btnLoadVideo.place( x=1460, y=800, width=180, height=36 )
 
     # sliderVideoFrame
-    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=860, width=200, height=240 )
+    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=860, width=200, height=24 )
 
     # lblVideoFrameSlider
     self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 12 ), anchor="center" )
