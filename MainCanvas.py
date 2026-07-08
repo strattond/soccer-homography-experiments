@@ -1,11 +1,12 @@
 import cv2
 import numpy as np
 import tkinter as tk
+from log import logger
 from PIL import Image, ImageTk
 from supervision import Color
 
 from LineDetector import LineDetector
-from SportsTracker import Track
+from dataTypes import Track
 from appState import AppState
 from dataTypes import Point2D, SelectionPoint, VideoData, ViewTransform
 from pitch import SoccerPitchConfiguration, SoccerPitchImage
@@ -80,7 +81,7 @@ class MainCanvasController:
     self.cap.set( cv2.CAP_PROP_POS_FRAMES, frame_index )
     ret, raw_img = self.cap.read()
     if not ret:
-      print( f"Failed reading cap {ret}" )
+      logger.error( f"Failed reading cap {ret}" )
       return
 
     self.pil_image = Image.fromarray( cv2.cvtColor( raw_img, cv2.COLOR_BGR2RGB ) )

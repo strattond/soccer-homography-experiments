@@ -1,9 +1,27 @@
 from dataclasses import dataclass, field
+from log import logging
 import tkinter as tk
 from tkinter import BooleanVar, StringVar, ttk
+from tkinter.scrolledtext import ScrolledText
 
 from appState import AppState
 from dataTypes import ViewTransform
+
+
+class TkinterLogHandler( logging.Handler ):
+
+  def __init__( self, text_widget ):
+    super().__init__()
+    self.text_widget = text_widget
+
+  def emit( self, record ):
+    msg = self.format( record )
+    # Append text safely from Tkinter main thread
+    self.text_widget.after( 0, self._append, msg )
+
+  def _append( self, msg ):
+    self.text_widget.insert( tk.END, msg + "\n" )
+    self.text_widget.see( tk.END )  # auto-scroll
 
 
 @dataclass
@@ -33,6 +51,13 @@ class Configuration:
     # Build UI
     self.createLayout()
 
+    handler = TkinterLogHandler( self.txtLog )
+    formatter = logging.Formatter( "%(asctime)s - %(levelname)s - %(message)s" )
+    handler.setFormatter( formatter )
+
+    logger = logging.getLogger( "SportsTracker" )
+    logger.addHandler( handler )
+
   def stateToUI( self ):
     self.uiOpts.closeEdges.set( self.appState.imgOpts.closeEdges )
     self.uiOpts.edgeEnhance.set( self.appState.imgOpts.edgeEnhance )
@@ -54,11 +79,13 @@ class Configuration:
     self.tabImagePreview = self.createTab( "Image Preview" )
     self.tabHomographyData = self.createTab( "Homography Data" )
     self.tabImageOptions = self.createTab( "Image Options" )
+    self.tabLog = self.createTab( "Log" )
     self.nbControl.pack( expand=1, fill='both' )
 
     self.setupImagePreview()
     self.setupHomographyData()
     self.setupImageOptions()
+    self.setupLogging()
 
   def createTab( self, text ):
     newTab = ttk.Frame( self.nbControl )
@@ -112,6 +139,10 @@ class Configuration:
 
   def createCheck( self, text, variable ):
     return ttk.Checkbutton( self.tabImageOptions, text=text, variable=variable, command=self.uiToState, compound='left' )
+
+  def setupLogging( self ):
+    self.txtLog = ScrolledText( self.tabLog, width=80, height=20, state="normal" )
+    self.txtLog.pack( fill="both", expand=True )
 
   def setupImageOptions( self ):
     self.optShowHough = self.createCheck( text="Show Edge Detection", variable=self.uiOpts.showHough )

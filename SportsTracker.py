@@ -1,100 +1,147 @@
+from appState import ModelOptions
 from dataclasses import dataclass, field
+from dataTypes import Homography, TrackData
+from detectionadapter import DetectionAdapter
+from enum import Enum, auto
+from log import logger
+from ultralytics import YOLO
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
-
-from appState import ModelOptions
-from dataTypes import Homography
-from detectionadapter import DetectionAdapter
+import queue
+import threading
+import time
 
 BALL_CLASS_ID = 32
 PLAYER_CLASS_ID = 0
 
+
+class CommandType( Enum ):
+  RUN_FRAMES = auto()
+  PAUSE = auto()
+  RESUME = auto()
+  STOP = auto()
+  SEEK = auto()
+
+
+@dataclass
+class Command:
+  type: CommandType
+  start: int | None = None
+  end: int | None = None
+
+
 # This will be responsible for loading the model, performing detections and tracking, and so on
-
-
-@dataclass
-class Person:
-  # yapf: disable
-  id:    int = 0
-  name:  str = ""
-  pType: int = 0     # 0 - home, 1 - away, 2 - official
-  # yapf: enable
-
-
-@dataclass
-class TrackData:
-  # yapf: disable
-  x1:    int
-  y1:    int
-  x2:    int
-  y2:    int
-  conf:  float
-  index: int
-  # yapf: enable
-
-  def __init__( self, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
-    self.x1 = x1
-    self.x2 = x2
-    self.y1 = y1
-    self.y2 = y2
-    self.conf = conf
-    self.index = index
-
-
-@dataclass
-class Track:
-  # yapf: disable
-  id:     int
-  person: Person | None   = None
-  boxes:  list[TrackData] = field( default_factory=list )
-  # yapf: enable
-
-  def getByIndex( self, index: int ) -> TrackData | None:
-    for box in self.boxes:
-      if box.index == index:
-        return box
-
-    return None
 
 
 @dataclass
 class SportsTracker:
   # yapf: disable
   mdlOpts:          ModelOptions
+  videoFile:        str
+  range:            tuple[int, int]          = field( default_factory=tuple[int, int] )
+  index:            int                      = 0
   model:            YOLO                     = field( init=False )
   data:             Homography               = field( init=False )
   cap:              cv2.VideoCapture         = field( init=False )
-  tracks:           dict[int, Track]         = field( default_factory=dict )
+
+  # Threading + communication
+  in_queue:         queue.Queue              = field(default_factory=queue.Queue)
+  out_queue:        queue.Queue              = field(default_factory=queue.Queue)
+  paused:           bool                     = True
+  stopped:          bool                     = False
+  thread:           threading.Thread         = field(init=False)
   # yapf: enable
 
   def __post_init__( self ) -> None:
-    modelName = "yolo26" + self.mdlOpts.size + ".pt"
-    self.model = YOLO( modelName, verbose=True )
+    self.cap = cv2.VideoCapture( self.videoFile )
+    self.thread = threading.Thread( target=self.run, daemon=True )
 
-  def track( self, image, index ):
-    #new_frame = cv2.resize( image, (new_w, new_h))
+  def start( self ):
+    logger.info( "Starting SportsTracker" )
+    self.thread.start()
 
-    new_frame = image
-    #  Predicting
-    results = self.model.track( new_frame, verbose=False, tracker='track_custom.yaml' )
-    # Process results
-    detections = DetectionAdapter( results )
-    keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
-    all_mask = [ cid in keep_ids for cid in detections.class_id ]
-    detections = detections[ all_mask ]
-    balls = detections[ detections.class_id == BALL_CLASS_ID ]
-    players = detections[ detections.class_id == PLAYER_CLASS_ID ]
-    ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
-    player_dets = np.hstack( ( players.xyxy, players.confidence[ :, None ], players.class_id[ :, None ], players.trackID[ :, None ] ) )
-    for det in player_dets:
-      x1f, y1f, x2f, y2f, conf, cidf, tidf = det
+  def pause( self ):
+    logger.info( "Pausing SportsTracker" )
+    self.paused = True
 
-      # Team colour classifier
-      x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
+  def resume( self ):
+    logger.info( "Resuming SportsTracker" )
+    self.paused = False
 
-      print( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
-      if tid not in self.tracks:
-        self.tracks[ tid ] = Track( tid )
-      self.tracks[ tid ].boxes.append( TrackData( x1, y1, x2, y2, conf, index ) )
+  def stop( self ):
+    #logger.info( "Stopping SportsTracker" )
+    print( "Stopping SportsTracker" )
+    self.paused = False
+    self.stopped = True
+
+  def processCommands( self ):
+    try:
+      while True:
+        cmd: Command = self.in_queue.get_nowait()
+
+        print( "Received command", cmd )
+        if cmd.type == CommandType.PAUSE:
+          self.pause()
+        elif cmd.type == CommandType.RESUME:
+          self.resume()
+        elif cmd.type == CommandType.STOP:
+          self.stop()
+        elif cmd.type == CommandType.SEEK:
+          if cmd.start is not None:
+            self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
+
+        elif cmd.type == CommandType.RUN_FRAMES:
+          if cmd.start is not None and cmd.end is not None:
+            if cmd.end > int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
+              cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) )
+            self.range = ( cmd.start, cmd.end )
+            self.index = cmd.start
+            modelName = "yolo26" + self.mdlOpts.size + ".pt"
+            self.model = YOLO( modelName, verbose=True )
+
+    except queue.Empty:
+      pass
+
+  def run( self ):
+    while not self.stopped:
+      self.processCommands()
+      while self.paused and not self.stopped:
+        time.sleep( 0.5 )
+        self.processCommands()
+
+      # We might go from paused to stopped
+      if self.stopped:
+        break
+
+      ret, frame = self.cap.read()
+      if not ret:
+        logger.error( f"Failed reading cap {ret}" )
+        break
+
+      #  Predicting
+      results = self.model.track( frame, verbose=False, tracker='track_custom.yaml' )
+
+      # Process results
+      detections = DetectionAdapter( results )
+      keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
+      all_mask = [ cid in keep_ids for cid in detections.class_id ]
+      detections = detections[ all_mask ]
+      balls = detections[ detections.class_id == BALL_CLASS_ID ]
+      players = detections[ detections.class_id == PLAYER_CLASS_ID ]
+      ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
+      player_dets = np.hstack( ( players.xyxy, players.confidence[ :, None ], players.class_id[ :, None ], players.trackID[ :, None ] ) )
+      for det in player_dets:
+        x1f, y1f, x2f, y2f, conf, cidf, tidf = det
+
+        # Team colour classifier
+        x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
+
+        logger.info( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
+        self.out_queue.put( TrackData( tid, x1, y1, x2, y2, conf, self.index ) )
+
+      self.index += 1
+      if self.index > self.range[ 1 ]:
+        logger.info( "Processing complete!" )
+        self.pause()
+    self.cap.release()

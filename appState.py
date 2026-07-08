@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 import cv2
 
-from dataTypes import Homography, SelectionPoint
+from dataTypes import Homography, SelectionPoint, Track
 from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 
 
@@ -22,7 +22,7 @@ class ImageOptions:
 class ModelOptions:
   # yapf: disable
   withReID: bool = True
-  size:     str  = 'm'
+  size:     str  = 'x'
   imgSz:    int  = 640
 
 
@@ -40,8 +40,10 @@ class AppState:
   colors:           SoccerPitchColors        = field( default_factory=SoccerPitchColors )
   pitch:            SoccerPitchImage         = field( init=False )
   cap:              cv2.VideoCapture | None  = None
+  videoFile:        str                      = ""
   imgOpts:          ImageOptions             = field( default_factory=ImageOptions )
   mdlOpts:          ModelOptions             = field( default_factory=ModelOptions )
+  tracks:           dict[int, Track]         = field( default_factory=dict )
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )

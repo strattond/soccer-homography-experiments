@@ -173,3 +173,51 @@ class Homography:
     self.source = Point2D( *data[ "sizes" ][ "source" ] )
 
     self.recalcScale()
+
+@dataclass
+class Person:
+  # yapf: disable
+  id:    int = 0
+  name:  str = ""
+  pType: int = 0     # 0 - home, 1 - away, 2 - official
+  # yapf: enable
+
+
+@dataclass
+class TrackData:
+  # yapf: disable
+  tid:   int
+  x1:    int
+  y1:    int
+  x2:    int
+  y2:    int
+  conf:  float
+  index: int
+  # yapf: enable
+
+  def __init__( self, tid: int, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
+    self.tid = tid
+    self.x1 = x1
+    self.x2 = x2
+    self.y1 = y1
+    self.y2 = y2
+    self.conf = conf
+    self.index = index
+
+
+@dataclass
+class Track:
+  # yapf: disable
+  id:     int
+  person: Person | None   = None
+  boxes:  list[TrackData] = field( default_factory=list )
+  # yapf: enable
+
+  def getByIndex( self, index: int ) -> TrackData | None:
+    for box in self.boxes:
+      if box.index == index:
+        return box
+
+    return None
+
+

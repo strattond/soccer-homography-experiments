@@ -1,17 +1,18 @@
+import queue
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
 import cv2
-import numpy as np
 
+from log import logger, logging
 from Configuration import Configuration
 from LivePreview import LivePreview
 from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
-from SportsTracker import SportsTracker
+from SportsTracker import Command, CommandType, SportsTracker
 from appState import AppState
 from components import Slider
-from dataTypes import Homography, SelectionPoint, VideoData
+from dataTypes import Homography, SelectionPoint, Track, TrackData, VideoData
 
 
 class App:
@@ -28,6 +29,22 @@ class App:
 
     # Create widgets
     self._create_widgets()
+    root.protocol( "WM_DELETE_WINDOW", self.on_close )
+
+  def on_close( self ):
+    print( "Application closing" )
+    if self.tracking is not None:
+      print( "Tracking allocated" )
+      if self.tracking.thread is not None:
+        print( "Tracking thread exists, sending stop" )
+        self.tracking.in_queue.put( Command( CommandType.STOP ) )
+        print( "Joining thread" )
+        self.tracking.thread.join( timeout=30 )
+        print( "Checking thread status" )
+        if self.tracking is not None and self.tracking.thread.is_alive():
+          print( "Forcibly terminating" )
+
+    self.root.destroy()
 
   def _create_widgets( self ):
     """Create and place all widgets"""
@@ -138,6 +155,7 @@ class App:
       if self.appState.cap is not None:
         self.appState.cap.release()
 
+      self.appState.videoFile = filename
       self.appState.cap = cv2.VideoCapture( filename )
       if self.appState.cap.isOpened():
         vidData = VideoData( self.appState.cap )
@@ -163,12 +181,34 @@ class App:
     # Step 1 - load the model
     self.allocateModelTracking()
     if self.tracking is not None:
-      # Step 2 - convert the image 
-      image = np.array( self.mainImageController.pil_image.convert( "RGB" ) )
-      result_rgb = cv2.cvtColor( image, cv2.COLOR_RGB2BGR )
+      self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
+      self.tracking.in_queue.put( Command( CommandType.RUN_FRAMES, self.mainImageController.frame_num, self.mainImageController.frame_num ) )
+      self.tracking.in_queue.put( Command( CommandType.RESUME ) )
+      self.root.after( 100, self.pollForUI )
+      # Step 2 - convert the image
+      #image = np.array( self.mainImageController.pil_image.convert( "RGB" ) )
+      #result_rgb = cv2.cvtColor( image, cv2.COLOR_RGB2BGR )
       # Step 3 - run the tracking
-      self.tracking.track( result_rgb, self.mainImageController.frame_num )
-      self.mainImageController.updateBoundingBoxes( self.tracking.tracks, self.mainImageController.frame_num )
+      #self.tracking.track( result_rgb, self.mainImageController.frame_num )
+      #self.mainImageController.updateBoundingBoxes( self.tracking.tracks, self.mainImageController.frame_num )
+
+  def pollForUI( self ):
+    anyChange: bool = False
+    try:
+      while True:
+        if self.tracking is not None:
+          data: TrackData = self.tracking.out_queue.get_nowait()
+          if data is not None:
+            if data.tid not in self.appState.tracks:
+              self.appState.tracks[ data.tid ] = Track( data.tid )
+            self.appState.tracks[ data.tid ].boxes.append( data )
+            anyChange = True
+    except queue.Empty:
+      pass
+    if anyChange:
+      self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
+
+    self.root.after( 100, self.pollForUI )
 
   def cmdRunYoloVidDetection( self ):
     """
@@ -182,7 +222,8 @@ class App:
     if self.tracking is not None:
       # Already allocated
       return
-    self.tracking = SportsTracker( self.appState.mdlOpts )
+    self.tracking = SportsTracker( self.appState.mdlOpts, self.appState.videoFile )
+    self.tracking.start()
 
   def mapping_check( self ):
     if self.appState.last_image_click is None or self.appState.sel_world_point is None:
@@ -227,9 +268,15 @@ class App:
 
 
 if __name__ == "__main__":
+  print( "Establishing root" )
   root = tk.Tk()
+  print( "Default app state" )
   appState = AppState()
   appState.pitch.padding = 10
+  print( "Creating empty pitch" )
   appState.pitch.makeEmptyPitch()
+  logger.setLevel( logging.INFO )
+  print( "Creating app" )
   app = App( root, appState )
+  print( "Looping" )
   root.mainloop()
