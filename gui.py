@@ -1,18 +1,18 @@
 import queue
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, ttk
 from PIL import Image, ImageTk
 import cv2
-
 from log import logger, logging
+
 from Configuration import Configuration
 from LivePreview import LivePreview
 from MainCanvas import MainCanvasController
 from RadarCanvas import RadarCanvas
-from SportsTracker import Command, CommandType, SportsTracker
+from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from appState import AppState
-from components import Slider
-from dataTypes import Homography, SelectionPoint, Track, TrackData, VideoData
+from components import LabelledSpinBox, Slider
+from dataTypes import Homography, SelectionPoint, Track, VideoData
 
 
 class App:
@@ -32,15 +32,10 @@ class App:
     root.protocol( "WM_DELETE_WINDOW", self.on_close )
 
   def on_close( self ):
-    print( "Application closing" )
     if self.tracking is not None:
-      print( "Tracking allocated" )
       if self.tracking.thread is not None:
-        print( "Tracking thread exists, sending stop" )
         self.tracking.in_queue.put( Command( CommandType.STOP ) )
-        print( "Joining thread" )
         self.tracking.thread.join( timeout=30 )
-        print( "Checking thread status" )
         if self.tracking is not None and self.tracking.thread.is_alive():
           print( "Forcibly terminating" )
 
@@ -101,8 +96,6 @@ class App:
     self.btnLoadVideo.place( x=1460, y=800, width=180, height=36 )
 
     # sliderVideoFrame
-    #self.sldVideoFrame = tk.Scale( self.root, from_=0, to=100, orient='horizontal', command=self.cmdUpdateVideoFrame )
-    #self.sldVideoFrame.place( x=1650, y=860, width=200, height=240 )
     self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=860, width=200, height=240 )
 
     # lblVideoFrameSlider
@@ -115,6 +108,12 @@ class App:
 
     self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState )
+
+    self.progressBar = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
+    self.progressBar.place( x=1350, y=50, width=24, height=720 )
+
+    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=900, width=200, height=24, offset=190, label="Start" )
+    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=925, width=200, height=24, offset=190, label="Finish", initValue=100 )
 
   # ==========================================
   # Event Handlers - Implement your logic here
@@ -132,6 +131,7 @@ class App:
       self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
       self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
       self.refreshHomographyData()
+      self.checkButtonState()
 
   def cmdSaveHomography( self ):
     filetypes = ( ( 'Homography files', '*.json' ),)
@@ -160,6 +160,8 @@ class App:
       if self.appState.cap.isOpened():
         vidData = VideoData( self.appState.cap )
         self.sldVideoFrame.setMax( vidData.frames )
+        self.minFrame.setMax( vidData.frames )
+        self.maxFrame.setMax( vidData.frames )
         self.mainImageController.load( self.appState.cap, vidData )
         self.mainImageController.setFrame( 0 )
         self.checkButtonState()
@@ -172,51 +174,52 @@ class App:
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
     homoable = len( self.appState.data.world_pts ) >= 4
     self.btnRunYoloDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
-    self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable and homoable else tk.DISABLED )
+    self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnSaveHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
 
-  def cmdRunYoloDetection( self ):
-
+  def runYolo( self, minFrame, maxFrame ):
     # Step 1 - load the model
     self.allocateModelTracking()
     if self.tracking is not None:
+      logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
+      self.progressBar[ 'value' ] = 0
+      self.progressBar[ 'maximum' ] = ( maxFrame-minFrame ) + 1
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
-      self.tracking.in_queue.put( Command( CommandType.RUN_FRAMES, self.mainImageController.frame_num, self.mainImageController.frame_num ) )
+      self.tracking.in_queue.put( Command( CommandType.RUN_FRAMES, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
       self.root.after( 100, self.pollForUI )
-      # Step 2 - convert the image
-      #image = np.array( self.mainImageController.pil_image.convert( "RGB" ) )
-      #result_rgb = cv2.cvtColor( image, cv2.COLOR_RGB2BGR )
-      # Step 3 - run the tracking
-      #self.tracking.track( result_rgb, self.mainImageController.frame_num )
-      #self.mainImageController.updateBoundingBoxes( self.tracking.tracks, self.mainImageController.frame_num )
+
+  def cmdRunYoloDetection( self ):
+    self.runYolo( self.mainImageController.frame_num, self.mainImageController.frame_num )
 
   def pollForUI( self ):
-    anyChange: bool = False
+    repoll: bool = True
     try:
       while True:
         if self.tracking is not None:
-          data: TrackData = self.tracking.out_queue.get_nowait()
+          data: Output = self.tracking.out_queue.get_nowait()
           if data is not None:
-            if data.tid not in self.appState.tracks:
-              self.appState.tracks[ data.tid ] = Track( data.tid )
-            self.appState.tracks[ data.tid ].boxes.append( data )
-            anyChange = True
+            if data.type == OutputType.BBOX and data.data is not None:
+              if data.data.tid not in self.appState.tracks:
+                self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
+              self.appState.tracks[ data.data.tid ].boxes.append( data.data )
+            elif data.type == OutputType.NEW_FRAME:
+              self.progressBar[ 'value' ] += 1
+              pass
+            elif data.type == OutputType.COMPLETED:
+              print( "Stopping progress bar" )
+              self.progressBar.stop()
+              repoll = False
+              self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
     except queue.Empty:
       pass
-    if anyChange:
-      self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
 
-    self.root.after( 100, self.pollForUI )
+    if repoll:
+      self.root.after( 100, self.pollForUI )
 
   def cmdRunYoloVidDetection( self ):
-    """
-    Handle cmdRunYoloDetection event
-    TODO: Implement your logic here
-    """
-    self.allocateModelTracking()
-    pass
+    self.runYolo( self.minFrame.get(), self.maxFrame.get() )
 
   def allocateModelTracking( self ):
     if self.tracking is not None:
@@ -268,15 +271,10 @@ class App:
 
 
 if __name__ == "__main__":
-  print( "Establishing root" )
   root = tk.Tk()
-  print( "Default app state" )
   appState = AppState()
   appState.pitch.padding = 10
-  print( "Creating empty pitch" )
   appState.pitch.makeEmptyPitch()
   logger.setLevel( logging.INFO )
-  print( "Creating app" )
   app = App( root, appState )
-  print( "Looping" )
   root.mainloop()

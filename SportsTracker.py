@@ -24,11 +24,23 @@ class CommandType( Enum ):
   SEEK = auto()
 
 
+class OutputType( Enum ):
+  BBOX = auto()
+  NEW_FRAME = auto()
+  COMPLETED = auto()
+
+
 @dataclass
 class Command:
   type: CommandType
   start: int | None = None
   end: int | None = None
+
+
+@dataclass
+class Output:
+  type: OutputType
+  data: TrackData | None = None
 
 
 # This will be responsible for loading the model, performing detections and tracking, and so on
@@ -97,6 +109,7 @@ class SportsTracker:
               cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) )
             self.range = ( cmd.start, cmd.end )
             self.index = cmd.start
+            self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
             modelName = "yolo26" + self.mdlOpts.size + ".pt"
             self.model = YOLO( modelName, verbose=True )
 
@@ -120,6 +133,7 @@ class SportsTracker:
         break
 
       #  Predicting
+      self.out_queue.put( Output( type=OutputType.NEW_FRAME ) )
       results = self.model.track( frame, verbose=False, tracker='track_custom.yaml' )
 
       # Process results
@@ -138,10 +152,11 @@ class SportsTracker:
         x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
 
         logger.info( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
-        self.out_queue.put( TrackData( tid, x1, y1, x2, y2, conf, self.index ) )
+        self.out_queue.put( Output( type=OutputType.BBOX, data=TrackData( tid, x1, y1, x2, y2, conf, self.index ) ) )
 
       self.index += 1
       if self.index > self.range[ 1 ]:
         logger.info( "Processing complete!" )
+        self.out_queue.put( Output( type=OutputType.COMPLETED ) )
         self.pause()
     self.cap.release()

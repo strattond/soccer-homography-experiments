@@ -91,6 +91,7 @@ class MainCanvasController:
     self.applyTransform()
 
     self.applyHoughTransform()
+    self.updateBoundingBoxes( self.appState.tracks, frame_index )
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
