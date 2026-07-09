@@ -71,29 +71,37 @@ class App:
     self.lblHomography = tk.Label( self.root, text="Homography Point Matcher", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblHomography.place( x=50, y=20, width=200, height=24 )
 
+    # lblHomography
+    self.lblHomographyAction = tk.Label( self.root, text="Homography", fg="#000000", font=( "Arial", 12 ), anchor="w" )
+    self.lblHomographyAction.place( x=1460, y=706, width=100, height=24 )
+
     # btnLoadHomography
-    self.btnLoadHomography = tk.Button( self.root, text="Load Homography", font=( "Arial", 12 ), command=self.cmdLoadHomography )
-    self.btnLoadHomography.place( x=1460, y=700, width=180, height=36 )
+    self.btnLoadHomography = tk.Button( self.root, text="Load", font=( "Arial", 12 ), command=self.cmdLoadHomography )
+    self.btnLoadHomography.place( x=1600, y=700, width=100, height=36 )
 
     # btnSaveHomography
-    self.btnSaveHomography = tk.Button( self.root, text="Save Homography", font=( "Arial", 12 ), command=self.cmdSaveHomography, state=tk.DISABLED )
-    self.btnSaveHomography.place( x=1650, y=700, width=180, height=36 )
+    self.btnSaveHomography = tk.Button( self.root, text="Save", font=( "Arial", 12 ), command=self.cmdSaveHomography, state=tk.DISABLED )
+    self.btnSaveHomography.place( x=1700, y=700, width=100, height=36 )
+
+    # btnPlayHomography
+    self.btnPlayHomography = tk.Button( self.root, text="Play", font=( "Arial", 12 ), command=self.cmdPlayHomography, state=tk.DISABLED )
+    self.btnPlayHomography.place( x=1800, y=700, width=100, height=36 )
 
     # btnLoadBoundingBoxes
     self.btnLoadBoundingBoxes = tk.Button( self.root, text="Load Bounding Boxes", font=( "Arial", 12 ), command=self.cmdLoadBB )
-    self.btnLoadBoundingBoxes.place( x=1460, y=750, width=180, height=36 )
+    self.btnLoadBoundingBoxes.place( x=1460, y=740, width=180, height=36 )
 
     # btnRunYoloDetection
     self.btnRunYoloDetection = tk.Button( self.root, text="Run Detection", font=( "Arial", 12 ), command=self.cmdRunYoloDetection, state=tk.DISABLED )
-    self.btnRunYoloDetection.place( x=1650, y=750, width=180, height=36 )
+    self.btnRunYoloDetection.place( x=1650, y=740, width=180, height=36 )
 
     # btnRunYoloVidDetection
     self.btnRunYoloVidDetection = tk.Button( self.root, text="Run Detection (video)", font=( "Arial", 12 ), command=self.cmdRunYoloVidDetection, state=tk.DISABLED )
-    self.btnRunYoloVidDetection.place( x=1650, y=800, width=180, height=36 )
+    self.btnRunYoloVidDetection.place( x=1650, y=780, width=180, height=36 )
 
     # btnLoadVideo
     self.btnLoadVideo = tk.Button( self.root, text="Load Video", font=( "Arial", 12 ), command=self.cmdLoadVideo )
-    self.btnLoadVideo.place( x=1460, y=800, width=180, height=36 )
+    self.btnLoadVideo.place( x=1460, y=780, width=180, height=36 )
 
     # sliderVideoFrame
     self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=860, width=200, height=24 )
@@ -109,8 +117,11 @@ class App:
     self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState )
 
-    self.progressBar = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
-    self.progressBar.place( x=1350, y=50, width=24, height=720 )
+    self.prgDetection = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
+    self.prgDetection.place( x=1350, y=50, width=24, height=720 )
+
+    self.prgHomography = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
+    self.prgHomography.place( x=1375, y=50, width=24, height=720 )
 
     self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=900, width=200, height=24, offset=190, label="Start" )
     self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=925, width=200, height=24, offset=190, label="Finish", initValue=100 )
@@ -137,8 +148,11 @@ class App:
     filetypes = ( ( 'Homography files', '*.json' ),)
     filename = filedialog.asksaveasfilename( title='Save homography', initialdir='.', filetypes=filetypes )
     if filename is not None:
-      # And then load it
+      # And then save it
       self.appState.data.save( filename )
+
+  def cmdPlayHomography( self ):
+    pass
 
   def cmdLoadBB( self ):
     """
@@ -178,15 +192,20 @@ class App:
     self.btnRunYoloDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnSaveHomography.config( state=tk.NORMAL if self.hasHomography() else tk.DISABLED )
+    self.btnPlayHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
+
+  def setProgRange( self, prog: ttk.Progressbar, val: int, max: int ):
+    prog[ 'value' ] = val
+    prog[ 'maximum' ] = max
 
   def runYolo( self, minFrame, maxFrame ):
     # Step 1 - load the model
     self.allocateModelTracking()
     if self.tracking is not None:
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
-      self.progressBar[ 'value' ] = 0
-      self.progressBar[ 'maximum' ] = ( maxFrame-minFrame ) + 1
+      self.setProgRange( self.prgDetection, 0, ( maxFrame-minFrame ) + 1 )
+      self.setProgRange( self.prgHomography, 0, 0 )
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
       self.tracking.in_queue.put( Command( CommandType.RUN_FRAMES, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
@@ -209,12 +228,12 @@ class App:
           self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
         self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
       elif data.type == OutputType.NEW_FRAME:
-        self.progressBar[ 'value' ] += 1
+        self.prgDetection[ 'value' ] += 1
         #if isinstance( data.data, int ):
         #print( f"Refreshing homography for {data.data}" )
         #self.root.after( 10, self.refreshHomographyData, data.data )
       elif data.type == OutputType.COMPLETED:
-        self.progressBar.stop()
+        self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
         self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
@@ -277,12 +296,17 @@ class App:
       value.clearHomography()
     self.refreshHomographyData()
 
+  def bumpIt( self ):
+    self.prgHomography[ 'value' ] += 1
+
   def refreshHomographyData( self, index: int = 0 ):
     # Now recalculate
     logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
+    self.setProgRange( self.prgHomography, 0, len( self.appState.tracks.items() ) )
     for ( i, value ) in self.appState.tracks.items():
       print( f"Refreshing homography for track {i}" )
       value.refreshHomography( self.appState.data )
+      self.root.after( 0, self.bumpIt )
     self.livePreviewController.updateMappings( self.appState.tracks, index )
 
 

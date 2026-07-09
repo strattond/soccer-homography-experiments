@@ -70,6 +70,14 @@ class MainCanvasController:
     self.canvas.addtag_withtag( "selection", "selection" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
 
+  def stratify( self ):
+    self.canvas.tag_lower( "frame" )
+    self.canvas.tag_raise( "hough" )
+    self.canvas.tag_raise( "tracking" )
+    self.canvas.tag_raise( "selection" )
+    self.canvas.tag_raise( "mapping" )
+    
+
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
   # -------------------------------------------------------------
@@ -100,6 +108,7 @@ class MainCanvasController:
   def applyHoughTransform( self ):
     self.canvas.delete( 'hough' )
     if not self.appState.imgOpts.showHough:
+      self.stratify()
       return
 
     # Grayscale it
@@ -110,9 +119,11 @@ class MainCanvasController:
     self.nosky = ImageTk.PhotoImage( Image.fromarray( gray ) )
     self.canvas.create_image( 0, 0, anchor="nw", image=self.nosky, tags=( "hough",) )
     if lines is None:
+      self.stratify()
       return
     for ( x1, y1, x2, y2 ) in lines[ :, 0 ]:
       self.canvas.create_line( x1, y1, x2, y2, fill="cyan", width=2, tags=( "hough",) )
+    self.stratify()
 
   # -------------------------------------------------------------
   # Single marker on nominated layer
@@ -220,7 +231,7 @@ class MainCanvasController:
       mx, my = vertex.coords
 
       radius = 6
-      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection", ) )
+      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection",) )
 
   def refreshHough( self ):
     self.applyHoughTransform()
@@ -234,4 +245,4 @@ class MainCanvasController:
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
         #self.canvas.create_rectangle( box.x1, box.y1, box.x2, box.y2, outline='yellow', width=5, tags=( "tracking" ) )
         # Now we need to scale the box coordinates to our image
-        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "tracking", ) )
+        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "tracking",) )
