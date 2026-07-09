@@ -12,12 +12,12 @@ from RadarCanvas import RadarCanvas
 from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from appState import AppState
 from components import LabelledSpinBox, Slider
-from dataTypes import Homography, SelectionPoint, Track, VideoData
+from dataTypes import Homography, RawTrackData, SelectionPoint, Track, VideoData
 
 
 class App:
 
-  def __init__( self, root, appState: AppState ):
+  def __init__( self, root: tk.Tk, appState: AppState ):
     self.root = root
     self.root.title( "Homography Mapper" )
     self.root.geometry( "1920x1080" )
@@ -130,7 +130,7 @@ class App:
       self.appState.data.load( filename )
       self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
       self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
-      self.refreshHomographyData()
+      self.redisplayHomographyData()
       self.checkButtonState()
 
   def cmdSaveHomography( self ):
@@ -166,16 +166,18 @@ class App:
         self.mainImageController.setFrame( 0 )
         self.checkButtonState()
 
-  def cmdUpdateVideoFrame( self, value ):
+  def hasHomography( self ) -> bool:
+    return len( self.appState.data.world_pts ) >= 4
 
+  def cmdUpdateVideoFrame( self, value ):
     self.mainImageController.setFrame( int( value ) )
+    self.livePreviewController.updateMappings( self.appState.tracks, int( value ) )
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
-    homoable = len( self.appState.data.world_pts ) >= 4
     self.btnRunYoloDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
-    self.btnSaveHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
+    self.btnSaveHomography.config( state=tk.NORMAL if self.hasHomography() else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
 
   def runYolo( self, minFrame, maxFrame ):
@@ -200,18 +202,22 @@ class App:
         if self.tracking is not None:
           data: Output = self.tracking.out_queue.get_nowait()
           if data is not None:
-            if data.type == OutputType.BBOX and data.data is not None:
+            if data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, RawTrackData ):
               if data.data.tid not in self.appState.tracks:
                 self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
               self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
             elif data.type == OutputType.NEW_FRAME:
               self.progressBar[ 'value' ] += 1
+              if isinstance( data.data, int ):
+                print( f"Refreshing homography for {data.data}" )
+                self.root.after( 0, self.refreshHomographyData, data.data )
               pass
             elif data.type == OutputType.COMPLETED:
-              print( "Stopping progress bar" )
+              #print( "Stopping progress bar" )
               self.progressBar.stop()
               repoll = False
               self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
+              self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
     except queue.Empty:
       pass
 
@@ -239,7 +245,7 @@ class App:
     self.appState.sel_world_point = None
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
-    self.refreshHomographyData()
+    self.redisplayHomographyData()
 
   def on_main_click( self, x: int, y: int, point: SelectionPoint ):
     self.appState.last_image_click = point
@@ -266,8 +272,19 @@ class App:
   def on_options_change( self ):
     self.mainImageController.refreshHough()
 
-  def refreshHomographyData( self ):
+  def redisplayHomographyData( self ):
     self.tabData.refreshHomographyData()
+    logger.info( "Clearing existing homography calculations" )
+    for ( _, value ) in self.appState.tracks.items():
+      value.clearHomography()
+    self.refreshHomographyData()
+
+  def refreshHomographyData( self, index: int = 0 ):
+    # Now recalculate
+    logger.info( "Refreshing homography calculations" )
+    for ( _, value ) in self.appState.tracks.items():
+      value.refreshHomography( self.appState.data )
+    self.livePreviewController.updateMappings( self.appState.tracks, index )
 
 
 if __name__ == "__main__":

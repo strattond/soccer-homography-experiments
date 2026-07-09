@@ -6,9 +6,8 @@ from PIL import Image, ImageTk
 from supervision import Color
 
 from LineDetector import LineDetector
-from dataTypes import Track
 from appState import AppState
-from dataTypes import Point2D, SelectionPoint, VideoData, ViewTransform
+from dataTypes import Point2D, SelectionPoint, Track, VideoData, ViewTransform
 from pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 

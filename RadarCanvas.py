@@ -6,25 +6,8 @@ from pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 
 class RadarCanvas:
-  """
-    Handles:
-      - pitch image layer
-      - keypoint layer
-      - selection layer
-      - hover layer
-      - hit‑testing for nearest point
-      - redraw of only changed items
-    """
 
-  def __init__(
-      self,
-      canvas: tk.Canvas,
-      pitch_photo,
-      cfg: SoccerPitchConfiguration,
-      pitch: SoccerPitchImage,
-      on_click=None,
-      on_hover=None
-  ):
+  def __init__( self, canvas: tk.Canvas, pitch_photo, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage, on_click=None, on_hover=None ):
 
     self.canvas: tk.Canvas = canvas
     self.pitch_photo = pitch_photo
@@ -73,16 +56,7 @@ class RadarCanvas:
       my = int( vertex[ 1 ] * scaleL + self.pitch.padding )
 
       radius = 6
-      self.canvas.create_oval(
-          mx - radius,
-          my - radius,
-          mx + radius,
-          my + radius,
-          fill=self.pitch.colors.point_color.as_hex(),
-          outline="black",
-          width=1,
-          tags=( "keypoints" )
-      )
+      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=self.pitch.colors.point_color.as_hex(), outline="black", width=1, tags=( "keypoints" ) )
       self.canvas.create_text( mx + 10, my - 10, text=pt, fill="white", font=( "Arial", 12 ), tags=( "keypoints" ) )
       i += 1
 
@@ -128,6 +102,4 @@ class RadarCanvas:
       mx, my = self.pitch.calcPointOffset( vertex )
 
       radius = 6
-      self.canvas.create_oval(
-          mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" )
-      )
+      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection" ) )

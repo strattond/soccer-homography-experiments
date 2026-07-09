@@ -40,7 +40,7 @@ class Command:
 @dataclass
 class Output:
   type: OutputType
-  data: RawTrackData | None = None
+  data: RawTrackData | int | None = None
 
 
 # This will be responsible for loading the model, performing detections and tracking, and so on
@@ -111,7 +111,7 @@ class SportsTracker:
             self.index = cmd.start
             self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
             modelName = "yolo26" + self.mdlOpts.size + ".pt"
-            self.model = YOLO( modelName, verbose=True )
+            self.model = YOLO( modelName, verbose=False )
 
     except queue.Empty:
       pass
@@ -133,10 +133,8 @@ class SportsTracker:
         break
 
       #  Predicting
-      self.out_queue.put( Output( type=OutputType.NEW_FRAME ) )
-      print( "Tracking" )
-      results = self.model.track( source=frame, verbose=True, tracker='track_custom.yaml' )
-      print( "Tracked" )
+      self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
+      results = self.model.track( source=frame, verbose=False, tracker='track_custom.yaml' )
 
       # Process results
       detections = DetectionAdapter( results )
@@ -159,6 +157,7 @@ class SportsTracker:
       self.index += 1
       if self.index > self.range[ 1 ]:
         logger.info( "Processing complete!" )
+        self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index - 1 ) )
         self.out_queue.put( Output( type=OutputType.COMPLETED ) )
         self.pause()
     self.cap.release()

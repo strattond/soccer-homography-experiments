@@ -92,22 +92,10 @@ class Homography:
   world_pts: list[ SelectionPoint ] = field( default_factory=lambda: [] )
   display: Point2D = field( default_factory=lambda: Point2D( 1920, 1080 ) )
   source: Point2D = field( default_factory=lambda: Point2D() )
-  scaleUpX: float = 0
-  scaleUpY: float = 0
-  scaleDown: float = 0
   hom4k: MatLike | None = None
 
   def setSourceDimensions( self, orig: Point2D ):
     self.source = Point2D( orig.x, orig.y )
-    self.recalcScale()
-
-  def recalcScale( self ):
-    self.scaleDown = min( self.display.x / self.source.x, self.display.y / self.source.y )
-    self.scaleUpX = self.source.x / self.display.x
-    self.scaleUpY = self.source.y / self.display.y
-
-  def scaleUp( self, dimensions: Point2D ) -> Point2D:
-    return Point2D( int( dimensions.x * self.scaleUpX ), int( dimensions.y * self.scaleUpY ) )
 
   def computeScaledHomography( self, transform: ViewTransform ) -> MatLike:
     img_pts_scaled = transform.getScaledPoints( self.img_pts_4k )
@@ -115,19 +103,6 @@ class Homography:
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
     homScaled, _ = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
     return homScaled
-
-  def storeClickPair( self, image: SelectionPoint, world: SelectionPoint ):
-    # Scale up and store in 4k space
-    self.addScaledPair( image )
-
-    self.world_pts.append( world )
-
-    if len( self.img_pts_4k ) >= 4:
-      self.compute()
-
-  def addScaledPair( self, image: SelectionPoint ):
-    scaled = self.scaleUp( image.coords )
-    self.img_pts_4k.append( SelectionPoint( image.index, scaled ) )
 
   def compute( self ):
     img_pts_4k_arr = np.array( [ ip.coords.to_numpy() for ip in self.img_pts_4k ], dtype=np.float32 )
@@ -172,7 +147,11 @@ class Homography:
     self.display = Point2D( *data[ "sizes" ][ "display" ] )
     self.source = Point2D( *data[ "sizes" ][ "source" ] )
 
-    self.recalcScale()
+  def shazam( self, positions: list[ list[ float ] ] ) -> MatLike | None:
+    # Reshape it for our perspective transform
+    if self.hom4k is not None:
+      pts = np.array( positions, dtype=np.float32 ).reshape( -1, 1, 2 )
+      return cv2.perspectiveTransform( pts, self.hom4k ).reshape( -1, 2 )
 
 
 @dataclass
@@ -195,14 +174,6 @@ class TrackData:
   index: int
   # yapf: enable
 
-  def __init__( self, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
-    self.x1 = x1
-    self.x2 = x2
-    self.y1 = y1
-    self.y2 = y2
-    self.conf = conf
-    self.index = index
-
 
 @dataclass
 class RawTrackData:
@@ -222,11 +193,40 @@ class Track:
   id:     int
   person: Person | None   = None
   boxes:  list[TrackData] = field( default_factory=list )
+  homog:  list[Point2D]   = field( default_factory=list )
   # yapf: enable
 
   def getByIndex( self, index: int ) -> TrackData | None:
     for box in self.boxes:
       if box.index == index:
         return box
-
     return None
+
+  def getListIndex( self, index: int ) -> int | None:
+    for ( i, box ) in enumerate( self.boxes ):
+      if box.index == index:
+        return i
+    return None
+
+  def clearHomography( self ):
+    self.homog.clear()
+
+  def refreshHomography( self, transformer: Homography ):
+    boxLen = len( self.boxes )
+    hmgLen = len( self.homog )
+    positions: list[ list[ float ] ] = []
+    #print( f"Refreshing from {hmgLen} to {boxLen - 1} homography" )
+    for i in range( hmgLen, boxLen ):
+      b = self.boxes[ i ]
+      # Get the middle bottom of the bounding box aka Da Feet
+      positions.append( [ 0.5 * ( b.x1 + b.x2 ), b.y2 ] )
+    # Cool, now we have positions ...
+    if len( positions ) == 0:
+      return
+    # Something to homography
+    xf = transformer.shazam( positions )
+    if xf is not None:
+      for ( x, y ) in xf:
+        self.homog.append( Point2D( x, y ) )
+    if len(self.boxes) != len(self.homog):
+      print( f"Track {self.id} - {len(self.boxes)} vs {len(self.homog)}" )
