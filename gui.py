@@ -196,33 +196,31 @@ class App:
     self.runYolo( self.mainImageController.frame_num, self.mainImageController.frame_num )
 
   def pollForUI( self ):
-    repoll: bool = True
+    data: Output | None = None
     try:
-      while True:
-        if self.tracking is not None:
-          data: Output = self.tracking.out_queue.get_nowait()
-          if data is not None:
-            if data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, RawTrackData ):
-              if data.data.tid not in self.appState.tracks:
-                self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
-              self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
-            elif data.type == OutputType.NEW_FRAME:
-              self.progressBar[ 'value' ] += 1
-              if isinstance( data.data, int ):
-                print( f"Refreshing homography for {data.data}" )
-                self.root.after( 0, self.refreshHomographyData, data.data )
-              pass
-            elif data.type == OutputType.COMPLETED:
-              #print( "Stopping progress bar" )
-              self.progressBar.stop()
-              repoll = False
-              self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
-              self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
+      if self.tracking is not None:
+        data = self.tracking.out_queue.get_nowait()
     except queue.Empty:
-      pass
+      data = None
 
-    if repoll:
-      self.root.after( 100, self.pollForUI )
+    if data is not None:
+      if data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, RawTrackData ):
+        if data.data.tid not in self.appState.tracks:
+          self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
+        self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
+      elif data.type == OutputType.NEW_FRAME:
+        self.progressBar[ 'value' ] += 1
+        #if isinstance( data.data, int ):
+        #print( f"Refreshing homography for {data.data}" )
+        #self.root.after( 10, self.refreshHomographyData, data.data )
+      elif data.type == OutputType.COMPLETED:
+        self.progressBar.stop()
+        self.refreshHomographyData( self.mainImageController.frame_num )
+        self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
+        self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
+        return
+
+    self.root.after( 50, self.pollForUI )
 
   def cmdRunYoloVidDetection( self ):
     self.runYolo( self.minFrame.get(), self.maxFrame.get() )
@@ -281,8 +279,9 @@ class App:
 
   def refreshHomographyData( self, index: int = 0 ):
     # Now recalculate
-    logger.info( "Refreshing homography calculations" )
-    for ( _, value ) in self.appState.tracks.items():
+    logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
+    for ( i, value ) in self.appState.tracks.items():
+      print( f"Refreshing homography for track {i}" )
       value.refreshHomography( self.appState.data )
     self.livePreviewController.updateMappings( self.appState.tracks, index )
 

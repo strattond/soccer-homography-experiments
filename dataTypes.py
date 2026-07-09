@@ -215,7 +215,7 @@ class Track:
     boxLen = len( self.boxes )
     hmgLen = len( self.homog )
     positions: list[ list[ float ] ] = []
-    #print( f"Refreshing from {hmgLen} to {boxLen - 1} homography" )
+    print( f"Refreshing from {hmgLen} to {boxLen - 1} homography" )
     for i in range( hmgLen, boxLen ):
       b = self.boxes[ i ]
       # Get the middle bottom of the bounding box aka Da Feet
