@@ -1,5 +1,6 @@
 import numpy as np
 import supervision as sv
+import ultralytics
 
 
 class DetectionAdapter:
@@ -18,6 +19,9 @@ class DetectionAdapter:
     if isinstance( raw, list ) and hasattr( raw[ 0 ], "boxes" ):
       #print( raw[0] )
       self.from_yolo( raw[ 0 ] )
+
+    elif isinstance( raw, ultralytics.engine.results.Results ):
+      self.from_yolo( raw )
 
     # Detect RF-DETR format (your old structure)
     elif hasattr( raw, "class_id" ) and hasattr( raw, "xyxy" ):

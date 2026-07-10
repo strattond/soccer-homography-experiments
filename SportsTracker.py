@@ -1,3 +1,5 @@
+from typing import Iterable
+
 from appState import ModelOptions
 from dataclasses import dataclass, field
 from dataTypes import Homography, RawTrackData
@@ -109,35 +111,19 @@ class SportsTracker:
               cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) )
             self.range = ( cmd.start, cmd.end )
             self.index = cmd.start
-            self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
             modelName = "yolo26" + self.mdlOpts.size + ".pt"
+            if hasattr( self, "model" ):
+              del self.model
             self.model = YOLO( modelName, verbose=False )
 
     except queue.Empty:
       pass
 
-  def run( self ):
-    while not self.stopped:
-      self.processCommands()
-      while self.paused and not self.stopped:
-        time.sleep( 0.5 )
-        self.processCommands()
-
-      # We might go from paused to stopped
-      if self.stopped:
-        break
-
-      ret, frame = self.cap.read()
-      if not ret:
-        logger.error( f"Failed reading cap {ret}" )
-        break
-
-      #  Predicting
+  def processResults( self, results ):
+    # Process results
+    for r in results:
       self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
-      results = self.model.track( source=frame, verbose=False, tracker='track_custom.yaml' )
-
-      # Process results
-      detections = DetectionAdapter( results )
+      detections = DetectionAdapter( r )
       keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
       all_mask = [ cid in keep_ids for cid in detections.class_id ]
       detections = detections[ all_mask ]
@@ -160,4 +146,27 @@ class SportsTracker:
         self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index - 1 ) )
         self.out_queue.put( Output( type=OutputType.COMPLETED ) )
         self.pause()
+
+  def run( self ):
+
+    while not self.stopped:
+      self.processCommands()
+      while self.paused and not self.stopped:
+        time.sleep( 0.5 )
+        self.processCommands()
+
+      # We might go from paused to stopped
+      if self.stopped:
+        break
+
+      ret, frame = self.cap.read()
+      if not ret:
+        logger.error( f"Failed reading cap {ret}" )
+        self.pause()
+        continue
+
+      #  Predicting
+      results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=1280 )
+      self.processResults( results )
+
     self.cap.release()
