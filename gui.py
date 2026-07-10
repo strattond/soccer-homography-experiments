@@ -77,15 +77,23 @@ class App:
 
     # btnLoadHomography
     self.btnLoadHomography = tk.Button( self.root, text="Load", font=( "Arial", 12 ), command=self.cmdLoadHomography )
-    self.btnLoadHomography.place( x=1600, y=700, width=100, height=36 )
+    self.btnLoadHomography.place( x=1600, y=700, width=60, height=36 )
 
     # btnSaveHomography
     self.btnSaveHomography = tk.Button( self.root, text="Save", font=( "Arial", 12 ), command=self.cmdSaveHomography, state=tk.DISABLED )
-    self.btnSaveHomography.place( x=1700, y=700, width=100, height=36 )
+    self.btnSaveHomography.place( x=1660, y=700, width=60, height=36 )
 
     # btnPlayHomography
     self.btnPlayHomography = tk.Button( self.root, text="Play", font=( "Arial", 12 ), command=self.cmdPlayHomography, state=tk.DISABLED )
-    self.btnPlayHomography.place( x=1800, y=700, width=100, height=36 )
+    self.btnPlayHomography.place( x=1720, y=700, width=60, height=36 )
+
+    # btnGIFHomography
+    self.btnGIFHomography = tk.Button( self.root, text="GIF", font=( "Arial", 12 ), command=self.cmdGIFHomography, state=tk.DISABLED )
+    self.btnGIFHomography.place( x=1780, y=700, width=60, height=36 )
+
+    # btnMP4Homography
+    self.btnMP4Homography = tk.Button( self.root, text="MP4", font=( "Arial", 12 ), command=self.cmdMP4Homography, state=tk.DISABLED )
+    self.btnMP4Homography.place( x=1840, y=700, width=60, height=36 )
 
     # btnLoadBoundingBoxes
     self.btnLoadBoundingBoxes = tk.Button( self.root, text="Load Bounding Boxes", font=( "Arial", 12 ), command=self.cmdLoadBB )
@@ -152,6 +160,12 @@ class App:
       self.appState.data.save( filename )
 
   def cmdPlayHomography( self ):
+    pass
+
+  def cmdGIFHomography( self ):
+    pass
+
+  def cmdMP4Homography( self ):
     pass
 
   def cmdLoadBB( self ):
