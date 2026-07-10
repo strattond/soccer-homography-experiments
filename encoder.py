@@ -10,18 +10,17 @@ class BaseVideoEncoder( abc.ABC ):
     """
 
   @abc.abstractmethod
-  def save( self, source_capture: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
+  def save( self, source: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
     """
         Encode a video using the provided source capture and raw PIL frames.
         Returns MP4 bytes in memory.
         """
     pass
 
-
-class Mp4Encoder( BaseVideoEncoder ):
-  """
-    Concrete MP4 encoder using OpenCV.
-    """
+  def dimensions( self, frame: Image.Image ) -> tuple[ int, int ]:
+    # Determine output size from first frame
+    first_cv = self.pil_to_cv( frame )
+    return first_cv.shape[ :2 ]
 
   @staticmethod
   def pil_to_cv( img: Image.Image ) -> np.ndarray:
@@ -29,6 +28,8 @@ class Mp4Encoder( BaseVideoEncoder ):
     arr = np.array( img )
     return cv2.cvtColor( arr, cv2.COLOR_RGB2BGR )
 
+
+class Mp4Encoder( BaseVideoEncoder ):
   def save( self, source: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
     """
         Encode frames into an MP4 entirely in memory.
@@ -37,9 +38,10 @@ class Mp4Encoder( BaseVideoEncoder ):
     if not frames:
       raise ValueError( "No frames provided to encoder." )
 
-    width = int( source.get( cv2.CAP_PROP_FRAME_WIDTH ) )
-    height = int( source.get( cv2.CAP_PROP_FRAME_HEIGHT ) )
+    height, width = self.dimensions( frames[0] )
     fps = int( source.get( cv2.CAP_PROP_FPS ) )
+
+    print( "Saving homography ")
 
     # Configure MP4 writer
     fourcc = cv2.VideoWriter.fourcc( *"mp4v" )

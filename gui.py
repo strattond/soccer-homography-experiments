@@ -1,18 +1,19 @@
+import cv2
 import queue
 import tkinter as tk
-from tkinter import filedialog, ttk
-from PIL import Image, ImageTk
-import cv2
-from log import logger, logging
 
-from Configuration import Configuration
-from LivePreview import LivePreview
-from MainCanvas import MainCanvasController
-from RadarCanvas import RadarCanvas
-from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from appState import AppState
 from components import LabelledSpinBox, Slider
+from Configuration import Configuration
 from dataTypes import Homography, RawTrackData, SelectionPoint, Track, VideoData
+from encoder import GifEncoder, Mp4Encoder
+from LivePreview import LivePreview
+from log import logger, logging
+from MainCanvas import MainCanvasController
+from PIL import Image, ImageTk, ImageGrab
+from RadarCanvas import RadarCanvas
+from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
+from tkinter import filedialog, ttk
 
 
 class App:
@@ -24,6 +25,8 @@ class App:
     self.root.resizable( True, True )
     self.appState: AppState = appState
     self.tracking: SportsTracker | None = None
+    self.preserved: list[ Image.Image ] = []
+    self.preserve = False
 
     # Initialize variables
 
@@ -159,14 +162,43 @@ class App:
       # And then save it
       self.appState.data.save( filename )
 
+  def saveFrame( self, canvas ):
+    x = canvas.winfo_rootx()
+    y = canvas.winfo_rooty()
+    w = x + canvas.winfo_width()
+    h = y + canvas.winfo_height()
+    return ImageGrab.grab( bbox=( x, y, w, h ) )
+
+  def homographyPlayLoop( self ):
+    self.livePreviewController.updateMappings( self.appState.tracks, self.homogIndex )
+    self.homogIndex += 1
+    if self.homogIndex >= self.homogMax:
+      if self.preserve and self.appState.cap is not None:
+        self.preserve = False
+        self.encoder.save( self.appState.cap, self.preserved )
+        self.preserved = []
+      return
+    if self.preserve:
+      self.preserved.append( self.saveFrame( self.livePreview ) )
+    self.root.after( 50, self.homographyPlayLoop )
+
   def cmdPlayHomography( self ):
-    pass
+    self.homogIndex = self.minFrame.get()
+    self.homogMax = self.maxFrame.get()
+    self.setProgRange( self.prgHomography, self.homogIndex, self.homogMax )
+    self.root.after( 50, self.homographyPlayLoop )
 
   def cmdGIFHomography( self ):
-    pass
+    self.preserved = []
+    self.preserve = True
+    self.encoder = GifEncoder()
+    self.cmdPlayHomography()
 
   def cmdMP4Homography( self ):
-    pass
+    self.preserved = []
+    self.preserve = True
+    self.encoder = Mp4Encoder()
+    self.cmdPlayHomography()
 
   def cmdLoadBB( self ):
     """
@@ -207,6 +239,8 @@ class App:
     self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnSaveHomography.config( state=tk.NORMAL if self.hasHomography() else tk.DISABLED )
     self.btnPlayHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
+    self.btnGIFHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
+    self.btnMP4Homography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
 
   def setProgRange( self, prog: ttk.Progressbar, val: int, max: int ):
@@ -243,14 +277,12 @@ class App:
         self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
       elif data.type == OutputType.NEW_FRAME:
         self.prgDetection[ 'value' ] += 1
-        #if isinstance( data.data, int ):
-        #print( f"Refreshing homography for {data.data}" )
-        #self.root.after( 10, self.refreshHomographyData, data.data )
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
         self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
+        self.checkButtonState()
         return
 
     self.root.after( 50, self.pollForUI )
