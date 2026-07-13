@@ -6,11 +6,11 @@ from appState import AppState
 from components import LabelledSpinBox, Slider
 from Configuration import Configuration
 from dataTypes import Homography, RawTrackData, SelectionPoint, Track, VideoData
-from encoder import GifEncoder, Mp4Encoder
 from LivePreview import LivePreview
+from encoder import BaseVideoEncoder, GifEncoder, Mp4Encoder
 from log import logger, logging
 from MainCanvas import MainCanvasController
-from PIL import Image, ImageTk, ImageGrab
+from PIL import Image, ImageTk
 from RadarCanvas import RadarCanvas
 from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from tkinter import filedialog, ttk
@@ -25,8 +25,6 @@ class App:
     self.root.resizable( True, True )
     self.appState: AppState = appState
     self.tracking: SportsTracker | None = None
-    self.preserved: list[ Image.Image ] = []
-    self.preserve = False
 
     # Initialize variables
 
@@ -98,35 +96,51 @@ class App:
     self.btnMP4Homography = tk.Button( self.root, text="MP4", font=( "Arial", 12 ), command=self.cmdMP4Homography, state=tk.DISABLED )
     self.btnMP4Homography.place( x=1840, y=700, width=60, height=36 )
 
-    # btnLoadBoundingBoxes
-    self.btnLoadBoundingBoxes = tk.Button( self.root, text="Load Bounding Boxes", font=( "Arial", 12 ), command=self.cmdLoadBB )
-    self.btnLoadBoundingBoxes.place( x=1460, y=740, width=180, height=36 )
+    # lblDataAction
+    self.lblDataAction = tk.Label( self.root, text="Data", fg="#000000", font=( "Arial", 12 ), anchor="w" )
+    self.lblDataAction.place( x=1460, y=740, width=100, height=24 )
+
+    # btnDataLoad
+    self.btnDataLoad = tk.Button( self.root, text="Load", font=( "Arial", 12 ), command=self.cmdDataLoad )
+    self.btnDataLoad.place( x=1600, y=740, width=60, height=36 )
+
+    # btnDataSave
+    self.btnDataSave = tk.Button( self.root, text="Save", font=( "Arial", 12 ), command=self.cmdDataSave, state=tk.DISABLED )
+    self.btnDataSave.place( x=1660, y=740, width=60, height=36 )
+
+    # lblDetectAction
+    self.lblDetectAction = tk.Label( self.root, text="Detection", fg="#000000", font=( "Arial", 12 ), anchor="w" )
+    self.lblDetectAction.place( x=1460, y=780, width=100, height=24 )
 
     # btnRunYoloDetection
-    self.btnRunYoloDetection = tk.Button( self.root, text="Run Detection", font=( "Arial", 12 ), command=self.cmdRunYoloDetection, state=tk.DISABLED )
-    self.btnRunYoloDetection.place( x=1650, y=740, width=180, height=36 )
+    self.btnYoloOneFrame = tk.Button( self.root, text="Frame", font=( "Arial", 12 ), command=self.cmdYoloOneFrame, state=tk.DISABLED )
+    self.btnYoloOneFrame.place( x=1600, y=780, width=60, height=36 )
 
     # btnRunYoloVidDetection
-    self.btnRunYoloVidDetection = tk.Button( self.root, text="Run Detection (video)", font=( "Arial", 12 ), command=self.cmdRunYoloVidDetection, state=tk.DISABLED )
-    self.btnRunYoloVidDetection.place( x=1650, y=780, width=180, height=36 )
+    self.btnYoloRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdYoloRange, state=tk.DISABLED )
+    self.btnYoloRange.place( x=1660, y=780, width=60, height=36 )
+
+    # lblDetectAction
+    self.lblSourceAction = tk.Label( self.root, text="Source", fg="#000000", font=( "Arial", 12 ), anchor="w" )
+    self.lblSourceAction.place( x=1460, y=820, width=100, height=24 )
 
     # btnLoadVideo
-    self.btnLoadVideo = tk.Button( self.root, text="Load Video", font=( "Arial", 12 ), command=self.cmdLoadVideo )
-    self.btnLoadVideo.place( x=1460, y=780, width=180, height=36 )
+    self.btnSourceVideo = tk.Button( self.root, text="Video", font=( "Arial", 12 ), command=self.cmdSourceVideo )
+    self.btnSourceVideo.place( x=1660, y=820, width=60, height=36 )
 
     # sliderVideoFrame
-    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=860, width=200, height=24 )
+    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=900, width=200, height=24 )
 
     # lblVideoFrameSlider
     self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 12 ), anchor="center" )
-    self.lblVideoFrameSlider.place( x=1460, y=860, width=100, height=24 )
+    self.lblVideoFrameSlider.place( x=1460, y=900, width=100, height=24 )
 
     self.radarMapController = RadarCanvas(
         self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg, self.appState.pitch, self.on_radar_click, self.on_radar_hover
     )
 
     self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
-    self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState )
+    self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
     self.prgDetection = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
     self.prgDetection.place( x=1350, y=50, width=24, height=720 )
@@ -134,8 +148,8 @@ class App:
     self.prgHomography = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
     self.prgHomography.place( x=1375, y=50, width=24, height=720 )
 
-    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=900, width=200, height=24, offset=190, label="Start" )
-    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=925, width=200, height=24, offset=190, label="Finish", initValue=100 )
+    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=940, width=200, height=24, offset=190, label="Start" )
+    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=965, width=200, height=24, offset=190, label="Finish", initValue=100 )
 
   # ==========================================
   # Event Handlers - Implement your logic here
@@ -162,52 +176,36 @@ class App:
       # And then save it
       self.appState.data.save( filename )
 
-  def saveFrame( self, canvas ):
-    x = canvas.winfo_rootx()
-    y = canvas.winfo_rooty()
-    w = x + canvas.winfo_width()
-    h = y + canvas.winfo_height()
-    return ImageGrab.grab( bbox=( x, y, w, h ) )
-
-  def homographyPlayLoop( self ):
-    self.livePreviewController.updateMappings( self.appState.tracks, self.homogIndex )
-    self.homogIndex += 1
-    if self.homogIndex >= self.homogMax:
-      if self.preserve and self.appState.cap is not None:
-        self.preserve = False
-        self.encoder.save( self.appState.cap, self.preserved )
-        self.preserved = []
-      return
-    if self.preserve:
-      self.preserved.append( self.saveFrame( self.livePreview ) )
-    self.root.after( 50, self.homographyPlayLoop )
-
   def cmdPlayHomography( self ):
-    self.homogIndex = self.minFrame.get()
-    self.homogMax = self.maxFrame.get()
-    self.setProgRange( self.prgHomography, self.homogIndex, self.homogMax )
-    self.root.after( 50, self.homographyPlayLoop )
+    self.playIt( None )
+
+  def playIt( self, encoder: BaseVideoEncoder | None ):
+    min = self.minFrame.get()
+    max = self.maxFrame.get()
+    self.setProgRange( self.prgHomography, min, max )
+    self.livePreviewController.play( min, max, encoder )
 
   def cmdGIFHomography( self ):
-    self.preserved = []
-    self.preserve = True
-    self.encoder = GifEncoder()
-    self.cmdPlayHomography()
+    self.playIt( GifEncoder() )
 
   def cmdMP4Homography( self ):
-    self.preserved = []
-    self.preserve = True
-    self.encoder = Mp4Encoder()
-    self.cmdPlayHomography()
+    self.playIt( Mp4Encoder() )
 
-  def cmdLoadBB( self ):
+  def cmdDataLoad( self ):
     """
     Handle cmdLoadBB event
     TODO: Implement your logic here
     """
     pass
 
-  def cmdLoadVideo( self ):
+  def cmdDataSave( self ):
+    """
+    Handle cmdLoadBB event
+    TODO: Implement your logic here
+    """
+    pass
+
+  def cmdSourceVideo( self ):
     filetypes = ( ( 'Video files', [ '*.mp4', '*.mkv' ] ),)
 
     filename = filedialog.askopenfilename( title='Open video', initialdir='.', filetypes=filetypes )
@@ -235,8 +233,8 @@ class App:
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
-    self.btnRunYoloDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
-    self.btnRunYoloVidDetection.config( state=tk.NORMAL if cappable else tk.DISABLED )
+    self.btnYoloOneFrame.config( state=tk.NORMAL if cappable else tk.DISABLED )
+    self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnSaveHomography.config( state=tk.NORMAL if self.hasHomography() else tk.DISABLED )
     self.btnPlayHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
     self.btnGIFHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
@@ -251,6 +249,7 @@ class App:
     # Step 1 - load the model
     self.allocateModelTracking()
     if self.tracking is not None:
+      # Step 2 - do it
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
       self.setProgRange( self.prgDetection, 0, ( maxFrame-minFrame ) + 1 )
       self.setProgRange( self.prgHomography, 0, 0 )
@@ -259,7 +258,7 @@ class App:
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
       self.root.after( 100, self.pollForUI )
 
-  def cmdRunYoloDetection( self ):
+  def cmdYoloOneFrame( self ):
     self.runYolo( self.mainImageController.frame_num, self.mainImageController.frame_num )
 
   def pollForUI( self ):
@@ -287,7 +286,7 @@ class App:
 
     self.root.after( 50, self.pollForUI )
 
-  def cmdRunYoloVidDetection( self ):
+  def cmdYoloRange( self ):
     self.runYolo( self.minFrame.get(), self.maxFrame.get() )
 
   def allocateModelTracking( self ):

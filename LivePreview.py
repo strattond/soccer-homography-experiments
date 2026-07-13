@@ -1,8 +1,9 @@
 import tkinter as tk
-from PIL import ImageTk
+from PIL import Image, ImageTk, ImageGrab
 
 from appState import AppState
 from dataTypes import Track
+from encoder import BaseVideoEncoder
 from pitch import SoccerPitchImage
 
 
@@ -12,14 +13,17 @@ class LivePreview:
   pitch_photo: ImageTk.PhotoImage
   state:       AppState
   pitch:       SoccerPitchImage
+  preserved:   list[ Image.Image ] = []
+  preserve:    bool                = False
   # yapf: enable
 
-  def __init__( self, canvas: tk.Canvas, pitch_photo: ImageTk.PhotoImage, state: AppState ):
+  def __init__( self, canvas: tk.Canvas, pitch_photo: ImageTk.PhotoImage, state: AppState, bumpFunc ):
 
     self.canvas = canvas
     self.pitch_photo = pitch_photo
     self.state = state
     self.pitch = state.pitch
+    self.bump = bumpFunc
 
     # Build layers
     self.createLayers()
@@ -47,3 +51,33 @@ class LivePreview:
         my = int( homography.y * scaleL + self.pitch.padding )
         radius = 6
         self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=self.pitch.colors.point_color.as_hex(), outline="black", width=1, tags=( "mapping" ) )
+
+  def play( self, min: int, max: int, encoder: BaseVideoEncoder | None ):
+    self.preserved = []
+    self.preserve = True
+    self.homogIdx = min
+    self.homogMax = max
+    self.encoder = encoder
+    self.canvas.after( 50, self.homographyPlayLoop )
+
+  def homographyPlayLoop( self ):
+    self.updateMappings( self.state.tracks, self.homogIdx )
+    self.homogIdx += 1
+    if self.homogIdx >= self.homogMax:
+      if self.preserve and self.state.cap is not None and self.encoder is not None:
+        self.preserve = False
+        self.encoder.save( self.state.cap, self.preserved )
+        self.preserved = []
+      return
+    if self.preserve:
+      self.preserved.append( self.saveFrame( self.canvas ) )
+    if self.bump is not None:
+      self.bump()
+    self.canvas.after( 50, self.homographyPlayLoop )
+
+  def saveFrame( self, canvas ):
+    x = canvas.winfo_rootx()
+    y = canvas.winfo_rooty()
+    w = x + canvas.winfo_width()
+    h = y + canvas.winfo_height()
+    return ImageGrab.grab( bbox=( x, y, w, h ) )

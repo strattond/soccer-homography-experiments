@@ -208,6 +208,12 @@ class Track:
         return i
     return None
 
+  def clearFrame( self, index: int ) -> None:
+    for box in self.boxes:
+      if box.index == index:
+        self.boxes.remove( box )
+        return
+
   def clearHomography( self ):
     self.homog.clear()
 
