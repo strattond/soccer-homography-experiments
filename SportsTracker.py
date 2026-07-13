@@ -1,5 +1,3 @@
-from typing import Iterable
-
 from appState import ModelOptions
 from dataclasses import dataclass, field
 from dataTypes import Homography, RawTrackData
@@ -112,8 +110,6 @@ class SportsTracker:
             self.range = ( cmd.start, cmd.end )
             self.index = cmd.start
             modelName = "yolo26" + self.mdlOpts.size + ".pt"
-            if hasattr( self, "model" ):
-              del self.model
             self.model = YOLO( modelName, verbose=False )
 
     except queue.Empty:
@@ -145,7 +141,7 @@ class SportsTracker:
         logger.info( "Processing complete!" )
         self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index - 1 ) )
         self.out_queue.put( Output( type=OutputType.COMPLETED ) )
-        self.pause()
+        self.stop()
 
   def run( self ):
 
@@ -162,11 +158,16 @@ class SportsTracker:
       ret, frame = self.cap.read()
       if not ret:
         logger.error( f"Failed reading cap {ret}" )
-        self.pause()
+        self.stop()
         continue
 
       #  Predicting
       results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=1280 )
       self.processResults( results )
 
+    print( "Quitting thread" )
+    if hasattr( self.model, "predictor" ) and self.model.predictor is not None and hasattr( self.model.predictor, "trackers" ):
+      print( "Tracker reset!" )
+      for tracker in self.model.predictor.trackers:
+        tracker.reset()
     self.cap.release()

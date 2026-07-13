@@ -30,6 +30,7 @@ class BaseVideoEncoder( abc.ABC ):
 
 
 class Mp4Encoder( BaseVideoEncoder ):
+
   def save( self, source: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
     """
         Encode frames into an MP4 entirely in memory.
@@ -38,10 +39,10 @@ class Mp4Encoder( BaseVideoEncoder ):
     if not frames:
       raise ValueError( "No frames provided to encoder." )
 
-    height, width = self.dimensions( frames[0] )
+    height, width = self.dimensions( frames[ 0 ] )
     fps = int( source.get( cv2.CAP_PROP_FPS ) )
 
-    print( "Saving homography ")
+    print( "Saving homography " )
 
     # Configure MP4 writer
     fourcc = cv2.VideoWriter.fourcc( *"mp4v" )

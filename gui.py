@@ -291,9 +291,9 @@ class App:
     self.runYolo( self.minFrame.get(), self.maxFrame.get() )
 
   def allocateModelTracking( self ):
-    if self.tracking is not None:
-      # Already allocated
+    if self.tracking is not None and self.tracking.thread is not None and self.tracking.thread.is_alive():
       return
+    print( "Creating SportsTracker" )
     self.tracking = SportsTracker( self.appState.mdlOpts, self.appState.videoFile )
     self.tracking.start()
 
