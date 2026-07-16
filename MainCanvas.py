@@ -76,7 +76,6 @@ class MainCanvasController:
     self.canvas.tag_raise( "tracking" )
     self.canvas.tag_raise( "selection" )
     self.canvas.tag_raise( "mapping" )
-    
 
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
@@ -246,3 +245,4 @@ class MainCanvasController:
         #self.canvas.create_rectangle( box.x1, box.y1, box.x2, box.y2, outline='yellow', width=5, tags=( "tracking" ) )
         # Now we need to scale the box coordinates to our image
         self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "tracking",) )
+        self.canvas.create_text( tlx, tly, text=str( track ), tags=( "tracking",), fill='white', font=('Arial', 18) )

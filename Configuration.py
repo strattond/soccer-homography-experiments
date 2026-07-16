@@ -37,80 +37,13 @@ class UIOptions:
   # yapf: enable
 
 
-class Configuration:
+class ImagePreview:
 
-  def __init__( self, parent: tk.Tk, state: AppState, on_change=None ):
+  def __init__( self, tab: ttk.Frame ) -> None:
+    self.tab = tab
 
-    self.parent = parent
-    self.appState: AppState = state
-    self.uiOpts = UIOptions()
-    self.on_change = on_change
-
-    self.stateToUI()
-
-    # Build UI
-    self.createLayout()
-
-    handler = TkinterLogHandler( self.txtLog )
-    formatter = logging.Formatter( "%(asctime)s - %(levelname)s - %(message)s" )
-    handler.setFormatter( formatter )
-
-    logger = logging.getLogger( "SportsTracker" )
-    logger.addHandler( handler )
-
-  def stateToUI( self ):
-    self.uiOpts.closeEdges.set( self.appState.imgOpts.closeEdges )
-    self.uiOpts.edgeEnhance.set( self.appState.imgOpts.edgeEnhance )
-    self.uiOpts.edgeType.set( self.appState.imgOpts.edgeType )
-    self.uiOpts.lineType.set( self.appState.imgOpts.lineType )
-    self.uiOpts.preBlur.set( self.appState.imgOpts.preBlur )
-    self.uiOpts.removeSky.set( self.appState.imgOpts.removeSky )
-    self.uiOpts.showHough.set( self.appState.imgOpts.showHough )
-
-  # -------------------------------------------------------------
-  # Layout controls
-  # -------------------------------------------------------------
-  def createLayout( self ):
-
-    self.root = ttk.Frame( master=self.parent, width=1280, height=240, borderwidth=5, relief='groove' )
-    self.root.place( x=50, y=720 + 56 )
-
-    self.nbControl = ttk.Notebook( self.root, width=1280, height=240 )
-    self.tabImagePreview = self.createTab( "Image Preview" )
-    self.tabHomographyData = self.createTab( "Homography Data" )
-    self.tabImageOptions = self.createTab( "Image Options" )
-    self.tabLog = self.createTab( "Log" )
-    self.nbControl.pack( expand=1, fill='both' )
-
-    self.setupImagePreview()
-    self.setupHomographyData()
-    self.setupImageOptions()
-    self.setupLogging()
-
-  def createTab( self, text ):
-    newTab = ttk.Frame( self.nbControl )
-    self.nbControl.add( newTab, text=text )
-    return newTab
-
-  def refreshImagePreview( self, xf: ViewTransform ):
-    updates = [ ( "Zoom", f"{xf.scale:.3f}" ), ( "Offset X", f"{xf.offset.x:.3f}" ), ( "Offset Y", f"{xf.offset.y:.3f}" ) ]
-    for iid, new_values in zip( self.constantRowIDs, updates ):
-      self.tblPreview.item( iid, values=new_values )
-
-  def refreshHomographyData( self ):
-    for iid in self.tblHomographyData.get_children():
-      self.tblHomographyData.delete( iid )
-
-    for i, ( sel, world ) in enumerate( zip( self.appState.data.img_pts_4k, self.appState.data.world_pts ) ):
-      tag = "evenrow" if i % 2 == 0 else "oddrow"
-      row = (
-          str( self.appState.cfg.labels[ world.index ] ) if
-          ( self.appState.cfg and world.index is not None ) else "", f"{world.coords.x:.3f},{world.coords.y:.3f}", f"{sel.coords.x},{sel.coords.y}"
-      )
-      self.tblHomographyData.insert( "", tk.END, values=row, tags=( tag,) )
-
-  def setupImagePreview( self ):
-    self.tblPreview = ttk.Treeview( self.tabImagePreview, columns=( "Property", "Value" ), show="headings" )
+  def setup( self ):
+    self.tblPreview = ttk.Treeview( self.tab, columns=( "Property", "Value" ), show="headings" )
     self.tblPreview.place( x=0, y=24, width=600, height=160 )
     #
     self.tblPreview.heading( "Property", text="Property" )
@@ -126,8 +59,20 @@ class Configuration:
       iid = self.tblPreview.insert( "", tk.END, values=row, tags=( tag,) )
       self.constantRowIDs.append( iid )
 
-  def setupHomographyData( self ):
-    self.tblHomographyData = ttk.Treeview( self.tabHomographyData, columns=( "Field Point", "World Position", "Image Position" ), show="headings" )
+  def refresh( self, xf: ViewTransform ):
+    updates = [ ( "Zoom", f"{xf.scale:.3f}" ), ( "Offset X", f"{xf.offset.x:.3f}" ), ( "Offset Y", f"{xf.offset.y:.3f}" ) ]
+    for iid, new_values in zip( self.constantRowIDs, updates ):
+      self.tblPreview.item( iid, values=new_values )
+
+
+class HomographyData:
+
+  def __init__( self, appState: AppState, tab: ttk.Frame ) -> None:
+    self.appState = appState
+    self.tab = tab
+
+  def setup( self ):
+    self.tblHomographyData = ttk.Treeview( self.tab, columns=( "Field Point", "World Position", "Image Position" ), show="headings" )
     self.tblHomographyData.place( x=0, y=24, width=600, height=160 )
 
     self.tblHomographyData.heading( "Field Point", text="Field Point" )
@@ -137,23 +82,40 @@ class Configuration:
     self.tblHomographyData.tag_configure( "oddrow", background="#661111", foreground="white" )
     self.tblHomographyData.tag_configure( "evenrow", background="#993333", foreground="white" )
 
+  def refresh( self ):
+    for iid in self.tblHomographyData.get_children():
+      self.tblHomographyData.delete( iid )
+
+    for i, ( sel, world ) in enumerate( zip( self.appState.data.img_pts_4k, self.appState.data.world_pts ) ):
+      tag = "evenrow" if i % 2 == 0 else "oddrow"
+      row = (
+          str( self.appState.cfg.labels[ world.index ] ) if
+          ( self.appState.cfg and world.index is not None ) else "", f"{world.coords.x:.3f},{world.coords.y:.3f}", f"{sel.coords.x},{sel.coords.y}"
+      )
+      self.tblHomographyData.insert( "", tk.END, values=row, tags=( tag,) )
+
+
+class ImageOptionsUI:
+
+  def __init__( self, state: AppState, tab: ttk.Frame, on_change=None ) -> None:
+    self.tab = tab
+    self.appState: AppState = state
+    self.uiOpts = UIOptions()
+    self.on_change = on_change
+
   def createCheck( self, text, variable ):
-    return ttk.Checkbutton( self.tabImageOptions, text=text, variable=variable, command=self.uiToState, compound='left' )
+    return ttk.Checkbutton( self.tab, text=text, variable=variable, command=self.uiToState, compound='left' )
 
-  def setupLogging( self ):
-    self.txtLog = ScrolledText( self.tabLog, width=80, height=20, state="normal" )
-    self.txtLog.pack( fill="both", expand=True )
-
-  def setupImageOptions( self ):
+  def setup( self ):
     self.optShowHough = self.createCheck( text="Show Edge Detection", variable=self.uiOpts.showHough )
     self.optPreBlur = self.createCheck( text="Blur before detection", variable=self.uiOpts.preBlur )
     self.optRemoveSky = self.createCheck( text="Remove sky?", variable=self.uiOpts.removeSky )
     self.optEdgeEnhance = self.createCheck( text="Edge enhancement", variable=self.uiOpts.edgeEnhance )
     self.optCloseEdges = self.createCheck( text="Try close edges", variable=self.uiOpts.closeEdges )
     edgeTypes = ( 'Canny', 'Scharr' )
-    self.optEdgeType = ttk.Combobox( self.tabImageOptions, textvariable=self.uiOpts.edgeType, values=edgeTypes )
+    self.optEdgeType = ttk.Combobox( self.tab, textvariable=self.uiOpts.edgeType, values=edgeTypes )
     lineTypes = ( 'Hough', 'LineSegmentDetector' )
-    self.optLineType = ttk.Combobox( self.tabImageOptions, textvariable=self.uiOpts.lineType, values=lineTypes )
+    self.optLineType = ttk.Combobox( self.tab, textvariable=self.uiOpts.lineType, values=lineTypes )
 
     self.optShowHough.pack( anchor='w' )
     self.optPreBlur.pack( anchor='w' )
@@ -181,3 +143,85 @@ class Configuration:
 
   def comboChange( self, event ):
     self.uiToState()
+
+  def stateToUI( self ):
+    self.uiOpts.closeEdges.set( self.appState.imgOpts.closeEdges )
+    self.uiOpts.edgeEnhance.set( self.appState.imgOpts.edgeEnhance )
+    self.uiOpts.edgeType.set( self.appState.imgOpts.edgeType )
+    self.uiOpts.lineType.set( self.appState.imgOpts.lineType )
+    self.uiOpts.preBlur.set( self.appState.imgOpts.preBlur )
+    self.uiOpts.removeSky.set( self.appState.imgOpts.removeSky )
+    self.uiOpts.showHough.set( self.appState.imgOpts.showHough )
+
+
+class Log:
+
+  def __init__( self, tab: ttk.Frame ) -> None:
+    self.tab = tab
+
+  def setup( self ):
+    self.txtLog = ScrolledText( self.tab, width=80, height=20, state="normal" )
+    self.txtLog.pack( fill="both", expand=True )
+
+
+class Tracks:
+
+  def __init__( self, tab: ttk.Frame ) -> None:
+    self.tab = tab
+
+  def setup( self ):
+    self.tblTrackData = ttk.Treeview( self.tab, columns=( "Track ID", "Num Frames" ), show="headings" )
+    self.tblTrackData.place( x=0, y=24, width=600, height=160 )
+
+    self.tblTrackData.heading( "Track ID", text="Track ID" )
+    self.tblTrackData.heading( "Num Frames", text="Num Frames" )
+
+    self.tblTrackData.tag_configure( "oddrow", background="#661111", foreground="white" )
+    self.tblTrackData.tag_configure( "evenrow", background="#993333", foreground="white" )
+
+
+class Configuration:
+
+  def __init__( self, parent: tk.Tk, state: AppState, on_change=None ):
+
+    self.parent = parent
+    self.appState: AppState = state
+
+    # Build UI
+    self.createLayout( on_change )
+
+    self.tabImageOptions.stateToUI()
+
+    handler = TkinterLogHandler( self.tabLog.txtLog )
+    formatter = logging.Formatter( "%(asctime)s - %(levelname)s - %(message)s" )
+    handler.setFormatter( formatter )
+
+    logger = logging.getLogger( "SportsTracker" )
+    logger.addHandler( handler )
+
+  # -------------------------------------------------------------
+  # Layout controls
+  # -------------------------------------------------------------
+  def createLayout( self, on_change ):
+
+    self.root = ttk.Frame( master=self.parent, width=1280, height=240, borderwidth=5, relief='groove' )
+    self.root.place( x=50, y=720 + 56 )
+
+    self.nbControl = ttk.Notebook( self.root, width=1280, height=240 )
+    self.tabImagePreview = ImagePreview( self.createTab( "Image Preview" ) )
+    self.tabHomographyData = HomographyData( self.appState, self.createTab( "Homography Data" ) )
+    self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
+    self.tabLog = Log( self.createTab( "Log" ) )
+    self.tabTracks = Tracks( self.createTab( "Tracks" ) )
+    self.nbControl.pack( expand=1, fill='both' )
+
+    self.tabImagePreview.setup()
+    self.tabHomographyData.setup()
+    self.tabImageOptions.setup()
+    self.tabLog.setup()
+    self.tabTracks.setup()
+
+  def createTab( self, text ):
+    newTab = ttk.Frame( self.nbControl )
+    self.nbControl.add( newTab, text=text )
+    return newTab

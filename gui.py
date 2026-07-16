@@ -2,12 +2,13 @@ import cv2
 import queue
 import tkinter as tk
 
+from HomographyUI import HomographyUI
 from appState import AppState
 from components import LabelledSpinBox, Slider
 from Configuration import Configuration
-from dataTypes import Homography, RawTrackData, SelectionPoint, Track, VideoData
+from dataTypes import RawTrackData, SelectionPoint, Track, VideoData
 from LivePreview import LivePreview
-from encoder import BaseVideoEncoder, GifEncoder, Mp4Encoder
+from encoder import BaseVideoEncoder
 from log import logger, logging
 from MainCanvas import MainCanvasController
 from PIL import Image, ImageTk
@@ -72,29 +73,7 @@ class App:
     self.lblHomography = tk.Label( self.root, text="Homography Point Matcher", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblHomography.place( x=50, y=20, width=200, height=24 )
 
-    # lblHomography
-    self.lblHomographyAction = tk.Label( self.root, text="Homography", fg="#000000", font=( "Arial", 12 ), anchor="w" )
-    self.lblHomographyAction.place( x=1460, y=706, width=100, height=24 )
-
-    # btnLoadHomography
-    self.btnLoadHomography = tk.Button( self.root, text="Load", font=( "Arial", 12 ), command=self.cmdLoadHomography )
-    self.btnLoadHomography.place( x=1600, y=700, width=60, height=36 )
-
-    # btnSaveHomography
-    self.btnSaveHomography = tk.Button( self.root, text="Save", font=( "Arial", 12 ), command=self.cmdSaveHomography, state=tk.DISABLED )
-    self.btnSaveHomography.place( x=1660, y=700, width=60, height=36 )
-
-    # btnPlayHomography
-    self.btnPlayHomography = tk.Button( self.root, text="Play", font=( "Arial", 12 ), command=self.cmdPlayHomography, state=tk.DISABLED )
-    self.btnPlayHomography.place( x=1720, y=700, width=60, height=36 )
-
-    # btnGIFHomography
-    self.btnGIFHomography = tk.Button( self.root, text="GIF", font=( "Arial", 12 ), command=self.cmdGIFHomography, state=tk.DISABLED )
-    self.btnGIFHomography.place( x=1780, y=700, width=60, height=36 )
-
-    # btnMP4Homography
-    self.btnMP4Homography = tk.Button( self.root, text="MP4", font=( "Arial", 12 ), command=self.cmdMP4Homography, state=tk.DISABLED )
-    self.btnMP4Homography.place( x=1840, y=700, width=60, height=36 )
+    self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace )
 
     # lblDataAction
     self.lblDataAction = tk.Label( self.root, text="Data", fg="#000000", font=( "Arial", 12 ), anchor="w" )
@@ -155,41 +134,17 @@ class App:
   # Event Handlers - Implement your logic here
   # ==========================================
 
-  def cmdLoadHomography( self ):
-    filetypes = ( ( 'Homography files', '*.json' ),)
-
-    filename = filedialog.askopenfilename( title='Open homography', initialdir='.', filetypes=filetypes )
-    if filename is not None:
-      # Reset the homography
-      self.appState.data = Homography()
-      # And then load it
-      self.appState.data.load( filename )
-      self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
-      self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
-      self.redisplayHomographyData()
-      self.checkButtonState()
-
-  def cmdSaveHomography( self ):
-    filetypes = ( ( 'Homography files', '*.json' ),)
-    filename = filedialog.asksaveasfilename( title='Save homography', initialdir='.', filetypes=filetypes )
-    if filename is not None:
-      # And then save it
-      self.appState.data.save( filename )
-
-  def cmdPlayHomography( self ):
-    self.playIt( None )
+  def homoReplace( self ):
+    self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
+    self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
+    self.redisplayHomographyData()
+    self.checkButtonState()
 
   def playIt( self, encoder: BaseVideoEncoder | None ):
     min = self.minFrame.get()
     max = self.maxFrame.get()
     self.setProgRange( self.prgHomography, min, max )
     self.livePreviewController.play( min, max, encoder )
-
-  def cmdGIFHomography( self ):
-    self.playIt( GifEncoder() )
-
-  def cmdMP4Homography( self ):
-    self.playIt( Mp4Encoder() )
 
   def cmdDataLoad( self ):
     """
@@ -236,10 +191,7 @@ class App:
     homoable = self.hasHomography() and len( self.appState.tracks.items() ) > 0
     self.btnYoloOneFrame.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
-    self.btnSaveHomography.config( state=tk.NORMAL if self.hasHomography() else tk.DISABLED )
-    self.btnPlayHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
-    self.btnGIFHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
-    self.btnMP4Homography.config( state=tk.NORMAL if homoable else tk.DISABLED )
+    self.uiHomography.setEnableStatus( self.hasHomography(), homoable )
     self.btnDataSave.config( state=tk.NORMAL if homoable else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
 
@@ -324,7 +276,7 @@ class App:
   def on_main_view_change( self ):
     xf = self.mainImageController.transform
 
-    self.tabData.refreshImagePreview( xf )
+    self.tabData.tabImagePreview.refresh( xf )
 
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
@@ -340,7 +292,7 @@ class App:
     self.mainImageController.refreshHough()
 
   def redisplayHomographyData( self ):
-    self.tabData.refreshHomographyData()
+    self.tabData.tabHomographyData.refresh()
     logger.info( "Clearing existing homography calculations" )
     for ( _, value ) in self.appState.tracks.items():
       value.clearHomography()
