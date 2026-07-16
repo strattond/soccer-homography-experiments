@@ -239,6 +239,7 @@ class App:
         self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
         self.checkButtonState()
+        self.tabData.tabTracks.refresh()
         return
 
     self.root.after( 50, self.pollForUI )
