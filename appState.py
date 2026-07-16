@@ -1,8 +1,9 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
+import json
 
 import cv2
 
-from dataTypes import Homography, SelectionPoint, Track
+from dataTypes import Homography, Person, SelectionPoint, Track
 from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 
 
@@ -17,6 +18,11 @@ class ImageOptions:
   edgeType:    str  = 'Canny'               # Combo box - edge type - Canny, Scharr
   lineType:    str  = 'LineSegmentDetector' # Combo box - line type - Hough, LineSegmentDetector
 
+  def to_dict(self):
+    return asdict( self )
+  def to_json(self) -> str:
+    return json.dumps( self.to_dict() )
+
 
 @dataclass
 class ModelOptions:
@@ -25,15 +31,16 @@ class ModelOptions:
   size:     str  = 'x'
   imgSz:    int  = 640
 
+  def to_dict(self):
+    return asdict( self )
+  def to_json(self) -> str:
+    return json.dumps( self.to_dict() )
+
 
 @dataclass
 class AppState:
   # yapf: disable
-  input:            str                      = "test_homography_input.mp4"
-  homogFile:        str                      = "H_image_to_pitch.json"
-  frameIndex:       int                      = 50
   last_image_click: SelectionPoint | None    = None
-  hover_point:      SelectionPoint | None    = None
   sel_world_point:  SelectionPoint | None    = None
   data:             Homography               = field( default_factory=Homography )
   cfg:              SoccerPitchConfiguration = field( default_factory=SoccerPitchConfiguration )
@@ -44,6 +51,20 @@ class AppState:
   imgOpts:          ImageOptions             = field( default_factory=ImageOptions )
   mdlOpts:          ModelOptions             = field( default_factory=ModelOptions )
   tracks:           dict[int, Track]         = field( default_factory=dict )
+  people:           list[Person]             = field( default_factory=list )
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )
+
+  def save( self, path: str ):
+    data = {
+        "homography": self.data.to_dict(),
+        "videoFile": self.videoFile,
+        "imgOpts": self.imgOpts.to_dict(),
+        "mdlOpts": self.mdlOpts.to_dict(),
+        "tracks": { str(k): v.to_dict() for k, v in self.tracks.items() },
+        "people": [ asdict( p ) for p in self.people ]
+    }
+
+    with open( path, "w" ) as f:
+      json.dump( data, f, indent=2 )

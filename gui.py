@@ -199,11 +199,11 @@ class App:
     pass
 
   def cmdDataSave( self ):
-    """
-    Handle cmdLoadBB event
-    TODO: Implement your logic here
-    """
-    pass
+    filetypes = ( ( 'Saved match data', '*.json' ),)
+
+    filename = filedialog.asksaveasfilename( title='Save Match Data', initialdir='.', filetypes=filetypes )
+    if filename is not None:
+      self.appState.save( filename )
 
   def cmdSourceVideo( self ):
     filetypes = ( ( 'Video files', [ '*.mp4', '*.mkv' ] ),)
@@ -233,12 +233,14 @@ class App:
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
+    homoable = self.hasHomography() and len( self.appState.tracks.items() ) > 0
     self.btnYoloOneFrame.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnSaveHomography.config( state=tk.NORMAL if self.hasHomography() else tk.DISABLED )
-    self.btnPlayHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
-    self.btnGIFHomography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
-    self.btnMP4Homography.config( state=tk.NORMAL if ( self.hasHomography() and len( self.appState.tracks.items() ) > 0 ) else tk.DISABLED )
+    self.btnPlayHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
+    self.btnGIFHomography.config( state=tk.NORMAL if homoable else tk.DISABLED )
+    self.btnMP4Homography.config( state=tk.NORMAL if homoable else tk.DISABLED )
+    self.btnDataSave.config( state=tk.NORMAL if homoable else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
 
   def setProgRange( self, prog: ttk.Progressbar, val: int, max: int ):
@@ -250,6 +252,9 @@ class App:
     self.allocateModelTracking()
     if self.tracking is not None:
       # Step 2 - do it
+      # But clear out existing homography data...
+      for ( _, value ) in self.appState.tracks.items():
+        value.clearHomography()
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
       self.setProgRange( self.prgDetection, 0, ( maxFrame-minFrame ) + 1 )
       self.setProgRange( self.prgHomography, 0, 0 )

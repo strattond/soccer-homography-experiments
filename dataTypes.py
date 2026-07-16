@@ -109,9 +109,9 @@ class Homography:
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
     self.hom4k, _ = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
 
-  def save( self, path ):
-    data = {
-        "homography": self.hom4k.tolist() if self.hom4k else None,
+  def to_dict( self ):
+    return {
+        "homography": self.hom4k.tolist() if self.hom4k is not None else None,
         "points": {
             "image": [ asdict( p ) for p in self.img_pts_4k ],
             "world": [ asdict( p ) for p in self.world_pts ]
@@ -121,6 +121,12 @@ class Homography:
             "source": [ self.source.x, self.source.y ]
         }
     }
+
+  def to_json( self ) -> str:
+    return json.dumps( self.to_dict() )
+
+  def save( self, path ):
+    data = self.to_dict()
 
     with open( path, "w" ) as f:
       json.dump( data, f, indent=2 )
@@ -157,9 +163,10 @@ class Homography:
 @dataclass
 class Person:
   # yapf: disable
-  id:    int = 0
-  name:  str = ""
-  pType: int = 0     # 0 - home, 1 - away, 2 - official
+  id:     int       = 0
+  name:   str       = ""
+  pType:  int       = 0     # 0 - home, 1 - away, 2 - official
+  tracks: list[int] = field( default_factory=list )
   # yapf: enable
 
 
@@ -173,6 +180,9 @@ class TrackData:
   conf:  float
   index: int
   # yapf: enable
+
+  def to_dict( self ):
+    return asdict( self )
 
 
 @dataclass
@@ -190,11 +200,16 @@ class RawTrackData:
 @dataclass
 class Track:
   # yapf: disable
-  id:     int
-  person: Person | None   = None
-  boxes:  list[TrackData] = field( default_factory=list )
-  homog:  list[Point2D]   = field( default_factory=list )
+  id:            int
+  person:        Person | None     = None
+  boxes:         list[TrackData]   = field( default_factory=list )
+  homog:         list[Point2D]     = field( default_factory=list )
+  homog_smooth:  list[Point2D]     = field( default_factory=list )
+  smooth_pos:    np.ndarray | None = None
   # yapf: enable
+
+  def to_dict( self ):
+    return { "id": self.id, "person": self.person.id if self.person else None, "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
 
   def getByIndex( self, index: int ) -> TrackData | None:
     for box in self.boxes:
@@ -216,6 +231,7 @@ class Track:
 
   def clearHomography( self ):
     self.homog.clear()
+    self.homog_smooth.clear()
 
   def refreshHomography( self, transformer: Homography ):
     boxLen = len( self.boxes )
@@ -233,6 +249,32 @@ class Track:
     xf = transformer.shazam( positions )
     if xf is not None:
       for ( x, y ) in xf:
+        # Raw positions
         self.homog.append( Point2D( x, y ) )
-    if len(self.boxes) != len(self.homog):
+        # Smooth it
+        xs, ys = self.smooth( x, y )
+
+        self.homog_smooth.append( Point2D( xs, ys ) )
+
+    if len( self.boxes ) != len( self.homog ):
       print( f"Track {self.id} - {len(self.boxes)} vs {len(self.homog)}" )
+
+  def smooth( self, x, y ):
+    alpha = 0.2
+    dead_zone = 0.15
+
+    curr = np.array( [ x, y ], dtype=float )
+
+    if self.smooth_pos is None:
+      self.smooth_pos = curr
+      return Point2D( curr[ 0 ], curr[ 1 ] )
+
+    prev = self.smooth_pos
+    delta = curr - prev
+
+    if np.linalg.norm( delta ) < dead_zone:
+      return prev
+
+    new = alpha*curr + ( 1-alpha ) * prev
+    self.smooth_pos = new
+    return Point2D( new[ 0 ], new[ 1 ] )

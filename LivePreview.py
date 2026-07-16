@@ -2,7 +2,7 @@ import tkinter as tk
 from PIL import Image, ImageTk, ImageGrab
 
 from appState import AppState
-from dataTypes import Track
+from dataTypes import Point2D, Track
 from encoder import BaseVideoEncoder
 from pitch import SoccerPitchImage
 
@@ -32,6 +32,12 @@ class LivePreview:
   def drawPitch( self ):
     self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
 
+  def draw( self, homography: Point2D, color: str, scaleW, scaleL ):
+    mx = int( homography.x * scaleW + self.pitch.padding )
+    my = int( homography.y * scaleL + self.pitch.padding )
+    radius = 6
+    self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "mapping" ) )
+
   # -------------------------------------------------------------
   # Layer setup
   # -------------------------------------------------------------
@@ -46,11 +52,8 @@ class LivePreview:
     for track in tracks:
       lkpIndex = tracks[ track ].getListIndex( frame_index )
       if lkpIndex is not None:
-        homography = tracks[ track ].homog[ lkpIndex ]
-        mx = int( homography.x * scaleW + self.pitch.padding )
-        my = int( homography.y * scaleL + self.pitch.padding )
-        radius = 6
-        self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=self.pitch.colors.point_color.as_hex(), outline="black", width=1, tags=( "mapping" ) )
+        self.draw( tracks[ track ].homog[ lkpIndex ], self.pitch.colors.point_color.as_hex(), scaleW, scaleL )
+        self.draw( tracks[ track ].homog_smooth[ lkpIndex ], self.pitch.colors.hover_color.as_hex(), scaleW, scaleL )
 
   def play( self, min: int, max: int, encoder: BaseVideoEncoder | None ):
     self.preserved = []
