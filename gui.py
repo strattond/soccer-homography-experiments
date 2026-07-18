@@ -4,7 +4,7 @@ import tkinter as tk
 
 from HomographyUI import HomographyUI
 from appState import AppState
-from components import LabelledSpinBox, Slider
+from components import LabelledSpinBox, ProgressBarETA, Slider
 from Configuration import Configuration
 from dataTypes import RawTrackData, SelectionPoint, Track, VideoData
 from LivePreview import LivePreview
@@ -121,11 +121,8 @@ class App:
     self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
-    self.prgDetection = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
-    self.prgDetection.place( x=1350, y=50, width=24, height=720 )
-
-    self.prgHomography = ttk.Progressbar( master=self.root, orient='vertical', mode='determinate' )
-    self.prgHomography.place( x=1375, y=50, width=24, height=720 )
+    self.prgDetection = ProgressBarETA( root=self.root, x=1350, y=50, width=24, height=720 )
+    self.prgHomography = ProgressBarETA( root=self.root, x=1375, y=50, width=24, height=720 )
 
     self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=940, width=200, height=24, offset=190, label="Start" )
     self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=965, width=200, height=24, offset=190, label="Finish", initValue=100 )
@@ -143,7 +140,7 @@ class App:
   def playIt( self, encoder: BaseVideoEncoder | None ):
     min = self.minFrame.get()
     max = self.maxFrame.get()
-    self.setProgRange( self.prgHomography, min, max )
+    self.prgHomography.setRange( min, max )
     self.livePreviewController.play( min, max, encoder )
 
   def cmdDataLoad( self ):
@@ -208,11 +205,12 @@ class App:
       for ( _, value ) in self.appState.tracks.items():
         value.clearHomography()
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
-      self.setProgRange( self.prgDetection, 0, ( maxFrame-minFrame ) + 1 )
-      self.setProgRange( self.prgHomography, 0, 0 )
+      self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
+      self.prgHomography.setRange( 0, 0 )
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
       self.tracking.in_queue.put( Command( CommandType.RUN_FRAMES, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
+      self.prgDetection.start()
       self.root.after( 100, self.pollForUI )
 
   def cmdYoloOneFrame( self ):
@@ -232,7 +230,7 @@ class App:
           self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
         self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
       elif data.type == OutputType.NEW_FRAME:
-        self.prgDetection[ 'value' ] += 1
+        self.prgDetection.tick()
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
@@ -300,12 +298,12 @@ class App:
     self.refreshHomographyData()
 
   def bumpIt( self ):
-    self.prgHomography[ 'value' ] += 1
+    self.prgHomography.tick()
 
   def refreshHomographyData( self, index: int = 0 ):
     # Now recalculate
     logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
-    self.setProgRange( self.prgHomography, 0, len( self.appState.tracks.items() ) )
+    self.prgHomography.setRange( 0, len( self.appState.tracks.items() ) )
     for ( i, value ) in self.appState.tracks.items():
       print( f"Refreshing homography for track {i}" )
       value.refreshHomography( self.appState.data )

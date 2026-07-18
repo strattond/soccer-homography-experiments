@@ -71,6 +71,8 @@ class LivePreview:
         self.preserve = False
         self.encoder.save( self.state.cap, self.preserved )
         self.preserved = []
+      if self.bump is not None:
+        self.bump()
       return
     if self.preserve:
       self.preserved.append( self.saveFrame( self.canvas ) )
