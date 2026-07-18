@@ -201,8 +201,10 @@ class Configuration:
     # Build UI
     self.createLayout( on_change )
 
+    # Set options based on current config
     self.tabImageOptions.stateToUI()
 
+    # Setup logging handler so anything written gets put in the UI
     handler = TkinterLogHandler( self.tabLog.txtLog )
     formatter = logging.Formatter( "%(asctime)s - %(levelname)s - %(message)s" )
     handler.setFormatter( formatter )
@@ -225,13 +227,11 @@ class Configuration:
     self.tabLog = Log( self.createTab( "Log" ) )
     self.tabTracks = Tracks( self.appState, self.createTab( "Tracks" ) )
     self.nbControl.pack( expand=1, fill='both' )
+    self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabTracks ]
 
-    self.tabImagePreview.setup()
-    self.tabHomographyData.setup()
-    self.tabImageOptions.setup()
-    self.tabLog.setup()
-    self.tabTracks.setup()
-
+    for tab in self.allTabs:
+      tab.setup()
+      
   def createTab( self, text ):
     newTab = ttk.Frame( self.nbControl )
     self.nbControl.add( newTab, text=text )
