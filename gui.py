@@ -2,17 +2,12 @@ import cv2
 import queue
 import tkinter as tk
 
-from HomographyUI import HomographyUI
+from ui import HomographyUI, LabelledSpinBox, ProgressBarETA, Slider, Configuration, LivePreview, MainCanvasController, RadarCanvas
 from appState import AppState
-from components import LabelledSpinBox, ProgressBarETA, Slider
-from Configuration import Configuration
 from dataTypes import RawTrackData, SelectionPoint, Track, VideoData
-from LivePreview import LivePreview
 from encoder import BaseVideoEncoder
 from log import logger, logging
-from MainCanvas import MainCanvasController
 from PIL import Image, ImageTk
-from RadarCanvas import RadarCanvas
 from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from tkinter import filedialog, ttk
 
