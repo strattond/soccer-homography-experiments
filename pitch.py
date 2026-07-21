@@ -150,51 +150,21 @@ class SoccerPitchImage:
     scaled_penalty = int( self.cfg.penalty_spot_distance * scaleL )
 
     # Blank out the image
-    self.empty = np.ones( ( self.height + 2 * self.padding, self.width + 2 * self.padding, 3 ), dtype=np.uint8 ) * np.array(
-        self.colors.background_color.as_bgr(), dtype=np.uint8
-    )
+    self.empty = np.ones( ( self.height + 2 * self.padding, self.width + 2 * self.padding, 3 ), dtype=np.uint8 ) * np.array( self.colors.background_color.as_bgr(), dtype=np.uint8 )
 
     for start, end in self.cfg.edges:
-      point1 = (
-          int( self.cfg.vertices[ start - 1 ][ 0 ] * scaleW ) + self.padding,
-          int( self.cfg.vertices[ start - 1 ][ 1 ] * scaleL ) + self.padding
-      )
-      point2 = (
-          int( self.cfg.vertices[ end - 1 ][ 0 ] * scaleW ) + self.padding,
-          int( self.cfg.vertices[ end - 1 ][ 1 ] * scaleL ) + self.padding
-      )
+      point1 = ( int( self.cfg.vertices[ start - 1 ][ 0 ] * scaleW ) + self.padding, int( self.cfg.vertices[ start - 1 ][ 1 ] * scaleL ) + self.padding )
+      point2 = ( int( self.cfg.vertices[ end - 1 ][ 0 ] * scaleW ) + self.padding, int( self.cfg.vertices[ end - 1 ][ 1 ] * scaleL ) + self.padding )
       cv2.line( img=self.empty, pt1=point1, pt2=point2, color=self.colors.line_color.as_bgr(), thickness=self.line_thickness )
 
     centre_circle_center = ( centreX, centreY )
-    cv2.circle(
-        img=self.empty,
-        center=centre_circle_center,
-        radius=yard10,
-        color=self.colors.line_color.as_bgr(),
-        thickness=self.line_thickness
-    )
+    cv2.circle( img=self.empty, center=centre_circle_center, radius=yard10, color=self.colors.line_color.as_bgr(), thickness=self.line_thickness )
 
-    penalty_spots = [ ( int( scaled_penalty + self.padding ), centreY ),
-                      ( int( self.width - scaled_penalty + self.padding ), centreY ) ]
+    penalty_spots = [ ( int( scaled_penalty + self.padding ), centreY ), ( int( self.width - scaled_penalty + self.padding ), centreY ) ]
     arc_angles = [ ( -57, 57 ), ( 123, 237 ) ]
     for spot, ( start, end ) in zip( penalty_spots, arc_angles ):
-      cv2.circle(
-          img=self.empty,
-          center=spot,
-          radius=int( self.point_radius * scaleW ),
-          color=self.colors.line_color.as_bgr(),
-          thickness=-1
-      )
-      cv2.ellipse(
-          img=self.empty,
-          center=spot,
-          axes=( yard10, yard10 ),
-          angle=0,
-          startAngle=start,
-          endAngle=end,
-          color=self.colors.line_color.as_bgr(),
-          thickness=2
-      )
+      cv2.circle( img=self.empty, center=spot, radius=int( self.point_radius * scaleW ), color=self.colors.line_color.as_bgr(), thickness=-1 )
+      cv2.ellipse( img=self.empty, center=spot, axes=( yard10, yard10 ), angle=0, startAngle=start, endAngle=end, color=self.colors.line_color.as_bgr(), thickness=2 )
 
     return self.empty
 

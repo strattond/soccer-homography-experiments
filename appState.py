@@ -52,6 +52,8 @@ class AppState:
   mdlOpts:          ModelOptions             = field( default_factory=ModelOptions )
   tracks:           dict[int, Track]         = field( default_factory=dict )
   people:           list[Person]             = field( default_factory=list )
+  framesProcessed:  int                      = 0
+  chunk:            int                      = 0
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )

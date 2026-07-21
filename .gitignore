@@ -208,6 +208,8 @@ __marimo__/
 
 # Models
 *.pt
+*.engine
+*.onnx
 
 # Data files
 *.gif

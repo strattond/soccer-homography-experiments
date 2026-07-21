@@ -105,12 +105,12 @@ class SportsTracker:
 
         elif cmd.type == CommandType.RUN_FRAMES:
           if cmd.start is not None and cmd.end is not None:
-            if cmd.end > int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
-              cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) )
+            if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
+              cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
             self.range = ( cmd.start, cmd.end )
             self.index = cmd.start
-            modelName = "yolo26" + self.mdlOpts.size + ".pt"
-            self.model = YOLO( modelName, verbose=False )
+            modelName = "yolo26" + self.mdlOpts.size + ".engine"
+            self.model = YOLO( modelName, verbose=False, task='detect' )
 
     except queue.Empty:
       pass
@@ -133,7 +133,7 @@ class SportsTracker:
         # Team colour classifier
         x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
 
-        logger.info( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
+        logger.debug( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
         self.out_queue.put( Output( type=OutputType.BBOX, data=RawTrackData( tid, x1, y1, x2, y2, conf, self.index ) ) )
 
       self.index += 1

@@ -106,7 +106,7 @@ class ProgressBarETA:
   bgBar:      int          = field( init=False )
   fgBar:      int          = field( init=False )
   lblPercent: int          = field( init=False )
-  lblTime:    int          = field( init=False )
+  lblETATime:    int          = field( init=False )
   currentVal: int          = field( default=0, init=False )
   startTime:  float | None = field( default=None, init=False )
   # yapf: enable
@@ -124,7 +124,8 @@ class ProgressBarETA:
 
     # Rotated labels
     self.lblPercent = self.canvas.create_text( self.width // 2, self.height // 2 - 20, text="0%", fill="white", angle=90, font=( "Arial", 12, "bold" ) )
-    self.lblTime = self.canvas.create_text( self.width // 2, self.height // 2 + 20, text="--:--", fill="white", angle=90, font=( "Arial", 10 ) )
+    self.lblETATime = self.canvas.create_text( self.width // 2, self.height // 2 + 20, text="--:--", fill="white", angle=90, font=( "Arial", 10 ) )
+    self.lblDuratin = self.canvas.create_text( self.width // 2, self.height // 2 - 60, text="--:--", fill="white", angle=90, font=( "Arial", 10 ) )
 
   def setRange( self, val: int, max: int ):
     self.min = val
@@ -141,9 +142,9 @@ class ProgressBarETA:
     self.startTime = time.time()
 
   def stop( self ):
-    #self.progress.stop()
     self.canvas.itemconfig( self.lblPercent, text="0%" )
-    self.canvas.itemconfig( self.lblTime, text="--:--" )
+    self.canvas.itemconfig( self.lblETATime, text="--:--" )
+    self.canvas.itemconfig( self.lblDuratin, text="--:--" )
     pass
 
   def redraw( self ):
@@ -169,6 +170,8 @@ class ProgressBarETA:
         remSteps = self.max - self.currentVal
         etaInSeconds = int( timePerStep * remSteps )
         etaDisplay = time.strftime( "%M:%S", time.gmtime( etaInSeconds ) )
-        self.canvas.itemconfig( self.lblTime, text=f"{etaDisplay}" )
+        self.canvas.itemconfig( self.lblETATime, text=f"{etaDisplay}" )
       else:
-        self.canvas.itemconfig( self.lblTime, text="--:--" )
+        self.canvas.itemconfig( self.lblETATime, text="--:--" )
+      timeSpent = time.strftime( "%M:%S", time.gmtime( elapsed ) )
+      self.canvas.itemconfig( self.lblDuratin, text=timeSpent )

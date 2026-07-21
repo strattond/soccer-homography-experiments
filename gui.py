@@ -2,6 +2,8 @@ import cv2
 import queue
 import tkinter as tk
 
+from constants import CHUNK_SIZE
+from db import writeBatch
 from ui import HomographyUI, LabelledSpinBox, ProgressBarETA, Slider, Configuration, LivePreview, MainCanvasController, RadarCanvas
 from appState import AppState
 from dataTypes import RawTrackData, SelectionPoint, Track, VideoData
@@ -10,7 +12,6 @@ from log import logger, logging
 from PIL import Image, ImageTk
 from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from tkinter import filedialog, ttk
-
 
 class App:
 
@@ -164,9 +165,9 @@ class App:
       self.appState.cap = cv2.VideoCapture( filename )
       if self.appState.cap.isOpened():
         vidData = VideoData( self.appState.cap )
-        self.sldVideoFrame.setMax( vidData.frames )
-        self.minFrame.setMax( vidData.frames )
-        self.maxFrame.setMax( vidData.frames )
+        self.sldVideoFrame.setMax( vidData.frames - 1 )
+        self.minFrame.setMax( vidData.frames - 1 )
+        self.maxFrame.setMax( vidData.frames - 1 )
         self.mainImageController.load( self.appState.cap, vidData )
         self.mainImageController.setFrame( 0 )
         self.checkButtonState()
@@ -226,6 +227,11 @@ class App:
         self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
       elif data.type == OutputType.NEW_FRAME:
         self.prgDetection.tick()
+        self.appState.framesProcessed += 1
+        if self.appState.framesProcessed % CHUNK_SIZE == 0:
+          # Write out the saved data
+          self.chunkIt()
+          self.appState.chunk += 1
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
@@ -239,6 +245,17 @@ class App:
 
   def cmdYoloRange( self ):
     self.runYolo( self.minFrame.get(), self.maxFrame.get() )
+
+  def chunkIt( self ):
+    loTrack = self.appState.chunk * CHUNK_SIZE
+    hiTrack = ( self.appState.chunk + 1 ) * CHUNK_SIZE
+    export: list[ Track ] = []
+    for ( _, value ) in self.appState.tracks.items():
+      toAdd = value.forExport( loTrack, hiTrack )
+      if len( toAdd.boxes ) > 0:
+        export.append( toAdd )
+
+    writeBatch( 1, self.appState.chunk, export )
 
   def allocateModelTracking( self ):
     if self.tracking is not None and self.tracking.thread is not None and self.tracking.thread.is_alive():

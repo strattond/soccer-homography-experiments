@@ -7,8 +7,13 @@ supervision>=0.27.0
 torch==2.12.0+cu130
 torchvision==0.27.0+cu130
 ultralytics>=8.4.6
+pyarrow>=24.0.0
+polars>=1.42.0
+duckdb
+tensorrt
+nvidia-modelopt[all]>=0.45
 
 # Dependencies, but we might want to bump...
 #numpy==2.3.5
 numpy>=2.4,<2.7
-#opencv-python>=4.13.0.90
+opencv-python>=4.13.0.90

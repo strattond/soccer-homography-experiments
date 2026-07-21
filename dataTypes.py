@@ -201,15 +201,31 @@ class RawTrackData:
 class Track:
   # yapf: disable
   id:            int
-  person:        Person | None     = None
-  boxes:         list[TrackData]   = field( default_factory=list )
-  homog:         list[Point2D]     = field( default_factory=list )
-  homog_smooth:  list[Point2D]     = field( default_factory=list )
-  smooth_pos:    np.ndarray | None = None
+  person:        Person | int | None = None
+  boxes:         list[TrackData]     = field( default_factory=list )
+  homog:         list[Point2D]       = field( default_factory=list )
+  homog_smooth:  list[Point2D]       = field( default_factory=list )
+  smooth_pos:    np.ndarray | None   = None
   # yapf: enable
 
+  def forExport( self, lo: int, hi: int ):
+    nBoxes: list[TrackData] = []
+    for box in self.boxes:
+      if box.index >= lo and box.index < hi:
+        nBoxes.append( box )
+
+    return Track( self.id, self.person, nBoxes )
+
+  def numId( self ) -> int | None:
+    actId = None
+    if isinstance( self.id, Person ):
+      actId = self.id.id
+    elif isinstance( self.id, int ):
+      actId = self.id
+    return actId          
+
   def to_dict( self ):
-    return { "id": self.id, "person": self.person.id if self.person else None, "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
+    return { "id": self.id, "person": self.numId(), "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
 
   def getByIndex( self, index: int ) -> TrackData | None:
     for box in self.boxes:
