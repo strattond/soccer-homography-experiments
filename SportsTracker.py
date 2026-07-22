@@ -162,7 +162,7 @@ class SportsTracker:
         continue
 
       #  Predicting
-      results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=1280 )
+      results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=1280, stream=True )
       self.processResults( results )
 
     print( "Quitting thread" )
