@@ -5,14 +5,14 @@ from tkinter import filedialog, ttk
 import cv2
 from PIL import Image, ImageTk
 
-from appState import AppState
-from constants import CHUNK_SIZE
-from dataTypes import RawTrackData, SelectionPoint, Track, VideoData
-from db import writeBatch
-from encoder import BaseVideoEncoder
-from log import logger, logging
-from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
-from ui import (
+from soccer_homography.appState import AppState
+from soccer_homography.constants import CHUNK_SIZE
+from soccer_homography.dataTypes import RawTrackData, SelectionPoint, Track, VideoData
+from soccer_homography.db import writeBatch
+from soccer_homography.encoder import BaseVideoEncoder
+from soccer_homography.log import logger, logging
+from soccer_homography.SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
+from soccer_homography.ui import (
   Configuration,
   HomographyUI,
   LabelledSpinBox,
@@ -333,7 +333,7 @@ class App:
     self.livePreviewController.updateMappings( self.appState.tracks, index )
 
 
-if __name__ == "__main__":
+def main() -> None:
   root = tk.Tk()
   appState = AppState()
   appState.pitch.padding = 10

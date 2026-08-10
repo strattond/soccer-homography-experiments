@@ -3,8 +3,8 @@ from dataclasses import asdict, dataclass, field
 
 import cv2
 
-from dataTypes import Homography, Person, SelectionPoint, Track
-from pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
+from soccer_homography.dataTypes import Homography, Person, SelectionPoint, Track
+from soccer_homography.pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 
 
 @dataclass
@@ -29,7 +29,8 @@ class ModelOptions:
   # yapf: disable
   withReID: bool = True
   size:     str  = 'x'
-  imgSz:    int  = 640
+  imgSz:    int  = 1280
+  engine:   str  = 'engine' # or 'pt'
 
   def to_dict(self):
     return asdict( self )

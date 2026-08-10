@@ -3,9 +3,9 @@ from dataclasses import dataclass, field
 from tkinter import BooleanVar, StringVar, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from appState import AppState
-from dataTypes import ViewTransform
-from log import logging
+from soccer_homography.appState import AppState
+from soccer_homography.dataTypes import ViewTransform
+from soccer_homography.log import logging
 
 
 class TkinterLogHandler( logging.Handler ):

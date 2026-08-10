@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from dataTypes import Point2D, SelectionPoint
+from soccer_homography.dataTypes import Point2D, SelectionPoint
 
 # From https://raw.githubusercontent.com/roboflow/sports/refs/heads/main/sports/configs/soccer.py
 # But with modifications for size accuracy

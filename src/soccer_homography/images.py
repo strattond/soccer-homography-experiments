@@ -6,17 +6,19 @@ import numpy as np
 from cv2.typing import MatLike
 from PIL import Image
 
+logger = logging.getLogger( __name__ )
+
 
 def save_image( output_path, image, filename ):
   out_path = os.path.join( output_path, filename )
   if isinstance(image, Image.Image):
     image.save( out_path )
-    logging.info( f"Saved {out_path}" )
+    logger.info( f"Saved {out_path}" )
   else:
     if not cv2.imwrite( out_path, image ):
-      logging.info( f"Failed saving {out_path}")
+      logger.info( f"Failed saving {out_path}")
     else:
-      logging.info( f"Saved {out_path}" )
+      logger.info( f"Saved {out_path}" )
 
 def fit_to_alpha( source_image: MatLike, alpha_source: MatLike ) -> MatLike:
 

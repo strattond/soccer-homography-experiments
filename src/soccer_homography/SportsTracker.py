@@ -8,10 +8,10 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from appState import ModelOptions
-from dataTypes import Homography, RawTrackData
-from detectionadapter import DetectionAdapter
-from log import logger
+from soccer_homography.appState import ModelOptions
+from soccer_homography.dataTypes import Homography, RawTrackData
+from soccer_homography.detectionadapter import DetectionAdapter
+from soccer_homography.log import logger
 
 BALL_CLASS_ID = 32
 PLAYER_CLASS_ID = 0
@@ -104,14 +104,13 @@ class SportsTracker:
           if cmd.start is not None:
             self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
 
-        elif cmd.type == CommandType.RUN_FRAMES:
-          if cmd.start is not None and cmd.end is not None:
-            if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
-              cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
-            self.range = ( cmd.start, cmd.end )
-            self.index = cmd.start
-            modelName = "yolo26" + self.mdlOpts.size + ".pt" # ".engine"
-            self.model = YOLO( modelName, verbose=False, task='detect' )
+        elif cmd.type == CommandType.RUN_FRAMES and cmd.start is not None and cmd.end is not None:
+          if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
+            cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
+          self.range = ( cmd.start, cmd.end )
+          self.index = cmd.start
+          modelName = "yolo26" + self.mdlOpts.size + "." + self.mdlOpts.engine
+          self.model = YOLO( modelName, verbose=False, task='detect' )
 
     except queue.Empty:
       pass
@@ -124,9 +123,9 @@ class SportsTracker:
       keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
       all_mask = [ cid in keep_ids for cid in detections.class_id ]
       detections = detections[ all_mask ]
-      balls = detections[ detections.class_id == BALL_CLASS_ID ]
+      #balls = detections[ detections.class_id == BALL_CLASS_ID ]
       players = detections[ detections.class_id == PLAYER_CLASS_ID ]
-      ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
+      #ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
       player_dets = np.hstack( ( players.xyxy, players.confidence[ :, None ], players.class_id[ :, None ], players.trackID[ :, None ] ) )
       for det in player_dets:
         x1f, y1f, x2f, y2f, conf, cidf, tidf = det
@@ -163,7 +162,7 @@ class SportsTracker:
         continue
 
       #  Predicting
-      results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=1280, stream=True )
+      results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=self.mdlOpts.imgSz, stream=True )
       self.processResults( results )
 
     print( "Quitting thread" )

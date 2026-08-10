@@ -2,10 +2,10 @@ import tkinter as tk
 
 from PIL import Image, ImageGrab, ImageTk
 
-from appState import AppState
-from dataTypes import Point2D, Track
-from encoder import BaseVideoEncoder
-from pitch import SoccerPitchImage
+from soccer_homography.appState import AppState
+from soccer_homography.dataTypes import Point2D, Track
+from soccer_homography.encoder import BaseVideoEncoder
+from soccer_homography.pitch import SoccerPitchImage
 
 
 class LivePreview:

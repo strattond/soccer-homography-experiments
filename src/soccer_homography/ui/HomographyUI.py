@@ -1,9 +1,9 @@
 import tkinter as tk
 from tkinter import filedialog
 
-from appState import AppState
-from dataTypes import Homography
-from encoder import GifEncoder, Mp4Encoder
+from soccer_homography.appState import AppState
+from soccer_homography.dataTypes import Homography
+from soccer_homography.encoder import GifEncoder, Mp4Encoder
 
 
 class HomographyUI:

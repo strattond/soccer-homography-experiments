@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from cv2.typing import MatLike
 
-from appState import ImageOptions
+from soccer_homography.appState import ImageOptions
 
 
 class LineDetector:

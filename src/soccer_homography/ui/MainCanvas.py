@@ -5,11 +5,11 @@ import numpy as np
 from PIL import Image, ImageTk
 from supervision import Color
 
-from appState import AppState
-from dataTypes import Point2D, SelectionPoint, Track, VideoData, ViewTransform
-from LineDetector import LineDetector
-from log import logger
-from pitch import SoccerPitchConfiguration, SoccerPitchImage
+from soccer_homography.appState import AppState
+from soccer_homography.dataTypes import Point2D, SelectionPoint, Track, VideoData, ViewTransform
+from soccer_homography.LineDetector import LineDetector
+from soccer_homography.log import logger
+from soccer_homography.pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 
 class MainCanvasController:

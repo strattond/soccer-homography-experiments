@@ -6,7 +6,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from dataTypes import Person, Track, TrackData
+from soccer_homography.dataTypes import Person, Track, TrackData
 
 # ---------------------------------------------------------
 # Schema for writing tracking details to a Parquet file

@@ -2,8 +2,8 @@ import tkinter as tk
 
 from supervision import Color
 
-from dataTypes import SelectionPoint
-from pitch import SoccerPitchConfiguration, SoccerPitchImage
+from soccer_homography.dataTypes import SelectionPoint
+from soccer_homography.pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 
 class RadarCanvas:

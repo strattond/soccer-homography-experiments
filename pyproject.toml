@@ -1,5 +1,5 @@
 [project]
-name = "soccer-homography-experiments"
+name = "soccer-homography"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -46,6 +46,9 @@ torchvision = [
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+override-dependencies = [
+    "onnxruntime-gpu >= 1.26.0"
 ]
 
 [tool.yapf]
