@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
-import polars as pl
 
 from dataTypes import Person, Track, TrackData
 
@@ -12,8 +12,8 @@ from dataTypes import Person, Track, TrackData
 # Schema for writing tracking details to a Parquet file
 # ---------------------------------------------------------
 
+# yapf: disable
 TRACKING_SCHEMA = pa.schema( [
-  # yapf: disable
                               ( "clip", pa.int32() ),
                               ( "frame", pa.int32() ),
                               ( "track", pa.int32() ),
@@ -23,8 +23,8 @@ TRACKING_SCHEMA = pa.schema( [
                               ( "y2", pa.float32() ),
                               ( "confidence", pa.float32() ),
                               ( "person", pa.int32() ),  # nullable
-                              # yapf: enable
                             ] )
+# yapf: enable
 
 
 def dictToArrow( records: list[ Track ] ) -> pa.Table:

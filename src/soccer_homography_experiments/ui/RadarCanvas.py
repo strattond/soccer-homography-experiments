@@ -1,4 +1,5 @@
 import tkinter as tk
+
 from supervision import Color
 
 from dataTypes import SelectionPoint
@@ -50,15 +51,13 @@ class RadarCanvas:
   # -------------------------------------------------------------
   def drawKeypoints( self ):
     scaleW, scaleL = self.pitch.get_pitch_scale
-    i = 0
-    for vertex, pt in zip( self.cfg.vertices, self.cfg.labels ):
+    for i, (vertex, pt) in enumerate(zip( self.cfg.vertices, self.cfg.labels )):
       mx = int( vertex[ 0 ] * scaleW + self.pitch.padding )
       my = int( vertex[ 1 ] * scaleL + self.pitch.padding )
 
       radius = 6
       self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=self.pitch.colors.point_color.as_hex(), outline="black", width=1, tags=( "keypoints" ) )
       self.canvas.create_text( mx + 10, my - 10, text=pt, fill="white", font=( "Arial", 12 ), tags=( "keypoints" ) )
-      i += 1
 
   # -------------------------------------------------------------
   # Single marker on nominated layer

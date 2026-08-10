@@ -1,8 +1,9 @@
 import tkinter as tk
+from tkinter import filedialog
+
 from appState import AppState
 from dataTypes import Homography
 from encoder import GifEncoder, Mp4Encoder
-from tkinter import filedialog
 
 
 class HomographyUI:

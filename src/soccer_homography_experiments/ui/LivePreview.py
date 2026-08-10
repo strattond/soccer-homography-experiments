@@ -1,5 +1,6 @@
 import tkinter as tk
-from PIL import Image, ImageTk, ImageGrab
+
+from PIL import Image, ImageGrab, ImageTk
 
 from appState import AppState
 from dataTypes import Point2D, Track
@@ -13,12 +14,13 @@ class LivePreview:
   pitch_photo: ImageTk.PhotoImage
   state:       AppState
   pitch:       SoccerPitchImage
-  preserved:   list[ Image.Image ] = []
+  preserved:   list[ Image.Image ]
   preserve:    bool                = False
   # yapf: enable
 
   def __init__( self, canvas: tk.Canvas, pitch_photo: ImageTk.PhotoImage, state: AppState, bumpFunc ):
 
+    self.preserved = []
     self.canvas = canvas
     self.pitch_photo = pitch_photo
     self.state = state
@@ -49,11 +51,11 @@ class LivePreview:
   def updateMappings( self, tracks: dict[ int, Track ], frame_index: int ):
     self.canvas.delete( "mapping" )
     scaleW, scaleL = self.pitch.get_pitch_scale
-    for track in tracks:
-      lkpIndex = tracks[ track ].getListIndex( frame_index )
+    for track in tracks.values():
+      lkpIndex = track.getListIndex( frame_index )
       if lkpIndex is not None:
-        self.draw( tracks[ track ].homog[ lkpIndex ], self.pitch.colors.point_color.as_hex(), scaleW, scaleL )
-        self.draw( tracks[ track ].homog_smooth[ lkpIndex ], self.pitch.colors.hover_color.as_hex(), scaleW, scaleL )
+        self.draw( track.homog[ lkpIndex ], self.pitch.colors.point_color.as_hex(), scaleW, scaleL )
+        self.draw( track.homog_smooth[ lkpIndex ], self.pitch.colors.hover_color.as_hex(), scaleW, scaleL )
 
   def play( self, min: int, max: int, encoder: BaseVideoEncoder | None ):
     self.preserved = []

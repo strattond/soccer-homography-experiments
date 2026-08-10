@@ -1,11 +1,11 @@
-from dataclasses import dataclass, field
-from log import logging
 import tkinter as tk
+from dataclasses import dataclass, field
 from tkinter import BooleanVar, StringVar, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from appState import AppState
 from dataTypes import ViewTransform
+from log import logging
 
 
 class TkinterLogHandler( logging.Handler ):
@@ -45,14 +45,14 @@ class ImagePreview:
   def setup( self ):
     self.tblPreview = ttk.Treeview( self.tab, columns=( "Property", "Value" ), show="headings" )
     self.tblPreview.place( x=0, y=24, width=600, height=160 )
-    #
+
     self.tblPreview.heading( "Property", text="Property" )
     self.tblPreview.heading( "Value", text="Value" )
-    #
+
     initialData = [ ( "Zoom", "" ), ( "Offset X", "" ), ( "Offset Y", "" ) ]
     self.tblPreview.tag_configure( "oddrow", background="#661111", foreground="white" )
     self.tblPreview.tag_configure( "evenrow", background="#993333", foreground="white" )
-    #
+
     self.constantRowIDs = []
     for i, row in enumerate( initialData ):
       tag = "evenrow" if i % 2 == 0 else "oddrow"
@@ -231,7 +231,7 @@ class Configuration:
 
     for tab in self.allTabs:
       tab.setup()
-      
+
   def createTab( self, text ):
     newTab = ttk.Frame( self.nbControl )
     self.nbControl.add( newTab, text=text )

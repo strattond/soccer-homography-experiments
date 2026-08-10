@@ -1,13 +1,14 @@
+import tkinter as tk
+
 import cv2
 import numpy as np
-import tkinter as tk
-from log import logger
 from PIL import Image, ImageTk
 from supervision import Color
 
-from LineDetector import LineDetector
 from appState import AppState
 from dataTypes import Point2D, SelectionPoint, Track, VideoData, ViewTransform
+from LineDetector import LineDetector
+from log import logger
 from pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 
@@ -237,8 +238,8 @@ class MainCanvasController:
 
   def updateBoundingBoxes( self, tracks: dict[ int, Track ], index: int ):
     self.canvas.delete( "tracking" )
-    for track in tracks:
-      box = tracks[ track ].getByIndex( index )
+    for track in tracks.values():
+      box = track.getByIndex( index )
       if box is not None:
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )

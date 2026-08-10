@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
 import time
 import tkinter as tk
+from dataclasses import dataclass, field
 from tkinter import ttk
 
 
