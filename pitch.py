@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+
 import cv2
 import numpy as np
 import supervision as sv
@@ -111,12 +112,12 @@ class SoccerPitchConfiguration:
 @dataclass
 class SoccerPitchColors:
   # yapf: disable
-  background_color: sv.Color = sv.Color( 34, 139, 34 )
+  background_color: sv.Color = field( default_factory=lambda: sv.Color( 34, 139, 34 ) )
   line_color:       sv.Color = sv.Color.WHITE
   point_color:      sv.Color = sv.Color.YELLOW
   highlight_color:  sv.Color = sv.Color.GREEN
   hover_color:      sv.Color = sv.Color.RED
-  sel_color:        sv.Color = sv.Color.from_hex( "#FF00FF" )
+  sel_color:        sv.Color = field( default_factory=lambda: sv.Color.from_hex( "#FF00FF" ) )
   # yapf: enable
 
 

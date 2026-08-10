@@ -1,17 +1,28 @@
-import cv2
 import queue
 import tkinter as tk
+from tkinter import filedialog, ttk
 
-from constants import CHUNK_SIZE
-from db import writeBatch
-from ui import HomographyUI, LabelledSpinBox, ProgressBarETA, Slider, Configuration, LivePreview, MainCanvasController, RadarCanvas
+import cv2
+from PIL import Image, ImageTk
+
 from appState import AppState
+from constants import CHUNK_SIZE
 from dataTypes import RawTrackData, SelectionPoint, Track, VideoData
+from db import writeBatch
 from encoder import BaseVideoEncoder
 from log import logger, logging
-from PIL import Image, ImageTk
 from SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
-from tkinter import filedialog, ttk
+from ui import (
+  Configuration,
+  HomographyUI,
+  LabelledSpinBox,
+  LivePreview,
+  MainCanvasController,
+  ProgressBarETA,
+  RadarCanvas,
+  Slider,
+)
+
 
 class App:
 
@@ -30,12 +41,11 @@ class App:
     root.protocol( "WM_DELETE_WINDOW", self.on_close )
 
   def on_close( self ):
-    if self.tracking is not None:
-      if self.tracking.thread is not None:
-        self.tracking.in_queue.put( Command( CommandType.STOP ) )
-        self.tracking.thread.join( timeout=30 )
-        if self.tracking is not None and self.tracking.thread.is_alive():
-          print( "Forcibly terminating" )
+    if self.tracking is not None and self.tracking.thread is not None:
+      self.tracking.in_queue.put( Command( CommandType.STOP ) )
+      self.tracking.thread.join( timeout=30 )
+      if self.tracking is not None and self.tracking.thread.is_alive():
+        print( "Forcibly terminating" )
 
     self.root.destroy()
 
@@ -198,7 +208,7 @@ class App:
     if self.tracking is not None:
       # Step 2 - do it
       # But clear out existing homography data...
-      for ( _, value ) in self.appState.tracks.items():
+      for value in self.appState.tracks.values():
         value.clearHomography()
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
@@ -250,7 +260,7 @@ class App:
     loTrack = self.appState.chunk * CHUNK_SIZE
     hiTrack = ( self.appState.chunk + 1 ) * CHUNK_SIZE
     export: list[ Track ] = []
-    for ( _, value ) in self.appState.tracks.items():
+    for value in self.appState.tracks.values():
       toAdd = value.forExport( loTrack, hiTrack )
       if len( toAdd.boxes ) > 0:
         export.append( toAdd )
@@ -305,7 +315,7 @@ class App:
   def redisplayHomographyData( self ):
     self.tabData.tabHomographyData.refresh()
     logger.info( "Clearing existing homography calculations" )
-    for ( _, value ) in self.appState.tracks.items():
+    for value in self.appState.tracks.values():
       value.clearHomography()
     self.refreshHomographyData()
 

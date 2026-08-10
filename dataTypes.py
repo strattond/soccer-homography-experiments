@@ -1,7 +1,8 @@
-import cv2
 import json
+from dataclasses import asdict, dataclass, field
+
+import cv2
 import numpy as np
-from dataclasses import dataclass, field, asdict
 from cv2.typing import MatLike
 
 
@@ -88,8 +89,8 @@ class ViewTransform:
 
 @dataclass
 class Homography:
-  img_pts_4k: list[ SelectionPoint ] = field( default_factory=lambda: [] )
-  world_pts: list[ SelectionPoint ] = field( default_factory=lambda: [] )
+  img_pts_4k: list[ SelectionPoint ] = field( default_factory=list )
+  world_pts: list[ SelectionPoint ] = field( default_factory=list )
   display: Point2D = field( default_factory=lambda: Point2D( 1920, 1080 ) )
   source: Point2D = field( default_factory=lambda: Point2D() )
   hom4k: MatLike | None = None
@@ -209,7 +210,7 @@ class Track:
   # yapf: enable
 
   def forExport( self, lo: int, hi: int ):
-    nBoxes: list[TrackData] = []
+    nBoxes: list[ TrackData ] = []
     for box in self.boxes:
       if box.index >= lo and box.index < hi:
         nBoxes.append( box )
@@ -222,7 +223,7 @@ class Track:
       actId = self.id.id
     elif isinstance( self.id, int ):
       actId = self.id
-    return actId          
+    return actId
 
   def to_dict( self ):
     return { "id": self.id, "person": self.numId(), "boxes": [ [ box.to_dict() for box in self.boxes ] ]}

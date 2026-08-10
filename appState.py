@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field, asdict
 import json
+from dataclasses import asdict, dataclass, field
 
 import cv2
 

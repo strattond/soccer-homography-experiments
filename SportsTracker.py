@@ -1,16 +1,17 @@
-from appState import ModelOptions
-from dataclasses import dataclass, field
-from dataTypes import Homography, RawTrackData
-from detectionadapter import DetectionAdapter
-from enum import Enum, auto
-from log import logger
-from ultralytics import YOLO
-
-import cv2
-import numpy as np
 import queue
 import threading
 import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
+
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+from appState import ModelOptions
+from dataTypes import Homography, RawTrackData
+from detectionadapter import DetectionAdapter
+from log import logger
 
 BALL_CLASS_ID = 32
 PLAYER_CLASS_ID = 0
@@ -109,7 +110,7 @@ class SportsTracker:
               cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
             self.range = ( cmd.start, cmd.end )
             self.index = cmd.start
-            modelName = "yolo26" + self.mdlOpts.size + ".engine"
+            modelName = "yolo26" + self.mdlOpts.size + ".pt" # ".engine"
             self.model = YOLO( modelName, verbose=False, task='detect' )
 
     except queue.Empty:

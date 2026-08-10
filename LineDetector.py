@@ -72,7 +72,6 @@ class LineDetector:
         edges = self.getHoughEdges( gray )
 
     lines = self.processForLines( edges, gray )
-    #
     if imgOpts.closeEdges:
       masked = self.drawOnMask( lines, gray )
       edges = self.rebuildEdges( masked )

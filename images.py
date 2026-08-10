@@ -1,9 +1,11 @@
-import cv2
 import logging
 import os
+
+import cv2
 import numpy as np
-from PIL import Image
 from cv2.typing import MatLike
+from PIL import Image
+
 
 def save_image( output_path, image, filename ):
   out_path = os.path.join( output_path, filename )

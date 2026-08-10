@@ -1,4 +1,5 @@
 import abc
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -15,7 +16,6 @@ class BaseVideoEncoder( abc.ABC ):
         Encode a video using the provided source capture and raw PIL frames.
         Returns MP4 bytes in memory.
         """
-    pass
 
   def dimensions( self, frame: Image.Image ) -> tuple[ int, int ]:
     # Determine output size from first frame
