@@ -3,7 +3,7 @@ from dataclasses import asdict, dataclass, field
 
 import cv2
 
-from soccer_homography.dataTypes import Homography, Person, SelectionPoint, Track
+from soccer_homography.dataTypes import BoundingBox, Homography, Person, SelectionPoint, Track
 from soccer_homography.pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
 
 
@@ -41,20 +41,21 @@ class ModelOptions:
 @dataclass
 class AppState:
   # yapf: disable
-  last_image_click: SelectionPoint | None    = None
-  sel_world_point:  SelectionPoint | None    = None
-  data:             Homography               = field( default_factory=Homography )
-  cfg:              SoccerPitchConfiguration = field( default_factory=SoccerPitchConfiguration )
-  colors:           SoccerPitchColors        = field( default_factory=SoccerPitchColors )
-  pitch:            SoccerPitchImage         = field( init=False )
-  cap:              cv2.VideoCapture | None  = None
-  videoFile:        str                      = ""
-  imgOpts:          ImageOptions             = field( default_factory=ImageOptions )
-  mdlOpts:          ModelOptions             = field( default_factory=ModelOptions )
-  tracks:           dict[int, Track]         = field( default_factory=dict )
-  people:           list[Person]             = field( default_factory=list )
-  framesProcessed:  int                      = 0
-  chunk:            int                      = 0
+  last_image_click: SelectionPoint | None         = None
+  sel_world_point:  SelectionPoint | None         = None
+  data:             Homography                    = field( default_factory=Homography )
+  cfg:              SoccerPitchConfiguration      = field( default_factory=SoccerPitchConfiguration )
+  colors:           SoccerPitchColors             = field( default_factory=SoccerPitchColors )
+  pitch:            SoccerPitchImage              = field( init=False )
+  cap:              cv2.VideoCapture | None       = None
+  videoFile:        str                           = ""
+  imgOpts:          ImageOptions                  = field( default_factory=ImageOptions )
+  mdlOpts:          ModelOptions                  = field( default_factory=ModelOptions )
+  tracks:           dict[int, Track]              = field( default_factory=dict )
+  boxes:            dict[int, list[BoundingBox]]  = field( default_factory=dict )
+  people:           list[Person]                  = field( default_factory=list )
+  framesProcessed:  int                           = 0
+  chunk:            int                           = 0
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )

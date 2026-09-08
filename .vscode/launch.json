@@ -18,6 +18,13 @@
             "program": "${workspaceFolder}/gui.py",
             "console": "integratedTerminal",
             "justMyCode": false
+        },
+        {
+            "name": "UV Python",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "soccer_homography",
+            "console": "integratedTerminal"
         }
     ]
 }

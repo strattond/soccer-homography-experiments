@@ -3,13 +3,15 @@ import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Any
 
 import cv2
 import numpy as np
+from boxmot.trackers.bbox import ByteTrack
 from ultralytics import YOLO
 
 from soccer_homography.appState import ModelOptions
-from soccer_homography.dataTypes import Homography, RawTrackData
+from soccer_homography.dataTypes import BoundingBox, Homography, TrackData
 from soccer_homography.detectionadapter import DetectionAdapter
 from soccer_homography.log import logger
 
@@ -18,7 +20,8 @@ PLAYER_CLASS_ID = 0
 
 
 class CommandType( Enum ):
-  RUN_FRAMES = auto()
+  RUN_BBOX = auto()
+  RUN_TRACK = auto()
   PAUSE = auto()
   RESUME = auto()
   STOP = auto()
@@ -41,7 +44,7 @@ class Command:
 @dataclass
 class Output:
   type: OutputType
-  data: RawTrackData | int | None = None
+  data: BoundingBox | TrackData | int | None = None
 
 
 # This will be responsible for loading the model, performing detections and tracking, and so on
@@ -55,6 +58,7 @@ class SportsTracker:
   range:            tuple[int, int]          = field( default_factory=tuple[int, int] )
   index:            int                      = 0
   model:            YOLO                     = field( init=False )
+  tracker:          Any                      = field( init=False )
   data:             Homography               = field( init=False )
   cap:              cv2.VideoCapture         = field( init=False )
 
@@ -64,6 +68,8 @@ class SportsTracker:
   paused:           bool                     = True
   stopped:          bool                     = False
   thread:           threading.Thread         = field(init=False)
+
+  curMode:          CommandType              = CommandType.PAUSE
   # yapf: enable
 
   def __post_init__( self ) -> None:
@@ -104,13 +110,24 @@ class SportsTracker:
           if cmd.start is not None:
             self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
 
-        elif cmd.type == CommandType.RUN_FRAMES and cmd.start is not None and cmd.end is not None:
+        elif cmd.type == CommandType.RUN_BBOX and cmd.start is not None and cmd.end is not None:
           if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
             cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
           self.range = ( cmd.start, cmd.end )
           self.index = cmd.start
           modelName = "yolo26" + self.mdlOpts.size + "." + self.mdlOpts.engine
           self.model = YOLO( modelName, verbose=False, task='detect' )
+          self.curMode = CommandType.RUN_BBOX
+
+        elif cmd.type == CommandType.RUN_TRACK and cmd.start is not None and cmd.end is not None:
+          if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
+            cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
+          self.range = ( cmd.start, cmd.end )
+          self.index = cmd.start
+          #modelName = "yolo26" + self.mdlOpts.size + "." + self.mdlOpts.engine
+          #self.model = YOLO( modelName, verbose=False, task='detect' )
+          self.tracker = ByteTrack()
+          self.curMode = CommandType.RUN_TRACK
 
     except queue.Empty:
       pass
@@ -132,9 +149,8 @@ class SportsTracker:
 
         # Team colour classifier
         x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
-
         logger.debug( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
-        self.out_queue.put( Output( type=OutputType.BBOX, data=RawTrackData( tid, x1, y1, x2, y2, conf, self.index ) ) )
+        self.out_queue.put( Output( type=OutputType.BBOX, data=BoundingBox( x1, y1, x2, y2, conf, cid, self.index ) ) )
 
       self.index += 1
       if self.index > self.range[ 1 ]:
@@ -162,7 +178,8 @@ class SportsTracker:
         continue
 
       #  Predicting
-      results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=self.mdlOpts.imgSz, stream=True )
+      results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
+      #results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=self.mdlOpts.imgSz, stream=True )
       self.processResults( results )
 
     print( "Quitting thread" )

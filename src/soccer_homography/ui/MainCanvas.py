@@ -6,7 +6,7 @@ from PIL import Image, ImageTk
 from supervision import Color
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import Point2D, SelectionPoint, Track, VideoData, ViewTransform
+from soccer_homography.dataTypes import BoundingBox, Point2D, SelectionPoint, Track, VideoData, ViewTransform
 from soccer_homography.LineDetector import LineDetector
 from soccer_homography.log import logger
 from soccer_homography.pitch import SoccerPitchConfiguration, SoccerPitchImage
@@ -98,7 +98,7 @@ class MainCanvasController:
     self.applyTransform()
 
     self.applyHoughTransform()
-    self.updateBoundingBoxes( self.appState.tracks, frame_index )
+    self.updateBoundingBoxes( self.appState.boxes, frame_index )
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
@@ -236,14 +236,13 @@ class MainCanvasController:
   def refreshHough( self ):
     self.applyHoughTransform()
 
-  def updateBoundingBoxes( self, tracks: dict[ int, Track ], index: int ):
+  def updateBoundingBoxes( self, boxes: dict[ int, list[ BoundingBox ] ], index: int ):
     self.canvas.delete( "tracking" )
-    for track in tracks.values():
-      box = track.getByIndex( index )
+    boxData = boxes.get( index, [] )
+    for i, box in enumerate( boxData ):
       if box is not None:
+        # Now we need to scale the box coordinates to our image
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
-        #self.canvas.create_rectangle( box.x1, box.y1, box.x2, box.y2, outline='yellow', width=5, tags=( "tracking" ) )
-        # Now we need to scale the box coordinates to our image
         self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "tracking",) )
-        self.canvas.create_text( tlx, tly, text=str( track ), tags=( "tracking",), fill='white', font=('Arial', 18) )
+        self.canvas.create_text( tlx, tly, text=str( i ), tags=( "tracking",), fill='white', font=( 'Arial', 18 ) )

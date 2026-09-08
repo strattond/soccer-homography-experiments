@@ -7,20 +7,20 @@ from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
 from soccer_homography.constants import CHUNK_SIZE
-from soccer_homography.dataTypes import RawTrackData, SelectionPoint, Track, VideoData
+from soccer_homography.dataTypes import BoundingBox, SelectionPoint, Track, TrackData, VideoData
 from soccer_homography.db import writeBatch
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from soccer_homography.ui import (
-  Configuration,
-  HomographyUI,
-  LabelledSpinBox,
-  LivePreview,
-  MainCanvasController,
-  ProgressBarETA,
-  RadarCanvas,
-  Slider,
+    Configuration,
+    HomographyUI,
+    LabelledSpinBox,
+    LivePreview,
+    MainCanvasController,
+    ProgressBarETA,
+    RadarCanvas,
+    Slider,
 )
 
 
@@ -37,7 +37,7 @@ class App:
     # Initialize variables
 
     # Create widgets
-    self._create_widgets()
+    self.createWidgets()
     root.protocol( "WM_DELETE_WINDOW", self.on_close )
 
   def on_close( self ):
@@ -49,7 +49,7 @@ class App:
 
     self.root.destroy()
 
-  def _create_widgets( self ):
+  def createWidgets( self ):
     """Create and place all widgets"""
 
     # imagePreview
@@ -81,44 +81,70 @@ class App:
 
     self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace )
 
+    self.createWidgetsData( 1460, 740 )
+    self.createWidgetsDetection( 1460, 780 )
+    self.createWidgetsTrack( 1460, 820 )
+    self.createWidgetsSource( 1460, 860 )
+    self.createWidgetsFrameControl( 740, 800 )
+    self.createWidgetsMisc( 1460, 900 )
+
+  def createWidgetsData( self, left: int, top: int ):
+
     # lblDataAction
     self.lblDataAction = tk.Label( self.root, text="Data", fg="#000000", font=( "Arial", 12 ), anchor="w" )
-    self.lblDataAction.place( x=1460, y=740, width=100, height=24 )
+    self.lblDataAction.place( x=left, y=top, width=100, height=24 )
 
     # btnDataLoad
     self.btnDataLoad = tk.Button( self.root, text="Load", font=( "Arial", 12 ), command=self.cmdDataLoad )
-    self.btnDataLoad.place( x=1600, y=740, width=60, height=36 )
+    self.btnDataLoad.place( x=left + 140, y=top, width=60, height=36 )
 
     # btnDataSave
     self.btnDataSave = tk.Button( self.root, text="Save", font=( "Arial", 12 ), command=self.cmdDataSave, state=tk.DISABLED )
-    self.btnDataSave.place( x=1660, y=740, width=60, height=36 )
+    self.btnDataSave.place( x=left + 200, y=top, width=60, height=36 )
 
+  def createWidgetsDetection( self, left: int, top: int ):
     # lblDetectAction
     self.lblDetectAction = tk.Label( self.root, text="Detection", fg="#000000", font=( "Arial", 12 ), anchor="w" )
-    self.lblDetectAction.place( x=1460, y=780, width=100, height=24 )
+    self.lblDetectAction.place( x=left, y=top, width=100, height=24 )
 
     # btnRunYoloDetection
     self.btnYoloOneFrame = tk.Button( self.root, text="Frame", font=( "Arial", 12 ), command=self.cmdYoloOneFrame, state=tk.DISABLED )
-    self.btnYoloOneFrame.place( x=1600, y=780, width=60, height=36 )
+    self.btnYoloOneFrame.place( x=left + 140, y=top, width=60, height=36 )
 
     # btnRunYoloVidDetection
     self.btnYoloRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdYoloRange, state=tk.DISABLED )
-    self.btnYoloRange.place( x=1660, y=780, width=60, height=36 )
+    self.btnYoloRange.place( x=left + 200, y=top, width=60, height=36 )
 
+  def createWidgetsTrack( self, left: int, top: int ):
+    # lblDetectAction
+    self.lblTrackAction = tk.Label( self.root, text="Tracking", fg="#000000", font=( "Arial", 12 ), anchor="w" )
+    self.lblTrackAction.place( x=left, y=top, width=100, height=24 )
+
+    # btnRunYoloVidDetection
+    self.btnTrackRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdYoloRange, state=tk.DISABLED )
+    self.btnTrackRange.place( x=left + 140, y=top, width=60, height=36 )
+
+  def createWidgetsSource( self, left: int, top: int ):
     # lblDetectAction
     self.lblSourceAction = tk.Label( self.root, text="Source", fg="#000000", font=( "Arial", 12 ), anchor="w" )
-    self.lblSourceAction.place( x=1460, y=820, width=100, height=24 )
+    self.lblSourceAction.place( x=left, y=top, width=100, height=24 )
 
     # btnLoadVideo
     self.btnSourceVideo = tk.Button( self.root, text="Video", font=( "Arial", 12 ), command=self.cmdSourceVideo )
-    self.btnSourceVideo.place( x=1660, y=820, width=60, height=36 )
+    self.btnSourceVideo.place( x=left + 140, y=top, width=60, height=36 )
 
+  def createWidgetsFrameControl( self, left: int, top: int ):
     # sliderVideoFrame
-    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=1650, y=900, width=200, height=24 )
+    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 190, y=top, width=200, height=24 )
 
     # lblVideoFrameSlider
     self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 12 ), anchor="center" )
-    self.lblVideoFrameSlider.place( x=1460, y=900, width=100, height=24 )
+    self.lblVideoFrameSlider.place( x=left, y=top, width=100, height=24 )
+
+    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 50, width=200, height=24, offset=190, label="Start" )
+    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 75, width=200, height=24, offset=190, label="Finish", initValue=100 )
+
+  def createWidgetsMisc( self, left: int, top: int ):
 
     self.radarMapController = RadarCanvas(
         self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg, self.appState.pitch, self.on_radar_click, self.on_radar_hover
@@ -127,11 +153,8 @@ class App:
     self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
-    self.prgDetection = ProgressBarETA( root=self.root, x=1350, y=50, width=24, height=720 )
-    self.prgHomography = ProgressBarETA( root=self.root, x=1375, y=50, width=24, height=720 )
-
-    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=940, width=200, height=24, offset=190, label="Start" )
-    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=1650, y=965, width=200, height=24, offset=190, label="Finish", initValue=100 )
+    self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=50, width=24, height=720 )
+    self.prgHomography = ProgressBarETA( root=self.root, x=left - 100, y=50, width=24, height=720 )
 
   # ==========================================
   # Event Handlers - Implement your logic here
@@ -214,7 +237,7 @@ class App:
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
       self.prgHomography.setRange( 0, 0 )
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
-      self.tracking.in_queue.put( Command( CommandType.RUN_FRAMES, minFrame, maxFrame ) )
+      self.tracking.in_queue.put( Command( CommandType.RUN_BBOX, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
       self.prgDetection.start()
       self.root.after( 100, self.pollForUI )
@@ -231,16 +254,18 @@ class App:
       data = None
 
     if data is not None:
-      if data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, RawTrackData ):
-        if data.data.tid not in self.appState.tracks:
-          self.appState.tracks[ data.data.tid ] = Track( data.data.tid )
-        self.appState.tracks[ data.data.tid ].boxes.append( data.data.data )
+      if data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, BoundingBox ):
+        bbox = data.data
+        if bbox.frame not in self.appState.boxes:
+          self.appState.boxes[ bbox.frame ] = []
+        self.appState.boxes[ bbox.frame ].append( bbox )
       elif data.type == OutputType.NEW_FRAME:
         self.prgDetection.tick()
         self.appState.framesProcessed += 1
         if self.appState.framesProcessed % CHUNK_SIZE == 0:
           # Write out the saved data
           self.chunkIt()
+          logger.info( f"Writing chunk {self.appState.chunk}" )
           self.appState.chunk += 1
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()

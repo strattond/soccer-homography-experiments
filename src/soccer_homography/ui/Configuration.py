@@ -220,7 +220,7 @@ class Configuration:
     self.root = ttk.Frame( master=self.parent, width=1280, height=240, borderwidth=5, relief='groove' )
     self.root.place( x=50, y=720 + 56 )
 
-    self.nbControl = ttk.Notebook( self.root, width=1280, height=240 )
+    self.nbControl = ttk.Notebook( self.root, width=640, height=240 )
     self.tabImagePreview = ImagePreview( self.createTab( "Image Preview" ) )
     self.tabHomographyData = HomographyData( self.appState, self.createTab( "Homography Data" ) )
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )

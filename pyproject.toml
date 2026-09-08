@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "boxmot>=16.0.9",
+    "boxmot>=23.0.0",
     "duckdb>=1.5.5",
     "numpy>=2.4,<2.7",
     "nvidia-modelopt[all]>=0.45",

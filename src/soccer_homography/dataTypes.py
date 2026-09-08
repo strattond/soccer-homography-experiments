@@ -172,14 +172,15 @@ class Person:
 
 
 @dataclass
-class TrackData:
+class BoundingBox:
   # yapf: disable
-  x1:    int
-  y1:    int
-  x2:    int
-  y2:    int
-  conf:  float
-  index: int
+  x1:        int
+  y1:        int
+  x2:        int
+  y2:        int
+  conf:      float
+  cls:       int
+  frame:     int
   # yapf: enable
 
   def to_dict( self ):
@@ -187,15 +188,15 @@ class TrackData:
 
 
 @dataclass
-class RawTrackData:
+class TrackData:
   # yapf: disable
   tid:   int
-  data:  TrackData
+  data:  BoundingBox
   # yapf: enable
 
-  def __init__( self, tid: int, x1: int, y1: int, x2: int, y2: int, conf: float, index: int ) -> None:
+  def __init__( self, tid: int, x1: int, y1: int, x2: int, y2: int, conf: float, cls: int, frame: int ) -> None:
     self.tid = tid
-    self.data = TrackData( x1, y1, x2, y2, conf, index )
+    self.data = BoundingBox( x1, y1, x2, y2, conf, cls, frame )
 
 
 @dataclass
@@ -203,16 +204,16 @@ class Track:
   # yapf: disable
   id:            int
   person:        Person | int | None = None
-  boxes:         list[TrackData]     = field( default_factory=list )
+  boxes:         list[BoundingBox]     = field( default_factory=list )
   homog:         list[Point2D]       = field( default_factory=list )
   homog_smooth:  list[Point2D]       = field( default_factory=list )
   smooth_pos:    np.ndarray | None   = None
   # yapf: enable
 
   def forExport( self, lo: int, hi: int ):
-    nBoxes: list[ TrackData ] = []
+    nBoxes: list[ BoundingBox ] = []
     for box in self.boxes:
-      if box.index >= lo and box.index < hi:
+      if box.frame >= lo and box.frame < hi:
         nBoxes.append( box )
 
     return Track( self.id, self.person, nBoxes )
@@ -228,21 +229,21 @@ class Track:
   def to_dict( self ):
     return { "id": self.id, "person": self.numId(), "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
 
-  def getByIndex( self, index: int ) -> TrackData | None:
+  def getByIndex( self, index: int ) -> BoundingBox | None:
     for box in self.boxes:
-      if box.index == index:
+      if box.frame == index:
         return box
     return None
 
   def getListIndex( self, index: int ) -> int | None:
     for ( i, box ) in enumerate( self.boxes ):
-      if box.index == index:
+      if box.frame == index:
         return i
     return None
 
   def clearFrame( self, index: int ) -> None:
     for box in self.boxes:
-      if box.index == index:
+      if box.frame == index:
         self.boxes.remove( box )
         return
 

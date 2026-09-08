@@ -1,3 +1,39 @@
 from .io import writeBatch
+from .persist import (
+  Camera,
+  Clip,
+  Match,
+  Video,
+  getCameraByID,
+  getClip,
+  getClipByID,
+  getConn,
+  getMatchByID,
+  getVideoByID,
+  initDB,
+  listClips,
+  saveClip,
+  upsertCamera,
+  upsertMatch,
+  upsertVideo,
+)
 
-__all__ = [ "writeBatch" ]
+__all__ = [
+  "Camera",
+  "Clip",
+  "Match",
+  "Video",
+  "getCameraByID",
+  "getClip",
+  "getClipByID",
+  "getConn",
+  "getMatchByID",
+  "getVideoByID",
+  "initDB",
+  "listClips",
+  "saveClip",
+  "upsertCamera",
+  "upsertMatch",
+  "upsertVideo",
+  "writeBatch",
+]

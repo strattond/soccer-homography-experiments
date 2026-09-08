@@ -36,7 +36,7 @@ class DetectionAdapter:
   def from_yolo( self, result ):
     boxes = result.cpu().boxes
 
-    self.trackID = boxes.id.numpy().astype( int ) if hasattr( boxes, 'id' ) else np.full( len( boxes.xyxy ), -1, dtype=np.int32 )
+    self.trackID = boxes.id.numpy().astype( int ) if ( hasattr( boxes, 'id' ) and boxes.id is not None ) else np.full( len( boxes.xyxy ), -1, dtype=np.int32 )
     self.xyxy = boxes.xyxy.numpy()
     self.class_id = boxes.cls.numpy().astype( int )
     self.confidence = boxes.conf.numpy()
