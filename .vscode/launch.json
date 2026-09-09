@@ -24,7 +24,8 @@
             "type": "debugpy",
             "request": "launch",
             "module": "soccer_homography",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

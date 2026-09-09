@@ -21,6 +21,7 @@ PLAYER_CLASS_ID = 0
 
 class CommandType( Enum ):
   RUN_BBOX = auto()
+  FEED_BBOX = auto()
   RUN_TRACK = auto()
   PAUSE = auto()
   RESUME = auto()
@@ -30,6 +31,7 @@ class CommandType( Enum ):
 
 class OutputType( Enum ):
   BBOX = auto()
+  TRACK = auto()
   NEW_FRAME = auto()
   COMPLETED = auto()
 
@@ -39,6 +41,7 @@ class Command:
   type: CommandType
   start: int | None = None
   end: int | None = None
+  payload: Any = None
 
 
 @dataclass
@@ -55,21 +58,23 @@ class SportsTracker:
   # yapf: disable
   mdlOpts:          ModelOptions
   videoFile:        str
-  range:            tuple[int, int]          = field( default_factory=tuple[int, int] )
-  index:            int                      = 0
-  model:            YOLO                     = field( init=False )
-  tracker:          Any                      = field( init=False )
-  data:             Homography               = field( init=False )
-  cap:              cv2.VideoCapture         = field( init=False )
+  range:            tuple[int, int]              = field( default_factory=tuple[int, int] )
+  index:            int                          = 0
+  model:            YOLO                         = field( init=False )
+  tracker:          ByteTrack                    = field( init=False )
+  data:             Homography                   = field( init=False )
+  cap:              cv2.VideoCapture             = field( init=False )
 
   # Threading + communication
-  in_queue:         queue.Queue              = field(default_factory=queue.Queue)
-  out_queue:        queue.Queue              = field(default_factory=queue.Queue)
-  paused:           bool                     = True
-  stopped:          bool                     = False
-  thread:           threading.Thread         = field(init=False)
+  in_queue:         queue.Queue                  = field(default_factory=queue.Queue)
+  out_queue:        queue.Queue                  = field(default_factory=queue.Queue)
+  paused:           bool                         = True
+  stopped:          bool                         = False
+  thread:           threading.Thread             = field(init=False)
 
-  curMode:          CommandType              = CommandType.PAUSE
+  # Operational data
+  curMode:          CommandType                  = CommandType.PAUSE
+  inBoxes:          dict[int, list[BoundingBox]] = field( default_factory=dict )
   # yapf: enable
 
   def __post_init__( self ) -> None:
@@ -94,6 +99,9 @@ class SportsTracker:
     self.paused = False
     self.stopped = True
 
+  def setImagePos( self, pos: int ):
+    self.cap.set( cv2.CAP_PROP_POS_FRAMES, pos )
+
   def processCommands( self ):
     try:
       while True:
@@ -108,7 +116,7 @@ class SportsTracker:
           self.stop()
         elif cmd.type == CommandType.SEEK:
           if cmd.start is not None:
-            self.cap.set( cv2.CAP_PROP_POS_FRAMES, cmd.start )
+            self.setImagePos( cmd.start )
 
         elif cmd.type == CommandType.RUN_BBOX and cmd.start is not None and cmd.end is not None:
           if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
@@ -118,16 +126,19 @@ class SportsTracker:
           modelName = "yolo26" + self.mdlOpts.size + "." + self.mdlOpts.engine
           self.model = YOLO( modelName, verbose=False, task='detect' )
           self.curMode = CommandType.RUN_BBOX
+          self.setImagePos( cmd.start )
+
+        elif cmd.type == CommandType.FEED_BBOX and cmd.payload is not None:
+          self.inBoxes = cmd.payload
 
         elif cmd.type == CommandType.RUN_TRACK and cmd.start is not None and cmd.end is not None:
           if cmd.end >= int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ):
             cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
           self.range = ( cmd.start, cmd.end )
           self.index = cmd.start
-          #modelName = "yolo26" + self.mdlOpts.size + "." + self.mdlOpts.engine
-          #self.model = YOLO( modelName, verbose=False, task='detect' )
           self.tracker = ByteTrack()
           self.curMode = CommandType.RUN_TRACK
+          self.setImagePos( cmd.start )
 
     except queue.Empty:
       pass
@@ -153,14 +164,20 @@ class SportsTracker:
         self.out_queue.put( Output( type=OutputType.BBOX, data=BoundingBox( x1, y1, x2, y2, conf, cid, self.index ) ) )
 
       self.index += 1
-      if self.index > self.range[ 1 ]:
-        logger.info( "Processing complete!" )
-        self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index - 1 ) )
-        self.out_queue.put( Output( type=OutputType.COMPLETED ) )
-        self.stop()
+      self.checkCompletion()
+
+  def checkCompletion( self ):
+    if self.index > self.range[ 1 ]:
+      logger.info( "Processing complete!" )
+      self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index - 1 ) )
+      self.out_queue.put( Output( type=OutputType.COMPLETED ) )
+      self.stop()
 
   def run( self ):
 
+    # Prebind these to make Python ignore it
+    ret = True
+    frame = None
     while not self.stopped:
       self.processCommands()
       while self.paused and not self.stopped:
@@ -171,20 +188,41 @@ class SportsTracker:
       if self.stopped:
         break
 
-      ret, frame = self.cap.read()
-      if not ret:
-        logger.error( f"Failed reading cap {ret}" )
-        self.stop()
+      if self.curMode == CommandType.RUN_BBOX or self.curMode == CommandType.RUN_TRACK:
+        ret, frame = self.cap.read()
+        if not ret:
+          logger.error( f"Failed reading cap {ret}" )
+          self.stop()
+          continue
+
+      # Do nothing without a valid frame
+      if frame is None:
         continue
 
-      #  Predicting
-      results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
-      #results = self.model.track( source=[ frame ], verbose=False, tracker='track_custom.yaml', persist=True, imgsz=self.mdlOpts.imgSz, stream=True )
-      self.processResults( results )
+      if self.curMode == CommandType.RUN_BBOX:
+        #  Predicting
+        results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
+        self.processResults( results )
+      elif self.curMode == CommandType.RUN_TRACK:
+        currDets = self.inBoxes.get( self.index, [] )
+        if currDets:
+          dets = np.array( [ d.to_boxmot() for d in currDets ] )
+        else:
+          dets = np.empty( ( 0, 6 ) )
+        tracks = self.tracker.update( dets, img=frame )
+        self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
+        for track in tracks:
+          x1, y1, x2, y2, track_id, score, cls, frame_id = track
+
+          bbox = BoundingBox( x1, y1, x2, y2, score, cls, self.index )
+          self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( tid=track_id, data=bbox ) ) )
+
+        self.index += 1
+        self.checkCompletion()
 
     print( "Quitting thread" )
-    if hasattr( self.model, "predictor" ) and self.model.predictor is not None and hasattr( self.model.predictor, "trackers" ):
-      print( "Tracker reset!" )
-      for tracker in self.model.predictor.trackers:
-        tracker.reset()
+    #if hasattr( self.model, "predictor" ) and self.model.predictol0r is not None and hasattr( self.model.predictor, "trackers" ):
+    #  print( "Tracker reset!" )
+    #  for tracker in self.model.predictor.trackers:
+    #    tracker.reset()
     self.cap.release()

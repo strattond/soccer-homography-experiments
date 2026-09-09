@@ -121,7 +121,7 @@ class App:
     self.lblTrackAction.place( x=left, y=top, width=100, height=24 )
 
     # btnRunYoloVidDetection
-    self.btnTrackRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdYoloRange, state=tk.DISABLED )
+    self.btnTrackRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdTrackRange, state=tk.DISABLED )
     self.btnTrackRange.place( x=left + 140, y=top, width=60, height=36 )
 
   def createWidgetsSource( self, left: int, top: int ):
@@ -215,8 +215,10 @@ class App:
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
     homoable = self.hasHomography() and len( self.appState.tracks.items() ) > 0
+    trackable = len( self.appState.boxes.items() ) > 0
     self.btnYoloOneFrame.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
+    self.btnTrackRange.config( state=tk.NORMAL if trackable else tk.DISABLED )
     self.uiHomography.setEnableStatus( self.hasHomography(), homoable )
     self.btnDataSave.config( state=tk.NORMAL if homoable else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
@@ -230,6 +232,24 @@ class App:
     self.allocateModelTracking()
     if self.tracking is not None:
       # Step 2 - do it
+      # But clear out existing bounding data...
+      for f in range( minFrame, maxFrame ):
+        if f in self.appState.boxes:
+          del self.appState.boxes[ f ]
+      logger.info( f"Identifying frames {minFrame} to {maxFrame}" )
+      self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
+      self.prgHomography.setRange( 0, 0 )
+      self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
+      self.tracking.in_queue.put( Command( CommandType.RUN_BBOX, minFrame, maxFrame ) )
+      self.tracking.in_queue.put( Command( CommandType.RESUME ) )
+      self.prgDetection.start()
+      self.root.after( 100, self.pollForUI )
+
+  def runTracking( self, minFrame, maxFrame ):
+    # Step 1 - load the model
+    self.allocateModelTracking()
+    if self.tracking is not None:
+      # Step 2 - do it
       # But clear out existing homography data...
       for value in self.appState.tracks.values():
         value.clearHomography()
@@ -237,7 +257,9 @@ class App:
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
       self.prgHomography.setRange( 0, 0 )
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
-      self.tracking.in_queue.put( Command( CommandType.RUN_BBOX, minFrame, maxFrame ) )
+      sliced = dict[ int, list[ BoundingBox ] ]( ( k, v ) for k, v in self.appState.boxes.items() if minFrame <= k <= maxFrame )
+      self.tracking.in_queue.put( Command( CommandType.FEED_BBOX, payload=sliced ) )
+      self.tracking.in_queue.put( Command( CommandType.RUN_TRACK, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
       self.prgDetection.start()
       self.root.after( 100, self.pollForUI )
@@ -259,10 +281,15 @@ class App:
         if bbox.frame not in self.appState.boxes:
           self.appState.boxes[ bbox.frame ] = []
         self.appState.boxes[ bbox.frame ].append( bbox )
+      if data.type == OutputType.TRACK and data.data is not None and isinstance( data.data, TrackData ):
+        track = data.data
+        if track.tid not in self.appState.tracks:
+          self.appState.tracks[ track.tid ] = Track( track.tid )
+        self.appState.tracks[ track.tid ].boxes.append( track.data )
       elif data.type == OutputType.NEW_FRAME:
         self.prgDetection.tick()
         self.appState.framesProcessed += 1
-        if self.appState.framesProcessed % CHUNK_SIZE == 0:
+        if self.tracking is not None and self.tracking.curMode == CommandType.RUN_BBOX and self.appState.framesProcessed % CHUNK_SIZE == 0:
           # Write out the saved data
           self.chunkIt()
           logger.info( f"Writing chunk {self.appState.chunk}" )
@@ -270,7 +297,7 @@ class App:
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
-        self.mainImageController.updateBoundingBoxes( self.appState.tracks, self.mainImageController.frame_num )
+        self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
         self.checkButtonState()
         self.tabData.tabTracks.refresh()
@@ -280,6 +307,9 @@ class App:
 
   def cmdYoloRange( self ):
     self.runYolo( self.minFrame.get(), self.maxFrame.get() )
+
+  def cmdTrackRange( self ):
+    self.runTracking( self.minFrame.get(), self.maxFrame.get() )
 
   def chunkIt( self ):
     loTrack = self.appState.chunk * CHUNK_SIZE

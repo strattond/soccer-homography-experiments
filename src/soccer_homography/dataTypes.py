@@ -186,6 +186,9 @@ class BoundingBox:
   def to_dict( self ):
     return asdict( self )
 
+  def to_boxmot( self ):
+    return [ self.x1, self.y1, self.x2, self.y2, self.conf, self.cls ]
+
 
 @dataclass
 class TrackData:
@@ -193,10 +196,6 @@ class TrackData:
   tid:   int
   data:  BoundingBox
   # yapf: enable
-
-  def __init__( self, tid: int, x1: int, y1: int, x2: int, y2: int, conf: float, cls: int, frame: int ) -> None:
-    self.tid = tid
-    self.data = BoundingBox( x1, y1, x2, y2, conf, cls, frame )
 
 
 @dataclass
