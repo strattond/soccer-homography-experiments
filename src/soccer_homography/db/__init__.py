@@ -1,7 +1,7 @@
 from .io import writeBatchDetections, writeBatchTracking
 from .persist import (
   Camera,
-  Clip,
+  ClipDB,
   Match,
   Video,
   getCameraByID,
@@ -12,7 +12,7 @@ from .persist import (
   getVideoByID,
   initDB,
   listClips,
-  saveClip,
+  upsertClip,
   upsertCamera,
   upsertMatch,
   upsertVideo,
@@ -20,7 +20,7 @@ from .persist import (
 
 __all__ = [
   "Camera",
-  "Clip",
+  "ClipDB",
   "Match",
   "Video",
   "getCameraByID",
@@ -31,7 +31,7 @@ __all__ = [
   "getVideoByID",
   "initDB",
   "listClips",
-  "saveClip",
+  "upsertClip",
   "upsertCamera",
   "upsertMatch",
   "upsertVideo",

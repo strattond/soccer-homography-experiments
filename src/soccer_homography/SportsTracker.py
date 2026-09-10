@@ -7,7 +7,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from boxmot.trackers.bbox import ByteTrack
+from boxmot.trackers.bbox import ByteTrack, OccluBoost
 from ultralytics import YOLO
 
 from soccer_homography.appState import ModelOptions
@@ -23,6 +23,7 @@ class CommandType( Enum ):
   RUN_BBOX = auto()
   FEED_BBOX = auto()
   RUN_TRACK = auto()
+  SET_CLIP_ID = auto()
   PAUSE = auto()
   RESUME = auto()
   STOP = auto()
@@ -61,7 +62,7 @@ class SportsTracker:
   range:            tuple[int, int]              = field( default_factory=tuple[int, int] )
   index:            int                          = 0
   model:            YOLO                         = field( init=False )
-  tracker:          ByteTrack                    = field( init=False )
+  tracker:          ByteTrack | OccluBoost       = field( init=False )
   data:             Homography                   = field( init=False )
   cap:              cv2.VideoCapture             = field( init=False )
 
@@ -75,6 +76,7 @@ class SportsTracker:
   # Operational data
   curMode:          CommandType                  = CommandType.PAUSE
   inBoxes:          dict[int, list[BoundingBox]] = field( default_factory=dict )
+  curClipID:        int                          = -1
   # yapf: enable
 
   def __post_init__( self ) -> None:
@@ -136,9 +138,13 @@ class SportsTracker:
             cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
           self.range = ( cmd.start, cmd.end )
           self.index = cmd.start
-          self.tracker = ByteTrack( frame_rate=int( self.cap.get( cv2.CAP_PROP_FPS ) ) )
+          #self.tracker = ByteTrack( frame_rate=int( self.cap.get( cv2.CAP_PROP_FPS ) ) )
+          self.tracker = OccluBoost( frame_rate=int( self.cap.get( cv2.CAP_PROP_FPS ) ) )
           self.curMode = CommandType.RUN_TRACK
           self.setImagePos( cmd.start )
+
+        elif cmd.type == CommandType.SET_CLIP_ID and cmd.payload is not None:
+          self.curClipID = cmd.payload
 
     except queue.Empty:
       pass
@@ -221,11 +227,13 @@ class SportsTracker:
       dets = np.empty( ( 0, 6 ) )
     tracks = self.tracker.update( dets, img=frame )
     self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
+
+    # If we're in the tracks list, then we're active to some degree.  But we could still be predicted.
     for track in tracks:
       x1, y1, x2, y2, track_id, score, cls, _ = track
 
       bbox = BoundingBox( x1, y1, x2, y2, score, cls, self.index )
-      self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( tid=int( track_id ), data=bbox ) ) )
+      self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( self.curClipID, tid=int( track_id ), data=bbox ) ) )
 
     self.index += 1
     self.checkCompletion()

@@ -166,8 +166,6 @@ class Person:
   # yapf: disable
   id:     int       = 0
   name:   str       = ""
-  pType:  int       = 0     # 0 - home, 1 - away, 2 - official
-  tracks: list[int] = field( default_factory=list )
   # yapf: enable
 
 
@@ -193,14 +191,16 @@ class BoundingBox:
 @dataclass
 class TrackData:
   # yapf: disable
-  tid:   int
-  data:  BoundingBox
+  clip:      int
+  tid:       int
+  data:      BoundingBox
   # yapf: enable
 
 
 @dataclass
 class Track:
   # yapf: disable
+  clip:          int
   id:            int
   person:        Person | int | None = None
   boxes:         list[BoundingBox]     = field( default_factory=list )
@@ -210,12 +210,9 @@ class Track:
   # yapf: enable
 
   def forExport( self, lo: int, hi: int ):
-    nBoxes: list[ BoundingBox ] = []
-    for box in self.boxes:
-      if box.frame >= lo and box.frame < hi:
-        nBoxes.append( box )
+    nBoxes = [ box for box in self.boxes if box.frame >= lo and box.frame < hi ]
 
-    return Track( self.id, self.person, nBoxes )
+    return Track( self.clip, self.id, self.person, nBoxes )
 
   def numId( self ) -> int | None:
     actId = None
@@ -229,16 +226,10 @@ class Track:
     return { "id": self.id, "person": self.numId(), "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
 
   def getByIndex( self, index: int ) -> BoundingBox | None:
-    for box in self.boxes:
-      if box.frame == index:
-        return box
-    return None
+    return next( ( box for box in self.boxes if box.frame == index ), None )
 
   def getListIndex( self, index: int ) -> int | None:
-    for ( i, box ) in enumerate( self.boxes ):
-      if box.frame == index:
-        return i
-    return None
+    return next( ( i for i, box in enumerate( self.boxes ) if box.frame == index ), None )
 
   def clearFrame( self, index: int ) -> None:
     for box in self.boxes:

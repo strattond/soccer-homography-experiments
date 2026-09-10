@@ -240,6 +240,7 @@ class App:
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
       self.prgHomography.setRange( 0, 0 )
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
+      self.tracking.in_queue.put( Command( CommandType.SET_CLIP_ID, payload=self.appState.curClipID ) )
       self.tracking.in_queue.put( Command( CommandType.RUN_BBOX, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
       self.prgDetection.start()
@@ -258,6 +259,7 @@ class App:
       self.prgHomography.setRange( 0, 0 )
       self.tracking.in_queue.put( Command( CommandType.PAUSE ) )
       sliced = dict[ int, list[ BoundingBox ] ]( ( k, v ) for k, v in self.appState.boxes.items() if minFrame <= k <= maxFrame )
+      self.tracking.in_queue.put( Command( CommandType.SET_CLIP_ID, payload=self.appState.curClipID ) )
       self.tracking.in_queue.put( Command( CommandType.FEED_BBOX, payload=sliced ) )
       self.tracking.in_queue.put( Command( CommandType.RUN_TRACK, minFrame, maxFrame ) )
       self.tracking.in_queue.put( Command( CommandType.RESUME ) )
@@ -284,7 +286,7 @@ class App:
       if data.type == OutputType.TRACK and data.data is not None and isinstance( data.data, TrackData ):
         track = data.data
         if track.tid not in self.appState.tracks:
-          self.appState.tracks[ track.tid ] = Track( track.tid )
+          self.appState.tracks[ track.tid ] = Track( track.clip, track.tid )
         self.appState.tracks[ track.tid ].boxes.append( track.data )
       elif data.type == OutputType.NEW_FRAME:
         self.prgDetection.tick()
@@ -294,6 +296,11 @@ class App:
           self.chunkDetections()
           logger.info( f"Writing chunk {self.appState.detectChunk}" )
           self.appState.detectChunk += 1
+        elif self.tracking is not None and self.tracking.curMode == CommandType.RUN_TRACK and self.appState.framesProcessed % CHUNK_SIZE == 0:
+          # Write out the saved data
+          self.chunkTracking()
+          logger.info( f"Writing chunk {self.appState.trackChunk}" )
+          self.appState.trackChunk += 1
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
@@ -315,24 +322,19 @@ class App:
   def chunkDetections( self ):
     loTrack = self.appState.detectChunk * CHUNK_SIZE
     hiTrack = ( self.appState.detectChunk + 1 ) * CHUNK_SIZE
-    export: list[ Track ] = []
-    for value in self.appState.tracks.values():
-      toAdd = value.forExport( loTrack, hiTrack )
-      if len( toAdd.boxes ) > 0:
-        export.append( toAdd )
-
+    export = { k: boxes for k, boxes in self.appState.boxes.items() if loTrack <= k < hiTrack }
     writeBatchDetections( 1, self.appState.detectChunk, export )
 
   def chunkTracking( self ):
-    loTrack = self.appState.detectChunk * CHUNK_SIZE
-    hiTrack = ( self.appState.detectChunk + 1 ) * CHUNK_SIZE
+    loTrack = self.appState.trackChunk * CHUNK_SIZE
+    hiTrack = ( self.appState.trackChunk + 1 ) * CHUNK_SIZE
     export: list[ Track ] = []
     for value in self.appState.tracks.values():
       toAdd = value.forExport( loTrack, hiTrack )
       if len( toAdd.boxes ) > 0:
         export.append( toAdd )
 
-    writeBatchTracking( 1, self.appState.detectChunk, export )
+    writeBatchTracking( 1, self.appState.trackChunk, export )
 
   def allocateModelTracking( self ):
     if self.tracking is not None and self.tracking.thread is not None and self.tracking.thread.is_alive():

@@ -26,36 +26,21 @@ BBOX_SCHEMA = pa.schema( [
 # yapf: enable
 
 TRACK_SCHEMA = pa.schema( [
-    ( "frame", pa.int32() ),
-    ( "track", pa.int32() ),
-
+    # Identifiers
+    ( "clip", pa.int32() ), ( "frame", pa.int32() ), ( "track", pa.int32() ),
     # Smoothed bounding box (Kalman-filtered)
-    ( "x1", pa.float32() ),
-    ( "y1", pa.float32() ),
-    ( "x2", pa.float32() ),
-    ( "y2", pa.float32() ),
+    ( "x1", pa.float32() ), ( "y1", pa.float32() ), ( "x2", pa.float32() ), ( "y2", pa.float32() ),
+    # Class and confidence
+    ( "cls", pa.int32() ), ( "confidence", pa.float32() )
+] )
 
-    # Predicted bounding box (when detection missing)
-    ( "pred_x1", pa.float32() ),
-    ( "pred_y1", pa.float32() ),
-    ( "pred_x2", pa.float32() ),
-    ( "pred_y2", pa.float32() ),
-
-    # Lifecycle
-    ( "is_confirmed", pa.bool_() ),
-    ( "is_tentative", pa.bool_() ),
-    ( "is_deleted", pa.bool_() ),
-
-    # Age + time since update
-    ( "age", pa.int32() ),
-    ( "time_since_update", pa.int32() ),
-
-    # Trajectory history (store as list of float tuples)
-    ( "history", pa.list_( pa.list_( pa.float32() ) ) ),
+TRACK_ASSOC_SCHEMA = pa.schema( [
+    # Identifiers
+    ( "clip", pa.int32() ), ( "track", pa.int32() ), ( "person", pa.int32() )
 ] )
 
 
-def dictToArrow( records: list[ Track ] ) -> pa.Table:
+def tracksToArrow( records: list[ Track ] ) -> pa.Table:
   flat = []
   for r in records:
     for t in r.boxes:
@@ -63,6 +48,25 @@ def dictToArrow( records: list[ Track ] ) -> pa.Table:
           "clip": 1,
           "frame": t.frame,
           "track": r.id,
+          "x1": float( t.x1 ),
+          "y1": float( t.y1 ),
+          "x2": float( t.x2 ),
+          "y2": float( t.y2 ),
+          "cls": int( t.cls ),
+          "confidence": float( t.conf )
+      } )
+
+  return pa.Table.from_pylist( flat, schema=TRACK_SCHEMA )
+
+
+def boxesToArrow( records: dict[ int, list[ BoundingBox ] ] ) -> pa.Table:
+  flat = []
+  for k, v in records.items():
+    for t in v:
+      flat.append( {
+          "clip": 1,
+          "frame": t.frame,
+          "track": k,
           "x1": float( t.x1 ),
           "y1": float( t.y1 ),
           "x2": float( t.x2 ),
@@ -79,13 +83,13 @@ def fileFromClipChunk( clipID: int, chunkID: int, type: str ) -> str:
 
 
 def writeBatchDetections( clipID: int, chunkID: int, records: dict[ int, list[ BoundingBox ] ] ):
-  table = dictToArrow( records )
+  table = boxesToArrow( records )
   path = fileFromClipChunk( clipID, chunkID, "detections" )
   pq.write_table( table, path, compression="zstd" )
 
 
 def writeBatchTracking( clipID: int, chunkID: int, records: list[ Track ] ):
-  table = dictToArrow( records )
+  table = tracksToArrow( records )
   path = fileFromClipChunk( clipID, chunkID, "tracking" )
   pq.write_table( table, path, compression="zstd" )
 
@@ -115,7 +119,7 @@ def readBatch( clipID: int ) -> list[ Track ]:
     tid = row[ 'track' ]
 
     if tid not in tracks:
-      tracks[ tid ] = Track( tid, None, [] )
+      tracks[ tid ] = Track( clipID, tid, None, [] )
       # At this point, we need to do a person lookup ...
 
     tracks[ tid ].boxes.append( BoundingBox( row[ 'x1' ], row[ 'y1' ], row[ 'x2' ], row[ 'y2' ], row[ 'confidence' ], row[ 'frame' ], row[ 'det_class' ] ) )

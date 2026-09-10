@@ -6,6 +6,7 @@ from pathlib import Path
 import duckdb
 
 
+# Database representations
 @dataclass( slots=True )
 class Video:
   id: int
@@ -28,7 +29,7 @@ class Camera:
 
 
 @dataclass( slots=True )
-class Clip:
+class ClipDB:
   id: int
   video_id: int
   match_id: int
@@ -36,11 +37,37 @@ class Clip:
   sequence: int
 
 
-def nextPK( conn: duckdb.DuckDBPyConnection, table_name: str ) -> int:
-  row = conn.execute( f"SELECT COALESCE(MAX(id), 0) + 1 FROM {table_name}" ).fetchone()
-  if row is None:
-    raise ValueError( f"Unable to determine next primary key for table {table_name}" )
-  return int( row[ 0 ] )
+@dataclass( slots=True )
+class Person:
+  id: int
+  first_name: str
+  last_name: str
+
+
+@dataclass( slots=True )
+class PersonParticipationDB:
+  match_id: int
+  person_id: int
+  shirt_number: int
+  role: str  # Must be 'home', 'away', or 'referee'
+
+
+# More business representations
+@dataclass( slots=True )
+class Clip:
+  id: int
+  video_id: Video
+  match_id: Match
+  camera_id: Camera
+  sequence: int
+
+
+@dataclass( slots=True )
+class PersonParticipation:
+  match_id: Match
+  person_id: Person
+  shirt_number: int
+  role: str  # Must be 'home', 'away', or 'referee'
 
 
 def getConn( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyConnection:
@@ -52,12 +79,12 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
   conn.execute(
       """
     CREATE TABLE IF NOT EXISTS videos (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       file VARCHAR NOT NULL UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS matches (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       date VARCHAR,
       home VARCHAR,
       away VARCHAR,
@@ -65,12 +92,12 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
     );
 
     CREATE TABLE IF NOT EXISTS cameras (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       name VARCHAR NOT NULL UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS clips (
-      id INTEGER PRIMARY KEY,
+      id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
       video_id INTEGER NOT NULL,
       match_id INTEGER NOT NULL,
       camera_id INTEGER NOT NULL,
@@ -80,81 +107,98 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
       FOREIGN KEY(match_id) REFERENCES matches(id),
       FOREIGN KEY(camera_id) REFERENCES cameras(id)
     );
+
+    CREATE TABLE Person (
+      person_id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+      first_name VARCHAR NOT NULL,
+      last_name  VARCHAR NOT NULL
+    );
+
+    CREATE TABLE PersonParticipation (
+      match_id INTEGER NOT NULL,
+      person_id INTEGER NOT NULL,
+      shirt_number INTEGER,
+      role VARCHAR NOT NULL CHECK (role IN ('home', 'away', 'referee')),
+      PRIMARY KEY (match_id, person_id),
+      FOREIGN KEY (match_id) REFERENCES Match(match_id),
+      FOREIGN KEY (person_id) REFERENCES Person(person_id)
+    );
+
   """
   )
   return conn
 
 
+def getLastInsertedID( conn: duckdb.DuckDBPyConnection ) -> int:
+  row = conn.execute( "SELECT last_insert_rowid()" ).fetchone()
+  if row is None:
+    raise ValueError( "Unable to retrieve last inserted ID" )
+  return int( row[ 0 ] )
+
+
 def upsertVideo( conn: duckdb.DuckDBPyConnection, video: Video ) -> Video:
-  if not video.file:
-    raise ValueError( "Video file is required" )
+  existing = None
+  if video.id > 0:
+    existing = conn.execute( "SELECT file FROM videos WHERE id = ?", [ video.id ] ).fetchone()
 
-  existing = conn.execute( "SELECT id FROM videos WHERE file = ?", [ video.file ] ).fetchone()
   if existing is not None:
-    video.id = int( existing[ 0 ] )
-    return video
-
-  video.id = nextPK( conn, "videos" )
-  conn.execute( "INSERT INTO videos(id, file) VALUES (?, ?)", [ video.id, video.file ] )
+    conn.execute( "UPDATE videos SET file = ? WHERE id = ?", [ video.file, video.id ] )
+  else:
+    conn.execute( "INSERT INTO videos(file) VALUES (?)", [ video.file ] )
+    video.id = getLastInsertedID( conn )
   return video
 
 
 def upsertMatch( conn: duckdb.DuckDBPyConnection, match: Match ) -> Match:
-  existing = conn.execute(
-      "SELECT id FROM matches WHERE date = ? AND home = ? AND away = ? AND division = ?",
-      [ match.date, match.home, match.away, match.division ],
-  ).fetchone()
+  existing = None
+  if match.id > 0:
+    existing = conn.execute( "SELECT date, home, away FROM matches WHERE id = ?", [ match.id ] ).fetchone()
   if existing is not None:
-    match.id = int( existing[ 0 ] )
-    return match
-
-  match.id = nextPK( conn, "matches" )
-  conn.execute(
-      "INSERT INTO matches(id, date, home, away, division) VALUES (?, ?, ?, ?, ?)",
-      [ match.id, match.date, match.home, match.away, match.division ],
-  )
+    conn.execute( "UPDATE matches SET date = ?, home = ?, away = ?, division = ? WHERE id = ?", [ match.date, match.home, match.away, match.division, match.id ] )
+  else:
+    conn.execute(
+        "INSERT INTO matches(date, home, away, division) VALUES (?, ?, ?, ?)",
+        [ match.date, match.home, match.away, match.division ],
+    )
+    match.id = getLastInsertedID( conn )
   return match
 
 
 def upsertCamera( conn: duckdb.DuckDBPyConnection, camera: Camera ) -> Camera:
-  if not camera.name:
-    raise ValueError( "Camera name is required" )
-
-  existing = conn.execute( "SELECT id FROM cameras WHERE name = ?", [ camera.name ] ).fetchone()
+  existing = None
+  if camera.id > 0:
+    existing = conn.execute( "SELECT id FROM cameras WHERE id = ?", [ camera.id ] ).fetchone()
   if existing is not None:
-    camera.id = int( existing[ 0 ] )
-    return camera
-
-  camera.id = nextPK( conn, "cameras" )
-  conn.execute( "INSERT INTO cameras(id, name) VALUES (?, ?)", [ camera.id, camera.name ] )
+    conn.execute( "UPDATE cameras SET name = ? WHERE id = ?", [ camera.name, camera.id ] )
+  else:
+    conn.execute( "INSERT INTO cameras(name) VALUES (?)", [ camera.name ] )
+    camera.id = getLastInsertedID( conn )
   return camera
 
 
-def saveClip( conn: duckdb.DuckDBPyConnection, clip: Clip ) -> Clip:
-  if clip.id <= 0:
-    clip.id = nextPK( conn, "clips" )
-
-  existing = conn.execute(
-      "SELECT id FROM clips WHERE video_id = ? AND match_id = ? AND camera_id = ? AND sequence = ?",
-      [ clip.video_id, clip.match_id, clip.camera_id, clip.sequence ],
-  ).fetchone()
+def upsertClip( conn: duckdb.DuckDBPyConnection, clip: ClipDB ) -> ClipDB:
+  existing = None
+  if clip.id > 0:
+    existing = conn.execute(
+        "SELECT id FROM clips WHERE id = ?",
+        [ clip.id ],
+    ).fetchone()
 
   if existing is not None:
-    clip.id = int( existing[ 0 ] )
     conn.execute(
         "UPDATE clips SET video_id = ?, match_id = ?, camera_id = ?, sequence = ? WHERE id = ?",
         [ clip.video_id, clip.match_id, clip.camera_id, clip.sequence, clip.id ],
     )
-    return clip
-
-  conn.execute(
-      "INSERT INTO clips(id, video_id, match_id, camera_id, sequence) VALUES (?, ?, ?, ?, ?)",
-      [ clip.id, clip.video_id, clip.match_id, clip.camera_id, clip.sequence ],
-  )
+  else:
+    conn.execute(
+        "INSERT INTO clips(video_id, match_id, camera_id, sequence) VALUES (?, ?, ?, ?)",
+        [ clip.video_id, clip.match_id, clip.camera_id, clip.sequence ],
+    )
+    clip.id = getLastInsertedID( conn )
   return clip
 
 
-def getClip( conn: duckdb.DuckDBPyConnection, video_id: int, match_id: int, camera_id: int, sequence: int ) -> Clip | None:
+def getClip( conn: duckdb.DuckDBPyConnection, video_id: int, match_id: int, camera_id: int, sequence: int ) -> ClipDB | None:
   row = conn.execute(
       "SELECT id, video_id, match_id, camera_id, sequence FROM clips WHERE video_id = ? AND match_id = ? AND camera_id = ? AND sequence = ?",
       [ video_id, match_id, camera_id, sequence ],
@@ -163,10 +207,10 @@ def getClip( conn: duckdb.DuckDBPyConnection, video_id: int, match_id: int, came
   if row is None:
     return None
 
-  return Clip( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) )
+  return ClipDB( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) )
 
 
-def getClipByID( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> Clip | None:
+def getClipByID( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> ClipDB | None:
   row = conn.execute(
       "SELECT id, video_id, match_id, camera_id, sequence FROM clips WHERE id = ?",
       [ clip_id ],
@@ -175,10 +219,10 @@ def getClipByID( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> Clip | None:
   if row is None:
     return None
 
-  return Clip( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) )
+  return ClipDB( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) )
 
 
-def listClips( conn: duckdb.DuckDBPyConnection, *, video_id: int | None = None, match_id: int | None = None, camera_id: int | None = None ) -> list[ Clip ]:
+def listClips( conn: duckdb.DuckDBPyConnection, *, video_id: int | None = None, match_id: int | None = None, camera_id: int | None = None ) -> list[ ClipDB ]:
   clauses: list[ str ] = []
   params: list[ int ] = []
 
@@ -198,7 +242,7 @@ def listClips( conn: duckdb.DuckDBPyConnection, *, video_id: int | None = None, 
   sql += " ORDER BY video_id, match_id, camera_id, sequence"
 
   rows = conn.execute( sql, params ).fetchall()
-  return [ Clip( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) ) for row in rows ]
+  return [ ClipDB( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) ) for row in rows ]
 
 
 def getVideoByID( conn: duckdb.DuckDBPyConnection, video_id: int ) -> Video | None:
@@ -222,7 +266,7 @@ def getCameraByID( conn: duckdb.DuckDBPyConnection, camera_id: int ) -> Camera |
   return Camera( id=int( row[ 0 ] ), name=str( row[ 1 ] ) )
 
 
-def readTrackingForClip( conn: duckdb.DuckDBPyConnection, parquet_path: str | Path, clip: Clip ) -> duckdb.DuckDBPyRelation:
+def readTrackingForClip( conn: duckdb.DuckDBPyConnection, parquet_path: str | Path, clip: ClipDB ) -> duckdb.DuckDBPyRelation:
   """Read the tracking rows for a clip by joining the compound clip identity to a parquet dataset."""
   result: duckdb.DuckDBPyRelation = conn.sql(
       """
@@ -234,6 +278,6 @@ def readTrackingForClip( conn: duckdb.DuckDBPyConnection, parquet_path: str | Pa
         AND t.sequence = ?
       ORDER BY t.frame
       """,
-      [ str( parquet_path ), clip.video_id, clip.match_id, clip.camera_id, clip.sequence ],
+      params=[ str( parquet_path ), clip.video_id, clip.match_id, clip.camera_id, clip.sequence ],
   )
   return result
