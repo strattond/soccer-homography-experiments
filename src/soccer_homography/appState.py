@@ -29,7 +29,7 @@ class ModelOptions:
   # yapf: disable
   withReID: bool = True
   size:     str  = 'x'
-  imgSz:    int  = 1280
+  imgSz:    tuple[int, int]  = (1280, 1280)
   engine:   str  = 'engine' # or 'pt'
 
   def to_dict(self):
@@ -55,7 +55,8 @@ class AppState:
   boxes:            dict[int, list[BoundingBox]]  = field( default_factory=dict )
   people:           list[Person]                  = field( default_factory=list )
   framesProcessed:  int                           = 0
-  chunk:            int                           = 0
+  detectChunk:      int                           = 0
+  trackChunk:       int                           = 0
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )

@@ -1,4 +1,4 @@
-from .io import writeBatch
+from .io import writeBatchDetections, writeBatchTracking
 from .persist import (
   Camera,
   Clip,
@@ -35,5 +35,6 @@ __all__ = [
   "upsertCamera",
   "upsertMatch",
   "upsertVideo",
-  "writeBatch",
+  "writeBatchDetections",
+  "writeBatchTracking",
 ]

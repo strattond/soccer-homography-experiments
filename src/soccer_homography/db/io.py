@@ -74,13 +74,19 @@ def dictToArrow( records: list[ Track ] ) -> pa.Table:
   return pa.Table.from_pylist( flat, schema=BBOX_SCHEMA )
 
 
-def fileFromClipChunk( clipID: int, chunkID: int ) -> str:
-  return f"tracking/chunk_{clipID}_{chunkID}.parquet"
+def fileFromClipChunk( clipID: int, chunkID: int, type: str ) -> str:
+  return f"tracking/chunk_{type}_{clipID}_{chunkID}.parquet"
 
 
-def writeBatch( clipID: int, chunkID: int, records: list[ Track ] ):
+def writeBatchDetections( clipID: int, chunkID: int, records: dict[ int, list[ BoundingBox ] ] ):
   table = dictToArrow( records )
-  path = fileFromClipChunk( clipID, chunkID )
+  path = fileFromClipChunk( clipID, chunkID, "detections" )
+  pq.write_table( table, path, compression="zstd" )
+
+
+def writeBatchTracking( clipID: int, chunkID: int, records: list[ Track ] ):
+  table = dictToArrow( records )
+  path = fileFromClipChunk( clipID, chunkID, "tracking" )
   pq.write_table( table, path, compression="zstd" )
 
 

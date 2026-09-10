@@ -8,7 +8,7 @@ from PIL import Image, ImageTk
 from soccer_homography.appState import AppState
 from soccer_homography.constants import CHUNK_SIZE
 from soccer_homography.dataTypes import BoundingBox, SelectionPoint, Track, TrackData, VideoData
-from soccer_homography.db import writeBatch
+from soccer_homography.db import writeBatchDetections, writeBatchTracking
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
@@ -291,13 +291,14 @@ class App:
         self.appState.framesProcessed += 1
         if self.tracking is not None and self.tracking.curMode == CommandType.RUN_BBOX and self.appState.framesProcessed % CHUNK_SIZE == 0:
           # Write out the saved data
-          self.chunkIt()
-          logger.info( f"Writing chunk {self.appState.chunk}" )
-          self.appState.chunk += 1
+          self.chunkDetections()
+          logger.info( f"Writing chunk {self.appState.detectChunk}" )
+          self.appState.detectChunk += 1
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
         self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
+        self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num )
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
         self.checkButtonState()
         self.tabData.tabTracks.refresh()
@@ -311,16 +312,27 @@ class App:
   def cmdTrackRange( self ):
     self.runTracking( self.minFrame.get(), self.maxFrame.get() )
 
-  def chunkIt( self ):
-    loTrack = self.appState.chunk * CHUNK_SIZE
-    hiTrack = ( self.appState.chunk + 1 ) * CHUNK_SIZE
+  def chunkDetections( self ):
+    loTrack = self.appState.detectChunk * CHUNK_SIZE
+    hiTrack = ( self.appState.detectChunk + 1 ) * CHUNK_SIZE
     export: list[ Track ] = []
     for value in self.appState.tracks.values():
       toAdd = value.forExport( loTrack, hiTrack )
       if len( toAdd.boxes ) > 0:
         export.append( toAdd )
 
-    writeBatch( 1, self.appState.chunk, export )
+    writeBatchDetections( 1, self.appState.detectChunk, export )
+
+  def chunkTracking( self ):
+    loTrack = self.appState.detectChunk * CHUNK_SIZE
+    hiTrack = ( self.appState.detectChunk + 1 ) * CHUNK_SIZE
+    export: list[ Track ] = []
+    for value in self.appState.tracks.values():
+      toAdd = value.forExport( loTrack, hiTrack )
+      if len( toAdd.boxes ) > 0:
+        export.append( toAdd )
+
+    writeBatchTracking( 1, self.appState.detectChunk, export )
 
   def allocateModelTracking( self ):
     if self.tracking is not None and self.tracking.thread is not None and self.tracking.thread.is_alive():

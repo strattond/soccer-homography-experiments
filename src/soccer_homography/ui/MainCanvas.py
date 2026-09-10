@@ -67,6 +67,7 @@ class MainCanvasController:
     # These tags define your layer stack
     self.canvas.addtag_withtag( "frame", "frame" )
     self.canvas.addtag_withtag( "hough", "hough" )
+    self.canvas.addtag_withtag( "boxes", "boxes" )
     self.canvas.addtag_withtag( "tracking", "tracking" )
     self.canvas.addtag_withtag( "selection", "selection" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
@@ -74,6 +75,7 @@ class MainCanvasController:
   def stratify( self ):
     self.canvas.tag_lower( "frame" )
     self.canvas.tag_raise( "hough" )
+    self.canvas.tag_raise( "boxes" )
     self.canvas.tag_raise( "tracking" )
     self.canvas.tag_raise( "selection" )
     self.canvas.tag_raise( "mapping" )
@@ -99,6 +101,7 @@ class MainCanvasController:
 
     self.applyHoughTransform()
     self.updateBoundingBoxes( self.appState.boxes, frame_index )
+    self.updateTracks( self.appState.tracks, frame_index )
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
@@ -237,12 +240,23 @@ class MainCanvasController:
     self.applyHoughTransform()
 
   def updateBoundingBoxes( self, boxes: dict[ int, list[ BoundingBox ] ], index: int ):
-    self.canvas.delete( "tracking" )
+    self.canvas.delete( "boxes" )
     boxData = boxes.get( index, [] )
     for i, box in enumerate( boxData ):
       if box is not None:
         # Now we need to scale the box coordinates to our image
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
-        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "tracking",) )
-        self.canvas.create_text( tlx, tly, text=str( i ), tags=( "tracking",), fill='white', font=( 'Arial', 18 ) )
+        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "boxes",) )
+        self.canvas.create_text( tlx, tly, text=str( i ), tags=( "boxes",), fill='white', font=( 'Arial', 18 ) )
+
+  def updateTracks( self, tracks: dict[ int, Track ], index: int ):
+    self.canvas.delete( "tracking" )
+    for k, v in tracks.items():
+      box = v.getByIndex( index )
+      if box is not None:
+        # Now we need to scale the box coordinates to our image
+        tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
+        brx, bry = self.transform.toDisplay( box.x2, box.y2 )
+        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='lightgreen', tags=( "tracking",) )
+        self.canvas.create_text( tlx, tly, text=str( k ), tags=( "tracking",), fill='lightgreen', font=( 'Arial', 18 ) )

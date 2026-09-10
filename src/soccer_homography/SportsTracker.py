@@ -107,7 +107,7 @@ class SportsTracker:
       while True:
         cmd: Command = self.in_queue.get_nowait()
 
-        print( "Received command", cmd )
+        print( f"Received command Command(type={cmd.type}, start={cmd.start}, end={cmd.end}, payload={'<Data>' if cmd.payload is not None else 'None'})" )
         if cmd.type == CommandType.PAUSE:
           self.pause()
         elif cmd.type == CommandType.RESUME:
@@ -136,7 +136,7 @@ class SportsTracker:
             cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
           self.range = ( cmd.start, cmd.end )
           self.index = cmd.start
-          self.tracker = ByteTrack()
+          self.tracker = ByteTrack( frame_rate=int( self.cap.get( cv2.CAP_PROP_FPS ) ) )
           self.curMode = CommandType.RUN_TRACK
           self.setImagePos( cmd.start )
 
@@ -204,21 +204,7 @@ class SportsTracker:
         results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
         self.processResults( results )
       elif self.curMode == CommandType.RUN_TRACK:
-        currDets = self.inBoxes.get( self.index, [] )
-        if currDets:
-          dets = np.array( [ d.to_boxmot() for d in currDets ] )
-        else:
-          dets = np.empty( ( 0, 6 ) )
-        tracks = self.tracker.update( dets, img=frame )
-        self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
-        for track in tracks:
-          x1, y1, x2, y2, track_id, score, cls, frame_id = track
-
-          bbox = BoundingBox( x1, y1, x2, y2, score, cls, self.index )
-          self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( tid=track_id, data=bbox ) ) )
-
-        self.index += 1
-        self.checkCompletion()
+        self.processTracking( frame )
 
     print( "Quitting thread" )
     #if hasattr( self.model, "predictor" ) and self.model.predictol0r is not None and hasattr( self.model.predictor, "trackers" ):
@@ -226,3 +212,20 @@ class SportsTracker:
     #  for tracker in self.model.predictor.trackers:
     #    tracker.reset()
     self.cap.release()
+
+  def processTracking( self, frame ):
+    currDets = self.inBoxes.get( self.index, [] )
+    if currDets:
+      dets = np.array( [ d.to_boxmot() for d in currDets ] )
+    else:
+      dets = np.empty( ( 0, 6 ) )
+    tracks = self.tracker.update( dets, img=frame )
+    self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
+    for track in tracks:
+      x1, y1, x2, y2, track_id, score, cls, _ = track
+
+      bbox = BoundingBox( x1, y1, x2, y2, score, cls, self.index )
+      self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( tid=int( track_id ), data=bbox ) ) )
+
+    self.index += 1
+    self.checkCompletion()
