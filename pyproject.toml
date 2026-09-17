@@ -8,18 +8,18 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "boxmot>=23.0.0",
-    "duckdb>=1.5.5",
-    "numpy>=2.4,<2.7",
-    "nvidia-modelopt[all]>=0.45",
-    "opencv-python>=4.13.0.90",
-    "polars>=1.42.0",
-    "pyarrow>=24.0.0",
-    "supervision>=0.27.0",
-    "tensorrt>=11.2.1.2",
-    "torch==2.13.0+cu130",
-    "torchvision==0.28.0+cu130",
-    "ultralytics>=8.4.6",
+  "boxmot>=23.0.0",
+  "duckdb>=1.5.5",
+  "numpy>=2.4,<2.7",
+  "nvidia-modelopt[all]>=0.45",
+  "opencv-python>=4.13.0.90",
+  "polars>=1.42.0",
+  "pyarrow>=24.0.0",
+  "supervision>=0.27.0",
+  "tensorrt>=11.2.1.2",
+  "torch==2.14.0+cu130",
+  "torchvision==0.29.0+cu130",
+  "ultralytics>=8.4.6",
 ]
 
 [project.scripts]
@@ -70,3 +70,9 @@ space_inside_brackets = true
 spaces_around_tuple_delimiters = true
 split_before_arithmetic_operator = true
 use_tabs = false
+
+[dependency-groups]
+dev = [
+  "pytest>=9.1.1",
+  "pytest-cov>=5.0.0",
+]
