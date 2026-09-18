@@ -55,3 +55,9 @@ def clean_db( conn ):
 def video():
   """Create a sample Video fixture."""
   return Video( id=0, file="video_001.mp4" )
+
+
+@pytest.fixture
+def match():
+  """Create a sample Match fixture."""
+  return Match( id=0, date="2026-09-01", home="A", away="B", division="D" )
