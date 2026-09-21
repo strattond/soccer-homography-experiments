@@ -11,14 +11,16 @@ from soccer_homography.db.persist import Camera, ClipDB, Match, Video
 TEST_DB = os.path.join( Path( __file__ ).parent, "test_soccer_homography.db" )
 
 
-@pytest.fixture( scope="session", autouse=True )
+@pytest.fixture
 def clear_test_database():
   """Initialize and clean the test database before running tests."""
   # Use soccer_homography.db which imports the right duckdb version
   from soccer_homography.db import persist
 
   if os.path.exists( TEST_DB ):
+    print( f"Removing {TEST_DB})")
     os.remove( TEST_DB )
+
   conn = persist.getConn( TEST_DB )
 
   persist.initDB( TEST_DB )
@@ -36,22 +38,6 @@ def conn():
 
 
 @pytest.fixture
-def clean_db( conn ):
-  """Get a cleaned database with initial data for testing upsert operations."""
-  from soccer_homography.db import persist
-
-  # Clear all tables
-  tables = [ "clips", "person_participation", "person", "cameras", "matches", "videos" ]
-  for table in reversed( tables ):
-    try:
-      conn.execute( f"DELETE FROM {table}" )
-    except Exception:
-      pass
-
-  yield conn
-
-
-@pytest.fixture
 def video():
   """Create a sample Video fixture."""
   return Video( id=0, file="video_001.mp4" )
@@ -61,3 +47,19 @@ def video():
 def match():
   """Create a sample Match fixture."""
   return Match( id=0, date="2026-09-01", home="A", away="B", division="D" )
+
+
+@pytest.fixture
+def camera():
+  """Create a sample Camera fixture."""
+  return Camera( id=0, name="Cam-1" )
+
+@pytest.fixture
+def clip():
+  """Create a sample ClipDB fixture."""
+  return ClipDB( id=0, video_id=1, match_id=2, camera_id=3, sequence=1 )
+
+@pytest.fixture
+def updated_clip():
+  """Create an updated ClipDB fixture with id > 0 for upsert tests."""
+  return ClipDB( id=5, video_id=4, match_id=6, camera_id=7, sequence=2 )
