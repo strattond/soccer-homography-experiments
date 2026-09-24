@@ -46,7 +46,7 @@ class TestUpsertVideo:
 
     persist.upsertVideo( conn, video )
 
-    assert isinstance( result := persist.getVideoByID( conn, video.id ), persist.Video ), "Should return a Video instance"
+    assert isinstance( persist.getVideoByID( conn, video.id ), persist.Video ), "Should return a Video instance"
 
 
 class TestUpsertMatch:
@@ -91,7 +91,7 @@ class TestUpsertMatch:
 
     persist.upsertMatch( conn, match )
 
-    assert isinstance( result := persist.getMatchByID( conn, match.id ), persist.Match ), "Should return a Match instance"
+    assert isinstance( persist.getMatchByID( conn, match.id ), persist.Match ), "Should return a Match instance"
 
 
 class TestUpsertCamera:
@@ -135,7 +135,7 @@ class TestUpsertCamera:
 
     persist.upsertCamera( conn, camera )
 
-    assert isinstance( result := persist.getCameraByID( conn, camera.id ), persist.Camera ), "Should return a Camera instance"
+    assert isinstance( persist.getCameraByID( conn, camera.id ), persist.Camera ), "Should return a Camera instance"
 
 class TestUpsertClip:
   """Test cases for upsertClip function."""
@@ -221,5 +221,5 @@ class TestUpsertClip:
     clip_obj = persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 )
     persist.upsertClip( conn, clip_obj )
     
-    assert isinstance( result := persist.getClipByID( conn, clip_obj.id ), persist.ClipDB ), "Should return a persist.ClipDB instance"
+    assert isinstance( persist.getClipByID( conn, clip_obj.id ), persist.ClipDB ), "Should return a persist.ClipDB instance"
 
