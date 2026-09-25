@@ -172,9 +172,9 @@ class SoccerPitchImage:
   def calcPointOffset( self, target_point: SelectionPoint ) -> Point2D:
 
     scaleW, scaleL = self.get_pitch_scale
-    x = int( target_point.coords.x )
-    y = int( target_point.coords.y )
-    return Point2D( int( x*scaleW + self.padding ), int( y*scaleL + self.padding ) )
+    x = target_point.coords.x
+    y = target_point.coords.y
+    return Point2D( x*scaleW + self.padding, y*scaleL + self.padding )
 
   def nearestFieldPoint( self, mx, my ) -> SelectionPoint:
     best_pt = self.cfg.vertices[ 0 ]

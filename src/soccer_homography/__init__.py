@@ -164,7 +164,13 @@ class App:
   def createWidgetsMisc( self, left: int, top: int ):
 
     self.radarMapController = RadarCanvas(
-        self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg, self.appState.pitch, self.on_radar_click, self.on_radar_hover
+        self.radarMap,
+        ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ),
+        self.appState.cfg,
+        self.appState.pitch,
+        self.on_radar_click,
+        self.on_radar_hover,
+        self.on_radar_selection_move,
     )
 
     self.mainImageController = MainCanvasController(
@@ -450,6 +456,9 @@ class App:
 
   def on_radar_hover( self, x: int, y: int ):
     pass
+
+  def on_radar_selection_move( self ):
+    self.redisplayHomographyData()
 
   def on_options_change( self ):
     self.mainImageController.refreshHough()
