@@ -99,6 +99,8 @@ class Homography:
     self.source = Point2D( orig.x, orig.y )
 
   def computeScaledHomography( self, transform: ViewTransform ) -> MatLike:
+    if len( self.img_pts_4k ) < 4 or len( self.img_pts_4k ) != len( self.world_pts ):
+      raise ValueError( "At least four matching image and world points are required" )
     img_pts_scaled = transform.getScaledPoints( self.img_pts_4k )
     img_pts_arr = np.array( [ ip.coords.to_numpy() for ip in img_pts_scaled ], dtype=np.float32 )
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
@@ -106,6 +108,9 @@ class Homography:
     return homScaled
 
   def compute( self ):
+    self.hom4k = None
+    if len( self.img_pts_4k ) < 4 or len( self.img_pts_4k ) != len( self.world_pts ):
+      return
     img_pts_4k_arr = np.array( [ ip.coords.to_numpy() for ip in self.img_pts_4k ], dtype=np.float32 )
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
     self.hom4k, _ = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )

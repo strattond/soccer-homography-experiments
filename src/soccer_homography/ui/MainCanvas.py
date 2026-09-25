@@ -185,6 +185,10 @@ class MainCanvasController:
   def handleMouseRelease( self, _event ):
     self.dragged_selection = None
 
+  def clearPendingMapping( self ):
+    self.mapping = None
+    self.canvas.itemconfig( self.mapping_item, state="hidden" )
+
   def handleHover( self, event ):
     if self.cap is None:
       return

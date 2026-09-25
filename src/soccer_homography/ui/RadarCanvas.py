@@ -26,6 +26,8 @@ class RadarCanvas:
     self.selection_items: dict[ int, tuple[ SelectionPoint, tuple[ tuple[ float, float ], tuple[ float, float ] ] | None ] ] = {}
     self.dragged_selection: SelectionPoint | None = None
     self.dragged_edge: tuple[ tuple[ float, float ], tuple[ float, float ] ] | None = None
+    self.drag_start: tuple[ float, float ] | None = None
+    self.drag_was_fixed = False
 
     # Build layers
     self.createLayers()
@@ -143,13 +145,26 @@ class RadarCanvas:
     overlapping = self.canvas.find_overlapping( event.x - 8, event.y - 8, event.x + 8, event.y + 8 )
     for item_id in reversed( overlapping ):
       selection = self.selection_items.get( item_id )
-      if selection is not None and selection[ 0 ].index is None:
+      if selection is not None:
         self.dragged_selection, self.dragged_edge = selection
+        self.drag_start = ( event.x, event.y )
+        self.drag_was_fixed = self.dragged_selection.index is not None
+        if self.drag_was_fixed:
+          self.dragged_edge = None
         return "break"
     self.handle_click( event )
 
   def handle_drag( self, event ):
-    if self.dragged_selection is None or self.dragged_edge is None:
+    if self.dragged_selection is None:
+      return
+    if self.drag_start is not None and self.drag_was_fixed:
+      moved = ( event.x - self.drag_start[ 0 ] )**2 + ( event.y - self.drag_start[ 1 ] )**2
+      if moved < self.FIELD_POINT_SNAP_DISTANCE**2:
+        return "break"
+      self.dragged_selection.index = None
+      _, self.dragged_edge = self.nearest_line( event.x, event.y )
+      self.drag_was_fixed = False
+    if self.dragged_edge is None:
       return
     start, end = self.dragged_edge
     dx = end[ 0 ] - start[ 0 ]
@@ -168,6 +183,12 @@ class RadarCanvas:
   def handle_release( self, _event ):
     self.dragged_selection = None
     self.dragged_edge = None
+    self.drag_start = None
+    self.drag_was_fixed = False
+
+  def clearPendingMapping( self ):
+    self.mapping = None
+    self.canvas.itemconfig( self.mapping_item, state="hidden" )
 
   # -------------------------------------------------------------
   # Mapped selection markers

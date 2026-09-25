@@ -181,6 +181,7 @@ class App:
         self.on_main_view_change,
         self.on_main_selection_move,
     )
+    self.root.bind( "<Escape>", self.clearPendingMapping )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
     self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=50, width=24, height=720 )
@@ -460,11 +461,18 @@ class App:
   def on_radar_selection_move( self ):
     self.redisplayHomographyData()
 
+  def clearPendingMapping( self, _event=None ):
+    self.appState.last_image_click = None
+    self.appState.sel_world_point = None
+    self.mainImageController.clearPendingMapping()
+    self.radarMapController.clearPendingMapping()
+
   def on_options_change( self ):
     self.mainImageController.refreshHough()
 
   def redisplayHomographyData( self ):
     self.tabData.tabHomographyData.refresh()
+    self.appState.data.compute()
     logger.info( "Clearing existing homography calculations" )
     for value in self.appState.tracks.values():
       value.clearHomography()
