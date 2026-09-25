@@ -78,11 +78,11 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
   conn = getConn( db_path )
   conn.execute(
       """
-    CREATE SEQUENCE video_seq;
-    CREATE SEQUENCE match_seq;
-    CREATE SEQUENCE camera_seq;
-    CREATE SEQUENCE clip_seq;
-    CREATE SEQUENCE person_seq;
+    CREATE SEQUENCE IF NOT EXISTS video_seq;
+    CREATE SEQUENCE IF NOT EXISTS match_seq;
+    CREATE SEQUENCE IF NOT EXISTS camera_seq;
+    CREATE SEQUENCE IF NOT EXISTS clip_seq;
+    CREATE SEQUENCE IF NOT EXISTS person_seq;
     
     CREATE TABLE IF NOT EXISTS videos (
       id INTEGER PRIMARY KEY DEFAULT nextval('video_seq'),
@@ -114,13 +114,13 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
       FOREIGN KEY(camera_id) REFERENCES cameras(id)
     );
 
-    CREATE TABLE Person (
+    CREATE TABLE IF NOT EXISTS Person (
       id INTEGER PRIMARY KEY DEFAULT nextval('person_seq'),
       first_name VARCHAR NOT NULL,
       last_name  VARCHAR NOT NULL
     );
 
-    CREATE TABLE PersonParticipation (
+    CREATE TABLE IF NOT EXISTS PersonParticipation (
       match_id INTEGER NOT NULL,
       person_id INTEGER NOT NULL,
       shirt_number INTEGER,
@@ -152,6 +152,15 @@ def upsertVideo( conn: duckdb.DuckDBPyConnection, video: Video ) -> Video:
   return video
 
 
+def listVideos( conn: duckdb.DuckDBPyConnection ) -> list[ Video ]:
+  rows = conn.execute( "SELECT id, file FROM videos ORDER BY file" ).fetchall()
+  return [ Video( id=int( row[ 0 ] ), file=str( row[ 1 ] ) ) for row in rows ]
+
+
+def deleteVideo( conn: duckdb.DuckDBPyConnection, video_id: int ) -> None:
+  conn.execute( "DELETE FROM videos WHERE id = ?", [ video_id ] )
+
+
 def upsertMatch( conn: duckdb.DuckDBPyConnection, match: Match ) -> Match:
   existing = None
   if match.id > 0:
@@ -168,6 +177,11 @@ def upsertMatch( conn: duckdb.DuckDBPyConnection, match: Match ) -> Match:
   return match
 
 
+def listMatches( conn: duckdb.DuckDBPyConnection ) -> list[ Match ]:
+  rows = conn.execute( "SELECT id, date, home, away, division FROM matches ORDER BY date, home, away" ).fetchall()
+  return [ Match( id=int( row[ 0 ] ), date=str( row[ 1 ] or "" ), home=str( row[ 2 ] or "" ), away=str( row[ 3 ] or "" ), division=str( row[ 4 ] or "" ) ) for row in rows ]
+
+
 def upsertCamera( conn: duckdb.DuckDBPyConnection, camera: Camera ) -> Camera:
   existing = None
   if camera.id > 0:
@@ -179,6 +193,11 @@ def upsertCamera( conn: duckdb.DuckDBPyConnection, camera: Camera ) -> Camera:
     if not result is None:
       camera.id = int( result[ 0 ] )
   return camera
+
+
+def listCameras( conn: duckdb.DuckDBPyConnection ) -> list[ Camera ]:
+  rows = conn.execute( "SELECT id, name FROM cameras ORDER BY name" ).fetchall()
+  return [ Camera( id=int( row[ 0 ] ), name=str( row[ 1 ] ) ) for row in rows ]
 
 
 def upsertClip( conn: duckdb.DuckDBPyConnection, clip: ClipDB ) -> ClipDB:
@@ -245,10 +264,30 @@ def listClips( conn: duckdb.DuckDBPyConnection, *, video_id: int | None = None, 
   sql = "SELECT id, video_id, match_id, camera_id, sequence FROM clips"
   if clauses:
     sql += " WHERE " + " AND ".join( clauses )
-  sql += " ORDER BY video_id, match_id, camera_id, sequence"
+  sql += " ORDER BY match_id, camera_id, sequence, video_id"
 
   rows = conn.execute( sql, params ).fetchall()
   return [ ClipDB( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) ) for row in rows ]
+
+
+def listPersons( conn: duckdb.DuckDBPyConnection ) -> list[ Person ]:
+  rows = conn.execute( "SELECT id, first_name, last_name FROM Person ORDER BY last_name, first_name" ).fetchall()
+  return [ Person( id=int( row[ 0 ] ), first_name=str( row[ 1 ] ), last_name=str( row[ 2 ] ) ) for row in rows ]
+
+
+def reorderClips( conn: duckdb.DuckDBPyConnection, clips: list[ ClipDB ] ) -> None:
+  if not clips:
+    return
+  conn.execute( "BEGIN TRANSACTION" )
+  try:
+    for offset, clip in enumerate( clips ):
+      conn.execute( "UPDATE clips SET sequence = ? WHERE id = ?", [ -( offset + 1 ), clip.id ] )
+    for offset, clip in enumerate( clips ):
+      conn.execute( "UPDATE clips SET sequence = ? WHERE id = ?", [ offset, clip.id ] )
+    conn.execute( "COMMIT" )
+  except Exception:
+    conn.execute( "ROLLBACK" )
+    raise
 
 
 def getVideoByID( conn: duckdb.DuckDBPyConnection, video_id: int ) -> Video | None:

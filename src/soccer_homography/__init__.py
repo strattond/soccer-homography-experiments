@@ -8,12 +8,13 @@ from PIL import Image, ImageTk
 from soccer_homography.appState import AppState
 from soccer_homography.constants import CHUNK_SIZE
 from soccer_homography.dataTypes import BoundingBox, SelectionPoint, Track, TrackData, VideoData
-from soccer_homography.db import writeBatchDetections, writeBatchTracking
+from soccer_homography.db import initDB, writeBatchDetections, writeBatchTracking
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
 from soccer_homography.ui import (
     Configuration,
+    DataMaintenance,
     HomographyUI,
     LabelledSpinBox,
     LivePreview,
@@ -32,6 +33,7 @@ class App:
     self.root.geometry( "1920x1080" )
     self.root.resizable( True, True )
     self.appState: AppState = appState
+    self.appState.db = initDB()
     self.tracking: SportsTracker | None = None
 
     # Initialize variables
@@ -46,6 +48,8 @@ class App:
       self.tracking.thread.join( timeout=30 )
       if self.tracking is not None and self.tracking.thread.is_alive():
         print( "Forcibly terminating" )
+    if self.appState.db is not None:
+      self.appState.db.close()
 
     self.root.destroy()
 
@@ -87,6 +91,12 @@ class App:
     self.createWidgetsSource( 1460, 860 )
     self.createWidgetsFrameControl( 740, 800 )
     self.createWidgetsMisc( 1460, 900 )
+    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 12 ), command=self.openDataMaintenance ).place( x=1600, y=900, width=180, height=36 )
+
+  def openDataMaintenance( self ):
+    if self.appState.db is None:
+      self.appState.db = initDB()
+    DataMaintenance( self.root, self.appState.db )
 
   def createWidgetsData( self, left: int, top: int ):
 
