@@ -66,8 +66,8 @@ class DataMaintenance:
     self.videoTree = self.makeTree( tab, ( "id", "file" ), ( "ID", "File" ) )
     controls = ttk.Frame( tab )
     controls.pack( fill="x", side="bottom", pady=6 )
-    ttk.Button( controls, text="Browse and enrol", command=self.addVideo ).pack( side="left" )
-    ttk.Button( controls, text="Remove selected", command=self.removeVideo ).pack( side="left", padx=6 )
+    ttk.Button( controls, text="Browse...", command=self.addVideo ).pack( side="left" )
+    ttk.Button( controls, text="Remove", command=self.removeVideo ).pack( side="left", padx=6 )
     ttk.Button( controls, text="Refresh", command=self.refreshVideos ).pack( side="left" )
     self.refreshVideos()
 
@@ -82,16 +82,16 @@ class DataMaintenance:
     if not path:
       return
     capture = cv2.VideoCapture( path )
-    supported = capture.isOpened()
+    opened = capture.isOpened()
     capture.release()
-    if not supported:
+    if not opened:
       messagebox.showerror( "Unsupported video", "OpenCV could not open the selected file.", parent=self.window )
       return
     try:
       upsertVideo( self.conn, Video( id=0, file=path ) )
       self.conn.commit()
     except duckdb.ConstraintException:
-      messagebox.showinfo( "Already enrolled", "That video is already in the database.", parent=self.window )
+      messagebox.showinfo( "Already added", "That video already exists in the database.", parent=self.window )
     except duckdb.Error as error:
       messagebox.showerror( "Database error", str( error ), parent=self.window )
     self.refreshVideos()
@@ -115,10 +115,13 @@ class DataMaintenance:
     form.pack( fill="x", side="bottom", pady=6 )
     self.matchVars = [ tk.StringVar() for _ in range( 4 ) ]
     for index, label in enumerate( ( "Date", "Home", "Away", "Division" ) ):
-      ttk.Label( form, text=label ).grid( row=0, column=index * 2 )
-      ttk.Entry( form, textvariable=self.matchVars[ index ], width=18 ).grid( row=0, column=index*2 + 1, padx=4 )
-    ttk.Button( form, text="Save selected/new", command=self.saveMatch ).grid( row=0, column=8 )
-    ttk.Button( form, text="New", command=lambda: self.clearForm( self.matchVars ) ).grid( row=0, column=9, padx=4 )
+      ttk.Label( form, text=label ).grid( row=index, column=0, sticky="w", pady=2 )
+      ttk.Entry( form, textvariable=self.matchVars[ index ], width=36 ).grid( row=index, column=1, padx=4, sticky="ew" )
+    buttons = ttk.Frame( form )
+    buttons.grid( row=4, column=0, columnspan=2, sticky="w", pady=( 6, 0 ) )
+    ttk.Button( buttons, text="Save", command=self.saveMatch ).pack( side="left" )
+    ttk.Button( buttons, text="Reset", command=lambda: self.clearForm( self.matchVars ) ).pack( side="left", padx=4 )
+    form.columnconfigure( 1, weight=1 )
     self.matchTree.bind( "<<TreeviewSelect>>", self.selectMatch )
     self.refreshMatches()
 
@@ -126,7 +129,7 @@ class DataMaintenance:
     self.matchTree.delete( *self.matchTree.get_children() )
     for match in listMatches( self.conn ):
       self.matchTree.insert( "", "end", iid=str( match.id ), values=( match.id, match.date, match.home, match.away, match.division ) )
-    self.refreshClipSelectors()
+    self.refreshClipFilters()
 
   def selectMatch( self, _event=None ):
     selected = self.matchTree.selection()
@@ -152,10 +155,13 @@ class DataMaintenance:
     form = ttk.Frame( tab )
     form.pack( fill="x", side="bottom", pady=6 )
     self.cameraName = tk.StringVar()
-    ttk.Label( form, text="Name" ).pack( side="left" )
-    ttk.Entry( form, textvariable=self.cameraName, width=30 ).pack( side="left", padx=4 )
-    ttk.Button( form, text="Save selected/new", command=self.saveCamera ).pack( side="left" )
-    ttk.Button( form, text="New", command=lambda: self.cameraName.set( "" ) ).pack( side="left", padx=4 )
+    ttk.Label( form, text="Name" ).grid( row=0, column=0, sticky="w" )
+    ttk.Entry( form, textvariable=self.cameraName, width=36 ).grid( row=0, column=1, padx=4, sticky="ew" )
+    buttons = ttk.Frame( form )
+    buttons.grid( row=1, column=0, columnspan=2, sticky="w", pady=( 6, 0 ) )
+    ttk.Button( buttons, text="Save selected/new", command=self.saveCamera ).pack( side="left" )
+    ttk.Button( buttons, text="New", command=lambda: self.cameraName.set( "" ) ).pack( side="left", padx=4 )
+    form.columnconfigure( 1, weight=1 )
     self.cameraTree.bind( "<<TreeviewSelect>>", self.selectCamera )
     self.refreshCameras()
 
@@ -163,7 +169,7 @@ class DataMaintenance:
     self.cameraTree.delete( *self.cameraTree.get_children() )
     for camera in listCameras( self.conn ):
       self.cameraTree.insert( "", "end", iid=str( camera.id ), values=( camera.id, camera.name ) )
-    self.refreshClipSelectors()
+    self.refreshClipFilters()
 
   def selectCamera( self, _event=None ):
     selected = self.cameraTree.selection()
@@ -182,13 +188,15 @@ class DataMaintenance:
   def buildClips( self ):
     tab = ttk.Frame( self.notebook )
     self.notebook.add( tab, text="Clips" )
-    selectors = ttk.Frame( tab )
-    selectors.pack( fill="x", pady=6 )
-    self.clipCamera = ttk.Combobox( selectors, state="readonly", width=24 )
-    self.clipMatch = ttk.Combobox( selectors, state="readonly", width=24 )
-    for label, widget in ( ( "Camera", self.clipCamera ), ( "Match", self.clipMatch ) ):
-      ttk.Label( selectors, text=label ).pack( side="left", padx=( 4, 2 ) )
-      widget.pack( side="left", padx=( 0, 12 ) )
+    filters = ttk.Frame( tab )
+    filters.pack( fill="x", padx=8, pady=6 )
+    filters.columnconfigure( 1, weight=1 )
+    self.clipCamera = ttk.Combobox( filters, state="readonly", width=24 )
+    self.clipMatch = ttk.Combobox( filters, state="readonly", width=24 )
+    ttk.Label( filters, text="Camera" ).grid( row=0, column=0, sticky="w", padx=( 0, 8 ), pady=2 )
+    self.clipCamera.grid( row=0, column=1, sticky="ew", pady=2 )
+    ttk.Label( filters, text="Match" ).grid( row=1, column=0, sticky="w", padx=( 0, 8 ), pady=2 )
+    self.clipMatch.grid( row=1, column=1, sticky="ew", pady=2 )
     self.clipCamera.bind( "<<ComboboxSelected>>", lambda _event: self.refreshClipOrder() )
     self.clipMatch.bind( "<<ComboboxSelected>>", lambda _event: self.refreshClipOrder() )
     body = ttk.Frame( tab )
@@ -197,12 +205,17 @@ class DataMaintenance:
     self.clipVideos = tk.Listbox( body, selectmode="extended", exportselection=False, height=8 )
     self.clipVideos.pack( fill="x" )
     self.clipOrderTree = self.makeTree( body, ( "sequence", "video", "id" ), ( "Sequence", "Video", "Clip ID" ) )
+    self.clipOrderTree.bind( "<ButtonPress-1>", self.startClipDrag )
+    self.clipOrderTree.bind( "<B1-Motion>", self.dragClip )
+    self.clipOrderTree.bind( "<ButtonRelease-1>", self.finishClipDrag )
     controls = ttk.Frame( tab )
     controls.pack( fill="x", pady=6 )
     ttk.Button( controls, text="Add selected videos", command=self.addClips ).pack( side="left" )
     ttk.Button( controls, text="Move up", command=lambda: self.moveClip( -1 ) ).pack( side="left", padx=4 )
     ttk.Button( controls, text="Move down", command=lambda: self.moveClip( 1 ) ).pack( side="left" )
     ttk.Button( controls, text="Save order", command=self.saveClipOrder ).pack( side="left", padx=4 )
+    self.refreshClipVideoList()
+    self.refreshClipFilters()
 
   def refreshClipVideoList( self ):
     if not hasattr( self, "clipVideos" ):
@@ -211,7 +224,7 @@ class DataMaintenance:
     for video in listVideos( self.conn ):
       self.clipVideos.insert( tk.END, f"{video.id}: {video.file}" )
 
-  def refreshClipSelectors( self ):
+  def refreshClipFilters( self ):
     if not hasattr( self, "clipCamera" ):
       return
     self.cameras = listCameras( self.conn )
@@ -268,6 +281,21 @@ class DataMaintenance:
       return
     self.clipOrderTree.move( selected[ 0 ], "", target )
     self.clipOrderTree.selection_set( selected[ 0 ] )
+
+  def startClipDrag( self, event ):
+    item = self.clipOrderTree.identify_row( event.y )
+    self.clipDragItem = item if item else None
+
+  def dragClip( self, event ):
+    if not getattr( self, "clipDragItem", None ):
+      return
+    target = self.clipOrderTree.identify_row( event.y )
+    if target and target != self.clipDragItem:
+      self.clipOrderTree.move( self.clipDragItem, "", self.clipOrderTree.index( target ) )
+      self.clipOrderTree.selection_set( self.clipDragItem )
+
+  def finishClipDrag( self, _event ):
+    self.clipDragItem = None
 
   def saveClipOrder( self ):
     clips = []

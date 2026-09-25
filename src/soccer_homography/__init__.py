@@ -1,6 +1,6 @@
 import queue
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 from PIL import Image, ImageTk
@@ -8,7 +8,7 @@ from PIL import Image, ImageTk
 from soccer_homography.appState import AppState
 from soccer_homography.constants import CHUNK_SIZE
 from soccer_homography.dataTypes import BoundingBox, SelectionPoint, Track, TrackData, VideoData
-from soccer_homography.db import initDB, writeBatchDetections, writeBatchTracking
+from soccer_homography.db import initDB, listVideos, writeBatchDetections, writeBatchTracking
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
@@ -142,6 +142,8 @@ class App:
     # btnLoadVideo
     self.btnSourceVideo = tk.Button( self.root, text="Video", font=( "Arial", 12 ), command=self.cmdSourceVideo )
     self.btnSourceVideo.place( x=left + 140, y=top, width=60, height=36 )
+    self.btnSourceDB = tk.Button( self.root, text="DB", font=( "Arial", 12 ), command=self.cmdSourceDB )
+    self.btnSourceDB.place( x=left + 205, y=top, width=60, height=36 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
     # sliderVideoFrame
@@ -201,19 +203,59 @@ class App:
 
     filename = filedialog.askopenfilename( title='Open video', initialdir='.', filetypes=filetypes )
     if filename is not None:
-      if self.appState.cap is not None:
-        self.appState.cap.release()
+      self.loadSourceVideo( filename )
 
-      self.appState.videoFile = filename
-      self.appState.cap = cv2.VideoCapture( filename )
-      if self.appState.cap.isOpened():
-        vidData = VideoData( self.appState.cap )
-        self.sldVideoFrame.setMax( vidData.frames - 1 )
-        self.minFrame.setMax( vidData.frames - 1 )
-        self.maxFrame.setMax( vidData.frames - 1 )
-        self.mainImageController.load( self.appState.cap, vidData )
-        self.mainImageController.setFrame( 0 )
-        self.checkButtonState()
+  def cmdSourceDB( self ):
+    if self.appState.db is None:
+      self.appState.db = initDB()
+    videos = listVideos( self.appState.db )
+    if not videos:
+      messagebox.showinfo( "No videos", "There are no videos enrolled in the database.", parent=self.root )
+      return
+
+    window = tk.Toplevel( self.root )
+    window.title( "Select database video" )
+    window.transient( self.root )
+    window.grab_set()
+    window.geometry( "800x400" )
+    tree = ttk.Treeview( window, columns=( "id", "file" ), show="headings", selectmode="browse" )
+    tree.heading( "id", text="ID" )
+    tree.heading( "file", text="File" )
+    tree.column( "id", width=70, anchor="center" )
+    tree.column( "file", width=680, anchor="w" )
+    tree.pack( fill="both", expand=True, padx=8, pady=8 )
+    for video in videos:
+      tree.insert( "", "end", iid=str( video.id ), values=( video.id, video.file ) )
+
+    def load_selected( _event=None ):
+      selected = tree.selection()
+      if not selected:
+        return
+      video = next( ( item for item in videos if item.id == int( selected[ 0 ] ) ), None )
+      if video is not None and self.loadSourceVideo( video.file ):
+        window.destroy()
+
+    tree.bind( "<Double-1>", load_selected )
+    ttk.Button( window, text="Load selected", command=load_selected ).pack( pady=( 0, 8 ) )
+
+  def loadSourceVideo( self, filename: str ) -> bool:
+    capture = cv2.VideoCapture( filename )
+    if not capture.isOpened():
+      capture.release()
+      messagebox.showerror( "Unable to open video", f"OpenCV could not open:\n{filename}", parent=self.root )
+      return False
+    if self.appState.cap is not None:
+      self.appState.cap.release()
+    self.appState.videoFile = filename
+    self.appState.cap = capture
+    vidData = VideoData( capture )
+    self.sldVideoFrame.setMax( max( 0, vidData.frames - 1 ) )
+    self.minFrame.setMax( max( 0, vidData.frames - 1 ) )
+    self.maxFrame.setMax( max( 0, vidData.frames - 1 ) )
+    self.mainImageController.load( capture, vidData )
+    self.mainImageController.setFrame( 0 )
+    self.checkButtonState()
+    return True
 
   def hasHomography( self ) -> bool:
     return len( self.appState.data.world_pts ) >= 4
