@@ -23,7 +23,7 @@ class MainCanvasController:
       - hover callbacks
     """
 
-  def __init__( self, canvas: tk.Canvas, appState: AppState, on_click=None, on_hover=None, on_view_change=None ):
+  def __init__( self, canvas: tk.Canvas, appState: AppState, on_click=None, on_hover=None, on_view_change=None, on_selection_move=None ):
 
     self.canvas = canvas
     self.appState = appState
@@ -37,10 +37,15 @@ class MainCanvasController:
     self.on_click = on_click
     self.on_hover = on_hover
     self.on_view_change = on_view_change
+    self.on_selection_move = on_selection_move
 
     # State
     self.transform = ViewTransform()
+    self.initial_scale = self.transform.scale
+    self.initial_offset = Point2D()
     self.drag_start: tuple[ int | None, int | None ] = ( None, None )
+    self.dragged_selection: SelectionPoint | None = None
+    self.selection_items: dict[ int, SelectionPoint ] = {}
 
     # Canvas items
     self.createLayers()
@@ -52,7 +57,9 @@ class MainCanvasController:
     self.mapping_item = self.createSingleMarker( self.pitch.colors.sel_color, "mapping" )
 
     # Bind events
-    self.canvas.bind( "<Button-1>", self.handleClick )
+    self.canvas.bind( "<ButtonPress-1>", self.handleMousePress )
+    self.canvas.bind( "<B1-Motion>", self.handleMouseDrag )
+    self.canvas.bind( "<ButtonRelease-1>", self.handleMouseRelease )
     self.canvas.bind( "<Motion>", self.handleHover )
     self.canvas.bind( "<ButtonPress-3>", self.startPan )
     self.canvas.bind( "<B3-Motion>", self.doPan )
@@ -155,6 +162,29 @@ class MainCanvasController:
     if self.on_click:
       self.on_click( ix, iy, self.mapping )
 
+  def handleMousePress( self, event ):
+    if self.cap is None:
+      return
+    overlapping = self.canvas.find_overlapping( event.x - 8, event.y - 8, event.x + 8, event.y + 8 )
+    for item_id in reversed( overlapping ):
+      if item_id in self.selection_items:
+        self.dragged_selection = self.selection_items[ item_id ]
+        return "break"
+    self.handleClick( event )
+
+  def handleMouseDrag( self, event ):
+    if self.dragged_selection is None:
+      return
+    ix, iy = self.transform.toImage( event.x, event.y )
+    self.dragged_selection.coords = Point2D( int( ix ), int( iy ) )
+    self.updateSelectionMarkers( self.selected )
+    if self.on_selection_move is not None:
+      self.on_selection_move()
+    return "break"
+
+  def handleMouseRelease( self, _event ):
+    self.dragged_selection = None
+
   def handleHover( self, event ):
     if self.cap is None:
       return
@@ -222,10 +252,25 @@ class MainCanvasController:
     if self.on_view_change is not None:
       self.on_view_change()
 
+  def resetView( self ):
+    self.transform.scale = self.initial_scale
+    self.transform.offset = Point2D( self.initial_offset.x, self.initial_offset.y )
+    self.applyTransform()
+
+  def resetZoom( self ):
+    self.transform.scale = self.initial_scale
+    self.applyTransform()
+
+  def resetTranslation( self ):
+    self.transform.offset = Point2D( self.initial_offset.x, self.initial_offset.y )
+    self.applyTransform()
+
   def load( self, cap: cv2.VideoCapture, vidData: VideoData ):
     self.cap = cap
     self.transform = ViewTransform( vidData )
     self.transform.scale = 1280 / vidData.width
+    self.initial_scale = self.transform.scale
+    self.initial_offset = Point2D()
 
   # -------------------------------------------------------------
   # Mapped selection markers
@@ -233,12 +278,14 @@ class MainCanvasController:
   def updateSelectionMarkers( self, selected: list[ SelectionPoint ] ):
     self.canvas.delete( "selection" )
     self.selected = selected
+    self.selection_items.clear()
     color = self.pitch.colors.highlight_color.as_hex()
     for point in selected:
       mx, my = self.transform.toDisplay( point.coords.x, point.coords.y )
 
       radius = 6
-      self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection",) )
+      item = self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection",) )
+      self.selection_items[ item ] = point
 
   def updateMappingMarker( self ):
     if self.mapping is None:

@@ -139,11 +139,11 @@ class App:
     self.lblSourceAction = tk.Label( self.root, text="Source", fg="#000000", font=( "Arial", 12 ), anchor="w" )
     self.lblSourceAction.place( x=left, y=top, width=100, height=24 )
 
-    # btnLoadVideo
+    # Load Video from file or database
     self.btnSourceVideo = tk.Button( self.root, text="Video", font=( "Arial", 12 ), command=self.cmdSourceVideo )
     self.btnSourceVideo.place( x=left + 140, y=top, width=60, height=36 )
     self.btnSourceDB = tk.Button( self.root, text="DB", font=( "Arial", 12 ), command=self.cmdSourceDB )
-    self.btnSourceDB.place( x=left + 205, y=top, width=60, height=36 )
+    self.btnSourceDB.place( x=left + 200, y=top, width=60, height=36 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
     # sliderVideoFrame
@@ -156,13 +156,25 @@ class App:
     self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 50, width=200, height=24, offset=190, label="Start" )
     self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 75, width=200, height=24, offset=190, label="Finish", initValue=100 )
 
+    self.btnResetZoom = tk.Button( self.root, text="Reset Zoom", font=( "Arial", 12 ), command=self.cmdResetZoom )
+    self.btnResetZoom.place( x=left + 190, y=top + 110, width=100, height=36 )
+    self.btnResetPan = tk.Button( self.root, text="Reset Pan", font=( "Arial", 12 ), command=self.cmdResetPan )
+    self.btnResetPan.place( x=left + 190, y=top + 146, width=100, height=36 )
+    
   def createWidgetsMisc( self, left: int, top: int ):
 
     self.radarMapController = RadarCanvas(
         self.radarMap, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState.cfg, self.appState.pitch, self.on_radar_click, self.on_radar_hover
     )
 
-    self.mainImageController = MainCanvasController( self.imagePreview, self.appState, self.on_main_click, self.on_main_hover, self.on_main_view_change )
+    self.mainImageController = MainCanvasController(
+        self.imagePreview,
+        self.appState,
+        self.on_main_click,
+        self.on_main_hover,
+        self.on_main_view_change,
+        self.on_main_selection_move,
+    )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
     self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=50, width=24, height=720 )
@@ -414,6 +426,15 @@ class App:
 
   def on_main_hover( self, x: int, y: int ):
     pass
+
+  def on_main_selection_move( self ):
+    self.redisplayHomographyData()
+
+  def cmdResetZoom( self ):
+    self.mainImageController.resetZoom()
+
+  def cmdResetPan( self ):
+    self.mainImageController.resetTranslation()
 
   def on_main_view_change( self ):
     xf = self.mainImageController.transform
