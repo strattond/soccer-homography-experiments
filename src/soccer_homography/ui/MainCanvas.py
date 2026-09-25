@@ -120,12 +120,16 @@ class MainCanvasController:
     lines = detector.getLines( gray )
 
     self.nosky = ImageTk.PhotoImage( Image.fromarray( gray ) )
-    self.canvas.create_image( 0, 0, anchor="nw", image=self.nosky, tags=( "hough",) )
+    self.canvas.create_image( self.transform.offset.x, self.transform.offset.y, anchor="nw", image=self.nosky, tags=( "hough",) )
     if lines is None:
       self.stratify()
       return
     for ( x1, y1, x2, y2 ) in lines[ :, 0 ]:
-      self.canvas.create_line( x1, y1, x2, y2, fill="cyan", width=2, tags=( "hough",) )
+      display_x1 = x1 + self.transform.offset.x
+      display_y1 = y1 + self.transform.offset.y
+      display_x2 = x2 + self.transform.offset.x
+      display_y2 = y2 + self.transform.offset.y
+      self.canvas.create_line( display_x1, display_y1, display_x2, display_y2, fill="cyan", width=2, tags=( "hough",) )
     self.stratify()
 
   # -------------------------------------------------------------
@@ -214,6 +218,7 @@ class MainCanvasController:
     # Reset transform
     self.canvas.coords( self.frame_item, self.transform.offset.x, self.transform.offset.y )
     self.setResizedImage()
+    self.updateMappingMarker()
     if self.on_view_change is not None:
       self.on_view_change()
 
@@ -229,12 +234,17 @@ class MainCanvasController:
     self.canvas.delete( "selection" )
     self.selected = selected
     color = self.pitch.colors.highlight_color.as_hex()
-    points = self.transform.getScaledPoints( selected )
-    for vertex in points:
-      mx, my = vertex.coords
+    for point in selected:
+      mx, my = self.transform.toDisplay( point.coords.x, point.coords.y )
 
       radius = 6
       self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "selection",) )
+
+  def updateMappingMarker( self ):
+    if self.mapping is None:
+      return
+    mx, my = self.transform.toDisplay( self.mapping.coords.x, self.mapping.coords.y )
+    self.canvas.coords( self.mapping_item, mx - 6, my - 6, mx + 6, my + 6 )
 
   def refreshHough( self ):
     self.applyHoughTransform()
