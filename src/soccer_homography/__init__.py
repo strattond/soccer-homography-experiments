@@ -20,6 +20,7 @@ from soccer_homography.db import (
     writeBatchDetections,
     writeBatchTracking,
 )
+from soccer_homography.db.chunk_writer import AsyncChunkWriter
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import (
@@ -53,6 +54,22 @@ class App:
     self.appState: AppState = appState
     self.appState.db = initDB()
     self.tracking: SportsTracker | None = None
+    self.detection_writer = AsyncChunkWriter(
+        "detection",
+        writeBatchDetections,
+        lambda delay, callback: self.root.after( delay, callback ),
+        lambda callback_id: self.root.after_cancel( callback_id ),
+        lambda chunk_id, error: self.on_chunk_write_error( "detection", chunk_id, error ),
+        lambda records: sum( len( boxes ) for boxes in records.values() ),
+    )
+    self.tracking_writer = AsyncChunkWriter(
+        "tracking",
+        writeBatchTracking,
+        lambda delay, callback: self.root.after( delay, callback ),
+        lambda callback_id: self.root.after_cancel( callback_id ),
+        lambda chunk_id, error: self.on_chunk_write_error( "tracking", chunk_id, error ),
+        lambda records: sum( len( track.boxes ) for track in records ),
+    )
 
     # Initialize variables
 
@@ -66,6 +83,8 @@ class App:
       self.tracking.thread.join( timeout=30 )
       if self.tracking is not None and self.tracking.thread.is_alive():
         print( "Forcibly terminating" )
+    self.detection_writer.shutdown()
+    self.tracking_writer.shutdown()
     if self.appState.db is not None:
       self.appState.db.close()
 
@@ -103,32 +122,17 @@ class App:
 
     self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace )
 
-    self.createWidgetsData( 1460, 740 )
-    self.createWidgetsDetection( 1460, 780 )
-    self.createWidgetsTrack( 1460, 820 )
-    self.createWidgetsSource( 1460, 860 )
+    self.createWidgetsDetection( 1460, 740 )
+    self.createWidgetsTrack( 1460, 780 )
+    self.createWidgetsSource( 1460, 820 )
     self.createWidgetsFrameControl( 740, 800 )
     self.createWidgetsMisc( 1460, 900 )
-    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 12 ), command=self.openDataMaintenance ).place( x=1600, y=900, width=180, height=36 )
+    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 12 ), command=self.openDataMaintenance ).place( x=1600, y=860, width=180, height=36 )
 
   def openDataMaintenance( self ):
     if self.appState.db is None:
       self.appState.db = initDB()
     DataMaintenance( self.root, self.appState.db )
-
-  def createWidgetsData( self, left: int, top: int ):
-
-    # lblDataAction
-    self.lblDataAction = tk.Label( self.root, text="Data", fg="#000000", font=( "Arial", 12 ), anchor="w" )
-    self.lblDataAction.place( x=left, y=top, width=100, height=24 )
-
-    # btnDataLoad
-    self.btnDataLoad = tk.Button( self.root, text="Load", font=( "Arial", 12 ), command=self.cmdDataLoad )
-    self.btnDataLoad.place( x=left + 140, y=top, width=60, height=36 )
-
-    # btnDataSave
-    self.btnDataSave = tk.Button( self.root, text="Save", font=( "Arial", 12 ), command=self.cmdDataSave, state=tk.DISABLED )
-    self.btnDataSave.place( x=left + 200, y=top, width=60, height=36 )
 
   def createWidgetsDetection( self, left: int, top: int ):
     # lblDetectAction
@@ -224,20 +228,6 @@ class App:
     self.prgHomography.setRange( min, max )
     self.livePreviewController.play( min, max, encoder )
 
-  def cmdDataLoad( self ):
-    """
-    Handle cmdLoadBB event
-    TODO: Implement your logic here
-    """
-    pass
-
-  def cmdDataSave( self ):
-    filetypes = ( ( 'Saved match data', '*.json' ),)
-
-    filename = filedialog.asksaveasfilename( title='Save Match Data', initialdir='.', filetypes=filetypes )
-    if filename is not None:
-      self.appState.save( filename )
-
   def cmdSourceVideo( self ):
     filetypes = ( ( 'Video files', [ '*.mp4', '*.mkv' ] ),)
 
@@ -313,7 +303,6 @@ class App:
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnTrackRange.config( state=tk.NORMAL if trackable else tk.DISABLED )
     self.uiHomography.setEnableStatus( self.hasHomography(), homoable )
-    self.btnDataSave.config( state=tk.NORMAL if homoable else tk.DISABLED )
     self.sldVideoFrame.setEnabled( cappable )
 
   def setProgRange( self, prog: ttk.Progressbar, val: int, max: int ):
@@ -422,8 +411,8 @@ class App:
   def chunkDetections( self ):
     loTrack = self.appState.detectChunk * CHUNK_SIZE
     hiTrack = ( self.appState.detectChunk + 1 ) * CHUNK_SIZE
-    export = { k: boxes for k, boxes in self.appState.boxes.items() if loTrack <= k < hiTrack }
-    writeBatchDetections( 1, self.appState.detectChunk, export )
+    export = { k: list( boxes ) for k, boxes in self.appState.boxes.items() if loTrack <= k < hiTrack }
+    self.detection_writer.submit( 1, self.appState.detectChunk, export )
 
   def chunkTracking( self ):
     loTrack = self.appState.trackChunk * CHUNK_SIZE
@@ -434,7 +423,14 @@ class App:
       if len( toAdd.boxes ) > 0:
         export.append( toAdd )
 
-    writeBatchTracking( 1, self.appState.trackChunk, export )
+    self.tracking_writer.submit( 1, self.appState.trackChunk, export )
+
+  def on_chunk_write_error( self, data_type: str, chunk_id: int, error: Exception ) -> None:
+    messagebox.showerror(
+        f"{data_type.title()} write failed",
+        f"Could not write {data_type} chunk {chunk_id}: {error}",
+        parent=self.root,
+    )
 
   def allocateModelTracking( self ):
     if self.tracking is not None and self.tracking.thread is not None and self.tracking.thread.is_alive():

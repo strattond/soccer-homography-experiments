@@ -15,6 +15,7 @@ dependencies = [
   "opencv-python>=4.13.0.90",
   "polars>=1.42.0",
   "pyarrow>=24.0.0",
+  "squadi-data-explorer",
   "supervision>=0.27.0",
   "tensorrt>=11.2.1.2",
   "torch==2.14.0+cu130",
@@ -41,6 +42,7 @@ torch = [
 torchvision = [
   { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+squadi-data-explorer = { git = "https://github.com/strattond/squadi-data-explorer.git", rev = "a64d1862744df7e791df85b9745d5f170e352a83" }
 
 [tool.uv]
 environments = [

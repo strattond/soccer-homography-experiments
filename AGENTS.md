@@ -12,6 +12,18 @@ Most of the project is in the package under [src/soccer_homography](src/soccer_h
 - `SportsTracker.py` — tracking pipeline (YOLO detection + ByteTrack) with threading and command queues
 - `dataTypes.py` — core data structures (Point2D, SelectionPoint, VideoData, Homography, Track, BoundingBox, etc.)
 
+Squadi cached season data is provided by the local editable `squadi-data-explorer` dependency. Import it through `squadi_data`, not by adding the other repository's `src` directory to `sys.path`:
+
+```python
+from pathlib import Path
+from squadi_data import blend_season, load_season
+
+season = load_season( Path( r"D:\Projects\github\squadi-data-explorer\output\8" ) )
+blended_season = blend_season( season )
+```
+
+The Squadi package reads cached JSON; fetching is still run from the Squadi repository root using its CLI scripts and local `data/config.json`.
+
 Project metadata lives in [pyproject.toml](pyproject.toml), while documentation is in [README.md](README.md). The project uses DuckDB for database persistence ([src/soccer_homography/db/](src/soccer_homography/db)).
 
 ## Working conventions

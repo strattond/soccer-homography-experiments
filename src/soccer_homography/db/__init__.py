@@ -1,4 +1,5 @@
 from .io import writeBatchDetections, writeBatchTracking
+from .chunk_writer import AsyncChunkWriter
 from .persist import (
   Camera,
   ClipDB,
@@ -28,6 +29,7 @@ from .persist import (
 __all__ = [
   "Camera",
   "ClipDB",
+  "AsyncChunkWriter",
   "Match",
   "Person",
   "Video",

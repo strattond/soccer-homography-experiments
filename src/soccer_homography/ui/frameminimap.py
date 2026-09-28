@@ -35,9 +35,12 @@ class FrameMinimap( tk.Canvas ):
 
   def updateTotalFrames( self, newValue: int ):
     self.total_frames = newValue
+    self.clearFrames()
+
+  def clearFrames( self ):
 
     # One bit per frame
-    self.processedFrames = np.zeros( newValue, dtype=bool )
+    self.processedFrames = np.zeros( self.total_frames, dtype=bool )
 
   def markFrameAsDone( self, frame_idx: int ):
     """Mark a single frame as processed."""

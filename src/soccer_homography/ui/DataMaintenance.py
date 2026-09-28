@@ -290,7 +290,7 @@ class DataMaintenance:
     if not getattr( self, "clipDragItem", None ):
       return
     target = self.clipOrderTree.identify_row( event.y )
-    if target and target != self.clipDragItem:
+    if target and target != self.clipDragItem and self.clipDragItem is not None:
       self.clipOrderTree.move( self.clipDragItem, "", self.clipOrderTree.index( target ) )
       self.clipOrderTree.selection_set( self.clipDragItem )
 
