@@ -7,14 +7,32 @@ from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
 from soccer_homography.constants import CHUNK_SIZE
-from soccer_homography.dataTypes import BoundingBox, SelectionPoint, Track, TrackData, VideoData
-from soccer_homography.db import initDB, listVideos, writeBatchDetections, writeBatchTracking
+from soccer_homography.dataTypes import (
+    BoundingBox,
+    SelectionPoint,
+    Track,
+    TrackData,
+    VideoData,
+)
+from soccer_homography.db import (
+    initDB,
+    listVideos,
+    writeBatchDetections,
+    writeBatchTracking,
+)
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
-from soccer_homography.SportsTracker import Command, CommandType, Output, OutputType, SportsTracker
+from soccer_homography.SportsTracker import (
+    Command,
+    CommandType,
+    Output,
+    OutputType,
+    SportsTracker,
+)
 from soccer_homography.ui import (
     Configuration,
     DataMaintenance,
+    FrameMinimap,
     HomographyUI,
     LabelledSpinBox,
     LivePreview,
@@ -146,21 +164,24 @@ class App:
     self.btnSourceDB.place( x=left + 200, y=top, width=60, height=36 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
+
+    self.minimap = FrameMinimap( master=self.root, total_frames=0 )
+    self.minimap.place( x=left, y=top, width=500, height=24 )
     # sliderVideoFrame
-    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 190, y=top, width=200, height=24 )
+    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 190, y=top + 60, width=200, height=24 )
 
     # lblVideoFrameSlider
     self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 12 ), anchor="center" )
-    self.lblVideoFrameSlider.place( x=left, y=top, width=100, height=24 )
+    self.lblVideoFrameSlider.place( x=left, y=top + 60, width=100, height=24 )
 
-    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 50, width=200, height=24, offset=190, label="Start" )
-    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 75, width=200, height=24, offset=190, label="Finish", initValue=100 )
+    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 110, width=200, height=24, offset=190, label="Start" )
+    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 135, width=200, height=24, offset=190, label="Finish", initValue=100 )
 
     self.btnResetZoom = tk.Button( self.root, text="Reset Zoom", font=( "Arial", 12 ), command=self.cmdResetZoom )
-    self.btnResetZoom.place( x=left + 190, y=top + 110, width=100, height=36 )
+    self.btnResetZoom.place( x=left + 190, y=top + 170, width=100, height=36 )
     self.btnResetPan = tk.Button( self.root, text="Reset Pan", font=( "Arial", 12 ), command=self.cmdResetPan )
-    self.btnResetPan.place( x=left + 190, y=top + 146, width=100, height=36 )
-    
+    self.btnResetPan.place( x=left + 290, y=top + 170, width=100, height=36 )
+
   def createWidgetsMisc( self, left: int, top: int ):
 
     self.radarMapController = RadarCanvas(
@@ -273,6 +294,7 @@ class App:
     self.maxFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.mainImageController.load( capture, vidData )
     self.mainImageController.setFrame( 0 )
+    self.minimap.updateTotalFrames( vidData.frames )
     self.checkButtonState()
     return True
 
@@ -342,6 +364,7 @@ class App:
 
   def pollForUI( self ):
     data: Output | None = None
+    pollDelay: int = 50
     try:
       if self.tracking is not None:
         data = self.tracking.out_queue.get_nowait()
@@ -354,14 +377,18 @@ class App:
         if bbox.frame not in self.appState.boxes:
           self.appState.boxes[ bbox.frame ] = []
         self.appState.boxes[ bbox.frame ].append( bbox )
+        pollDelay = 1
       if data.type == OutputType.TRACK and data.data is not None and isinstance( data.data, TrackData ):
         track = data.data
         if track.tid not in self.appState.tracks:
           self.appState.tracks[ track.tid ] = Track( track.clip, track.tid )
         self.appState.tracks[ track.tid ].boxes.append( track.data )
+        pollDelay = 2
       elif data.type == OutputType.NEW_FRAME:
         self.prgDetection.tick()
         self.appState.framesProcessed += 1
+        if self.tracking is not None and self.tracking.curMode == CommandType.RUN_BBOX and isinstance( data.data, int ):
+          self.minimap.markFrameAsDone( data.data )
         if self.tracking is not None and self.tracking.curMode == CommandType.RUN_BBOX and self.appState.framesProcessed % CHUNK_SIZE == 0:
           # Write out the saved data
           self.chunkDetections()
@@ -372,6 +399,7 @@ class App:
           self.chunkTracking()
           logger.info( f"Writing chunk {self.appState.trackChunk}" )
           self.appState.trackChunk += 1
+        pollDelay = 5
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
@@ -380,9 +408,10 @@ class App:
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
         self.checkButtonState()
         self.tabData.tabTracks.refresh()
+        self.minimap.redraw()
         return
 
-    self.root.after( 50, self.pollForUI )
+    self.root.after( pollDelay, self.pollForUI )
 
   def cmdYoloRange( self ):
     self.runYolo( self.minFrame.get(), self.maxFrame.get() )

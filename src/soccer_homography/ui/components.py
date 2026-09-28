@@ -145,7 +145,6 @@ class ProgressBarETA:
     self.canvas.itemconfig( self.lblPercent, text="0%" )
     self.canvas.itemconfig( self.lblETATime, text="--:--" )
     self.canvas.itemconfig( self.lblDuratin, text="--:--" )
-    pass
 
   def redraw( self ):
     len = self.max - self.min
