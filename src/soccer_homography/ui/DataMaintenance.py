@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import cv2
 import duckdb
+from squadi_data import data as squadi_data
+from squadi_data.fixed import DivisionData, loadDivisionData
 
 from soccer_homography.db import (
     Camera,
@@ -12,11 +15,13 @@ from soccer_homography.db import (
     Match,
     Video,
     deleteVideo,
+    importSquadiDivision,
     listCameras,
     listClips,
     listMatches,
     listPersons,
     listVideos,
+    parseMatchDate,
     reorderClips,
     upsertCamera,
     upsertClip,
@@ -48,6 +53,7 @@ class DataMaintenance:
     self.buildCameras()
     self.buildClips()
     self.buildPersons()
+    self.notebook.bind( "<<NotebookTabChanged>>", self.onNotebookTabChanged )
 
   def makeTree( self, tab: ttk.Frame, columns: tuple[ str, ...], headings: tuple[ str, ...] ) -> ttk.Treeview:
     tree = ttk.Treeview( tab, columns=columns, show="headings", selectmode="browse" )
@@ -119,6 +125,7 @@ class DataMaintenance:
       ttk.Entry( form, textvariable=self.matchVars[ index ], width=36 ).grid( row=index, column=1, padx=4, sticky="ew" )
     buttons = ttk.Frame( form )
     buttons.grid( row=4, column=0, columnspan=2, sticky="w", pady=( 6, 0 ) )
+    ttk.Button( buttons, text="Import", command=self.importMatches ).pack( side="left" )
     ttk.Button( buttons, text="Save", command=self.saveMatch ).pack( side="left" )
     ttk.Button( buttons, text="Reset", command=lambda: self.clearForm( self.matchVars ) ).pack( side="left", padx=4 )
     form.columnconfigure( 1, weight=1 )
@@ -128,7 +135,8 @@ class DataMaintenance:
   def refreshMatches( self ):
     self.matchTree.delete( *self.matchTree.get_children() )
     for match in listMatches( self.conn ):
-      self.matchTree.insert( "", "end", iid=str( match.id ), values=( match.id, match.date, match.home, match.away, match.division ) )
+      date = match.date.strftime( "%Y-%m-%d %H:%M" ) if match.date is not None else ""
+      self.matchTree.insert( "", "end", iid=str( match.id ), values=( match.id, date, match.home, match.away, match.division ) )
     self.refreshClipFilters()
 
   def selectMatch( self, _event=None ):
@@ -140,13 +148,123 @@ class DataMaintenance:
 
   def saveMatch( self ):
     selected = self.matchTree.selection()
-    match = Match( int( selected[ 0 ] ) if selected else 0, *( variable.get().strip() for variable in self.matchVars ) )
+    values = [ variable.get().strip() for variable in self.matchVars ]
     try:
+      match = Match(
+          id=int( selected[ 0 ] ) if selected else 0,
+          date=parseMatchDate( values[ 0 ] ),
+          home=values[ 1 ],
+          away=values[ 2 ],
+          division=values[ 3 ],
+      )
       upsertMatch( self.conn, match )
       self.conn.commit()
       self.refreshMatches()
+    except ValueError as error:
+      messagebox.showerror( "Invalid match date", str( error ), parent=self.window )
     except duckdb.Error as error:
       messagebox.showerror( "Database error", str( error ), parent=self.window )
+
+  def importMatches( self ):
+    file_path = filedialog.askopenfilename(
+        parent=self.window,
+        title="Select matchDetails.json",
+        filetypes=( ( "matchDetails.json", "matchDetails.json" ), ( "JSON files", "*.json" ) ),
+    )
+    if not file_path:
+      return
+
+    try:
+      found, details = loadDivisionData( Path( file_path ).parent, Path( file_path ).name )
+    except ( OSError, ValueError, TypeError, KeyError ) as error:
+      messagebox.showerror( "Import error", f"Could not read matchDetails.json: {error}", parent=self.window )
+      return
+    if not found or not details.data:
+      messagebox.showerror( "Import error", "The selected file contains no division match details.", parent=self.window )
+      return
+
+    results_error: str | None = None
+    try:
+      raw_results = squadi_data.shared.loadJson( Path( file_path ).parent, "results.json" ) or []
+      if not isinstance( raw_results, list ) or any( not isinstance( item, dict ) for item in raw_results ):
+        raise ValueError( "results.json must contain a list of division results." )
+      results = [ squadi_data.shared.from_dict( squadi_data.DivisionResults, item ) for item in raw_results ]
+    except ( OSError, ValueError, TypeError, KeyError ) as error:
+      results = []
+      results_error = f"Could not read results.json: {error}"
+
+    division = self.selectImportDivision( details.data )
+    if division is None:
+      return
+
+    match_teams: dict[ int, tuple[ str, str ] ] = {}
+    try:
+      for result_division in results:
+        if result_division.div.divisionId != division.div.divisionId:
+          continue
+        for round_fixtures in result_division.rounds:
+          for fixture in round_fixtures.matches:
+            match_teams[ int( fixture.id ) ] = ( fixture.home, fixture.away )
+    except ( AttributeError, TypeError, ValueError ) as error:
+      match_teams.clear()
+      results_error = f"Could not extract match team names from results.json: {error}"
+
+    try:
+      result = importSquadiDivision( self.conn, division, match_teams )
+      self.refreshMatches()
+      self.refreshPersons()
+      summary = (
+          f"Created {result.matches_created} matches and {result.persons_created} people. "
+          f"Added {result.participations_created} participations and updated {result.participations_updated}."
+      )
+      import_errors = ( [ results_error ] if results_error is not None else [] ) + result.errors
+      if import_errors:
+        messagebox.showwarning(
+            "Import completed with errors",
+            f"{summary}\n\n{len(import_errors)} issue(s):\n" + "\n".join( import_errors ),
+            parent=self.window,
+        )
+      else:
+        messagebox.showinfo( "Import complete", summary, parent=self.window )
+    except ( duckdb.Error, ValueError, RuntimeError ) as error:
+      messagebox.showerror( "Import error", str( error ), parent=self.window )
+
+  def selectImportDivision( self, divisions: list[ DivisionData ] ) -> DivisionData | None:
+    dialog = tk.Toplevel( self.window )
+    dialog.title( "Select Division" )
+    dialog.transient( self.window )
+    dialog.resizable( False, False )
+    dialog.protocol( "WM_DELETE_WINDOW", dialog.destroy )
+
+    ttk.Label( dialog, text="Choose the division to import:" ).pack( padx=12, pady=( 12, 4 ), anchor="w" )
+    division_choice = ttk.Combobox(
+        dialog,
+        state="readonly",
+        values=[ f"{division.div.name} (ID: {division.div.divisionId})" for division in divisions ],
+        width=42,
+    )
+    division_choice.pack( padx=12, pady=4, fill="x" )
+    selected_division: DivisionData | None = None
+
+    def acceptSelection():
+      nonlocal selected_division
+      selected_index = division_choice.current()
+      if selected_index < 0:
+        messagebox.showerror( "Missing selection", "Select a Division first.", parent=dialog )
+        return
+      selected_division = divisions[ selected_index ]
+      dialog.destroy()
+
+    buttons = ttk.Frame( dialog )
+    buttons.pack( padx=12, pady=( 4, 12 ), anchor="e" )
+    ttk.Button( buttons, text="Import", command=acceptSelection ).pack( side="left" )
+    ttk.Button( buttons, text="Cancel", command=dialog.destroy ).pack( side="left", padx=( 6, 0 ) )
+    dialog.bind( "<Return>", lambda _event: acceptSelection() )
+    dialog.bind( "<Escape>", lambda _event: dialog.destroy() )
+    dialog.wait_visibility()
+    dialog.grab_set()
+    self.window.wait_window( dialog )
+    return selected_division
 
   def buildCameras( self ):
     tab = ttk.Frame( self.notebook )
@@ -311,6 +429,7 @@ class DataMaintenance:
   def buildPersons( self ):
     tab = ttk.Frame( self.notebook )
     self.notebook.add( tab, text="Persons" )
+    self.personTab = tab
     self.personTree = self.makeTree( tab, ( "id", "first", "last" ), ( "ID", "First name", "Last name" ) )
     ttk.Button( tab, text="Refresh", command=self.refreshPersons ).pack( side="bottom", pady=6 )
     self.refreshPersons()
@@ -319,6 +438,10 @@ class DataMaintenance:
     self.personTree.delete( *self.personTree.get_children() )
     for person in listPersons( self.conn ):
       self.personTree.insert( "", "end", values=( person.id, person.first_name, person.last_name ) )
+
+  def onNotebookTabChanged( self, event ):
+    if event.widget is self.notebook and self.notebook.select() == str( self.personTab ):
+      self.refreshPersons()
 
   @staticmethod
   def clearForm( variables: list[ tk.StringVar ] ):

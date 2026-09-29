@@ -1,9 +1,12 @@
 """Tests for the database layer in soccer_homography/db/persist.py."""
 
+from datetime import datetime
+
 import pytest
 
 from soccer_homography.db import persist
 
+fixedTZ = datetime.now().astimezone().tzinfo
 
 class TestUpsertVideo:
   """Test cases for upsertVideo function."""
@@ -59,35 +62,35 @@ class TestUpsertMatch:
 
     assert isinstance( result, persist.Match )
     assert result.id == 1, "New match should get auto-incremented ID"
-    assert result.date == "2026-09-01", "Date should match input"
+    assert result.date == datetime( 2026, 9, 1, tzinfo=fixedTZ ), "Date should match input"
 
   @pytest.mark.usefixtures( "clear_test_database" )
   def test_upsert_match_update_existing( self, conn ):
     """Test updating an existing match record."""
     # First insert a match
-    orgResult = persist.upsertMatch( conn, persist.Match( id=0, date="2026-09-01", home="A", away="B", division="D" ) )
+    orgResult = persist.upsertMatch( conn, persist.Match( id=0, date=datetime( 2026, 9, 1, tzinfo=fixedTZ ), home="A", away="B", division="D" ) )
 
     # Then update with same ID (should trigger upsert via primary key)
-    updResult = persist.upsertMatch( conn, persist.Match( id=orgResult.id, date="2026-09-02", home="X", away="Y", division="Z" ) )
+    updResult = persist.upsertMatch( conn, persist.Match( id=orgResult.id, date=datetime( 2026, 9, 2, tzinfo=fixedTZ ), home="X", away="Y", division="Z" ) )
 
     assert updResult.id == orgResult.id, "Existing match should keep its ID"
-    assert updResult.date == "2026-09-02", "Date should be updated"
+    assert updResult.date == datetime( 2026, 9, 2, tzinfo=fixedTZ ), "Date should be updated"
     assert updResult.home == "X" and updResult.away == "Y" and updResult.division == "Z", "Other fields should be updated"
 
   @pytest.mark.usefixtures( "clear_test_database" )
   def test_upsert_match_id_zero_inserts( self, conn ):
     """Test that matches with id=0 always insert (never update)."""
-    persist.upsertMatch( conn, persist.Match( id=100, date="2026-09-01", home="A", away="B", division="D" ) )
+    persist.upsertMatch( conn, persist.Match( id=100, date=datetime( 2026, 9, 1, tzinfo=fixedTZ ), home="A", away="B", division="D" ) )
 
     # With id=0, it should insert even if a record with similar fields exists
-    result = persist.upsertMatch( conn, persist.Match( id=0, date="2026-09-02", home="X", away="Y", division="Z" ) )
+    result = persist.upsertMatch( conn, persist.Match( id=0, date=datetime( 2026, 9, 2, tzinfo=fixedTZ ), home="X", away="Y", division="Z" ) )
 
-    assert result.id != 0 and result.date == "2026-09-02", f"Should handle id=0 correctly. Got: {result}"
+    assert result.id != 0 and result.date == datetime( 2026, 9, 2, tzinfo=fixedTZ ), f"Should handle id=0 correctly. Got: {result}"
 
   @pytest.mark.usefixtures( "clear_test_database" )
   def test_upsert_match_returns_updated_object( self, conn ):
     """Test that upsertMatch returns the updated Match object."""
-    match = persist.Match( id=0, date="2026-09-01", home="A", away="B", division="D" )
+    match = persist.Match( id=0, date=datetime( 2026, 9, 1, tzinfo=fixedTZ ), home="A", away="B", division="D" )
 
     persist.upsertMatch( conn, match )
 
@@ -145,7 +148,7 @@ class TestUpsertClip:
     """Test inserting a new clip record after creating required parent records."""
     # First insert dependencies (video, match, camera)
     video = persist.Video( id=0, file="clip_video.mp4" )
-    match = persist.Match( id=0, date="2026-09-15", home="Team A", away="Team B", division="L" )
+    match = persist.Match( id=0, date=datetime( 2026, 9, 15, tzinfo=fixedTZ ), home="Team A", away="Team B", division="L" )
     camera = persist.Camera( id=0, name="Cam-A" )
     
     persist.upsertVideo( conn, video )
@@ -168,7 +171,7 @@ class TestUpsertClip:
     """Test updating an existing clip record."""
     # First create dependencies
     video = persist.Video( id=0, file="clip_video.mp4" )
-    match = persist.Match( id=0, date="2026-09-15", home="Team A", away="Team B", division="L" )
+    match = persist.Match( id=0, date=datetime( 2026, 9, 15, tzinfo=fixedTZ ), home="Team A", away="Team B", division="L" )
     camera = persist.Camera( id=0, name="Cam-A" )
     
     persist.upsertVideo( conn, video )
@@ -190,7 +193,7 @@ class TestUpsertClip:
     """Test that clips with id=0 always insert (never update)."""
     # Create dependencies
     video = persist.Video( id=0, file="first.mp4" )
-    match = persist.Match( id=0, date="2026-09-15", home="A", away="B", division="D" )
+    match = persist.Match( id=0, date=datetime( 2026, 9, 15, tzinfo=fixedTZ ), home="A", away="B", division="D" )
     camera = persist.Camera( id=0, name="First-Cam" )
     
     persist.upsertVideo( conn, video )
@@ -211,7 +214,7 @@ class TestUpsertClip:
     """Test that upsertClip returns the updated persist.ClipDB object."""
     # Create dependencies
     video = persist.Video( id=0, file="test.mp4" )
-    match = persist.Match( id=0, date="2026-09-15", home="A", away="B", division="D" )
+    match = persist.Match( id=0, date=datetime( 2026, 9, 15, tzinfo=fixedTZ ), home="A", away="B", division="D" )
     camera = persist.Camera( id=0, name="test-cam" )
     
     persist.upsertVideo( conn, video )
@@ -222,4 +225,3 @@ class TestUpsertClip:
     persist.upsertClip( conn, clip_obj )
     
     assert isinstance( persist.getClipByID( conn, clip_obj.id ), persist.ClipDB ), "Should return a persist.ClipDB instance"
-

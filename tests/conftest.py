@@ -1,6 +1,7 @@
 """PyTest configuration and fixtures for soccer_homography tests."""
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -21,20 +22,17 @@ def clear_test_database():
     print( f"Removing {TEST_DB})")
     os.remove( TEST_DB )
 
-  conn = persist.getConn( TEST_DB )
-
-  persist.initDB( TEST_DB )
-  conn.close()
+  conn = persist.initDB( TEST_DB )
+  try:
+    yield conn
+  finally:
+    conn.close()
 
 
 @pytest.fixture
-def conn():
-  """Get a fresh database connection for each test."""
-  # Import DuckDB's Python API wrapper to ensure we get the right module
-  from soccer_homography.db import persist
-
-  conn = persist.getConn( TEST_DB )
-  return conn
+def conn( clear_test_database ):
+  """Get the freshly initialized test database connection."""
+  return clear_test_database
 
 
 @pytest.fixture
@@ -46,7 +44,8 @@ def video():
 @pytest.fixture
 def match():
   """Create a sample Match fixture."""
-  return Match( id=0, date="2026-09-01", home="A", away="B", division="D" )
+  fixedTZ = datetime.now().astimezone().tzinfo
+  return Match( id=0, date=datetime( 2026, 9, 1, tzinfo=fixedTZ ), home="A", away="B", division="D" )
 
 
 @pytest.fixture

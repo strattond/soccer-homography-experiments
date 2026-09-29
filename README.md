@@ -38,3 +38,6 @@ uv sync
 uv run python .\gui.py
 ```
 
+## Importing Squadi match details
+
+In the app, open **Data Maintenance**, select the **Matches** tab, and choose **Import**. Select a `matchDetails.json` file and then the division to import. If a `results.json` file is alongside it, the importer uses its match results to set home and away team names. Dates are stored as timestamps, parsed from Squadi's `YYYYMMDDHHmm` format. Re-importing updates existing matches and participations and adds any newly listed players.
