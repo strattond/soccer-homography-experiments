@@ -1,7 +1,7 @@
-from collections.abc import Sequence
 import queue
 import threading
 import tkinter as tk
+from collections.abc import Sequence
 from dataclasses import dataclass
 from tkinter import messagebox, ttk
 
@@ -358,6 +358,7 @@ class Tracks:
           boxes_by_frame.setdefault( box.frame, [] ).append( ( track_id, box ) )
 
       shared_frames = self.selectSharedCropFrames( sorted( boxes_by_frame ) )
+      shared_frame_set = set( shared_frames )
       for completed, frame_number in enumerate( shared_frames, start=1 ):
         if cancel_event.is_set():
           return
@@ -377,12 +378,25 @@ class Tracks:
       fallback_tracks = [
           ( track_id, boxes )
           for track_id, boxes in tracks
-          if not cache[ track_id ] and boxes
+          if len( cache[ track_id ] ) < 6 and boxes
       ]
       for completed, ( track_id, boxes ) in enumerate( fallback_tracks, start=1 ):
         if cancel_event.is_set():
           return
-        cache[ track_id ] = self.extractTrackCrops( capture, track_id, boxes, cancel_event )
+        existing_frames = shared_frame_set | {
+            frame_number for frame_number, _crop in cache[ track_id ]
+        }
+        cache[ track_id ].extend(
+            self.extractTrackCrops(
+                capture,
+                track_id,
+                boxes,
+                cancel_event,
+                max_crops=6 - len( cache[ track_id ] ),
+                excluded_frames=existing_frames,
+            )
+        )
+        cache[ track_id ].sort( key=lambda crop: crop[ 0 ] )
         self.cropResults.put(
             CropJobMessage( generation, "progress", completed, len( fallback_tracks ), stage="fallback tracks" )
         )
@@ -415,16 +429,25 @@ class Tracks:
       track_id: int,
       boxes: list[ BoundingBox ],
       cancel_event: threading.Event | None = None,
+      *,
+      max_crops: int = 6,
+      excluded_frames: set[ int ] | None = None,
   ) -> CropSet:
-    count = min( 6, len( boxes ) )
-    if count == 0:
+    excluded_frames = excluded_frames or set()
+    available_boxes = [ box for box in boxes if box.frame not in excluded_frames ]
+    count = min( max_crops, len( available_boxes ) )
+    if count <= 0:
       return []
-    indices = [ round( i * ( len( boxes ) - 1 ) / max( count - 1, 1 ) ) for i in range( count ) ]
+    indices = [ round( i * ( len( available_boxes ) - 1 ) / max( count - 1, 1 ) ) for i in range( count ) ]
+    preferred_indices = list( dict.fromkeys( indices ) )
+    ordered_indices = preferred_indices + [ index for index in range( len( available_boxes ) ) if index not in preferred_indices ]
     crops: CropSet = []
-    for box_index in indices:
+    for box_index in ordered_indices:
+      if len( crops ) >= count:
+        break
       if cancel_event is not None and cancel_event.is_set():
         break
-      box = boxes[ box_index ]
+      box = available_boxes[ box_index ]
       capture.set( cv2.CAP_PROP_POS_FRAMES, box.frame )
       success, frame = capture.read()
       if not success:

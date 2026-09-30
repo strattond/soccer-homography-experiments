@@ -186,6 +186,7 @@ def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_
       ( 1, [ box( frame ) for frame in range( 10 ) ] ),
       ( 2, [ box( frame ) for frame in range( 10 ) ] ),
       ( 3, [ box( 1 ) ] ),
+      ( 4, [ box( frame ) for frame in range( 1, 9 ) ] ),
   ]
 
   tracks.collectCropsWorker( 7, "video.mp4", unknown_tracks, threading.Event() )
@@ -195,10 +196,11 @@ def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_
     messages.append( tracks.cropResults.get_nowait() )
   result = next( message for message in messages if message.kind == "done" )
 
-  assert capture.seeks == [ 0, 2, 4, 5, 7, 9, 1 ]
+  assert capture.seeks == [ 0, 2, 4, 5, 7, 9, 1, 1, 8 ]
   assert [ crop[ 0 ] for crop in result.crops[ 1 ] ] == [ 0, 2, 4, 5, 7, 9 ]
   assert [ crop[ 0 ] for crop in result.crops[ 2 ] ] == [ 0, 2, 4, 5, 7, 9 ]
   assert [ crop[ 0 ] for crop in result.crops[ 3 ] ] == [ 1 ]
+  assert [ crop[ 0 ] for crop in result.crops[ 4 ] ] == [ 1, 2, 4, 5, 7, 8 ]
 
 
 def test_view_change_redraws_detection_and_track_overlays():
