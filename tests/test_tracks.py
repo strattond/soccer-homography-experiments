@@ -1,5 +1,4 @@
 import queue
-import threading
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -9,7 +8,7 @@ import numpy as np
 
 from soccer_homography import App
 from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
-from soccer_homography.ui.config.tracks import Tracks
+from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.ui.LivePreview import LivePreview
 
@@ -145,17 +144,44 @@ def test_crop_coordinates_scale_to_source_frame_dimensions():
     def read( self ):
       return True, self.frame
 
-  tracks = Tracks.__new__( Tracks )
   box = BoundingBox( 10, 10, 20, 20, 0.9, 0, 0 )
 
-  crops = tracks.extractTrackCrops( cast( cv2.VideoCapture, SourceCapture() ), 8, [ box ] )
+  crops = cropFromFrame( SourceCapture().frame, box )
 
-  assert len( crops ) == 1
-  assert crops[ 0 ][ 1 ].shape[:2] == ( 10, 10 )
-  assert np.all( crops[ 0 ][ 1 ][ :, :, 0 ] == 255 )
+  assert crops is not None
+  assert crops.shape[:2] == ( 10, 10 )
+  assert np.all( crops[ :, :, 0 ] == 255 )
 
 
-def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_tracks(monkeypatch):
+def test_crop_frame_plan_prioritizes_frames_covering_more_tracks():
+  box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
+  tracks = [
+      ( 1, [ box( frame ) for frame in ( 5, 10, 15 ) ] ),
+      ( 2, [ box( frame ) for frame in ( 5, 11 ) ] ),
+      ( 3, [ box( frame ) for frame in ( 5, 12 ) ] ),
+      ( 4, [ box( frame ) for frame in ( 10, 11, 12 ) ] ),
+  ]
+
+  plan = planCropFrames( tracks )
+
+  assert plan[ 0 ].frameNumber == 5
+  assert { track_id for track_id, _box in plan[ 0 ].trackBoxes } == { 1, 2, 3 }
+
+
+def test_crop_frame_plan_spreads_samples_across_track_timeline():
+  box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
+  plan = planCropFrames( [ ( 1, [ box( frame ) for frame in range( 101 ) ] ) ] )
+
+  sampled_frames = [ planned.frameNumber for planned in plan[ :6 ] ]
+
+  assert min( abs( left - right ) for index, left in enumerate( sampled_frames ) for right in sampled_frames[ index + 1: ] ) >= 10
+  assert min( sampled_frames ) == 0
+  assert max( sampled_frames ) == 100
+
+
+def test_crop_worker_plans_first_and_reads_each_selected_frame_once(monkeypatch):
+  operations: list[ str ] = []
+
   class SourceCapture:
     def __init__( self ):
       self.frame_number = 0
@@ -170,6 +196,7 @@ def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_
       self.seeks.append( frame_number )
 
     def read( self ):
+      operations.append( "read" )
       frame = np.zeros( ( 40, 40, 3 ), dtype=np.uint8 )
       frame[ :, :, 0 ] = self.frame_number
       return True, frame
@@ -178,9 +205,19 @@ def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_
       pass
 
   capture = SourceCapture()
-  monkeypatch.setattr( "soccer_homography.ui.config.tracks.cv2.VideoCapture", Mock( return_value=capture ) )
-  tracks = Tracks.__new__( Tracks )
-  tracks.cropResults = queue.Queue()
+  def open_capture( _video_file ):
+    operations.append( "open" )
+    return capture
+
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", open_capture )
+  original_plan = planCropFrames
+
+  def record_plan( tracks, max_crops=6, cancel_event=None ):
+    operations.append( "plan" )
+    return original_plan( tracks, max_crops, cancel_event )
+
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.planCropFrames", record_plan )
+  results = queue.Queue()
   box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
   unknown_tracks = [
       ( 1, [ box( frame ) for frame in range( 10 ) ] ),
@@ -189,18 +226,74 @@ def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_
       ( 4, [ box( frame ) for frame in range( 1, 9 ) ] ),
   ]
 
-  tracks.collectCropsWorker( 7, "video.mp4", unknown_tracks, threading.Event() )
+  worker = CropExtractionWorker( 7, "video.mp4", unknown_tracks, results )
+  worker.run()
 
   messages = []
-  while not tracks.cropResults.empty():
-    messages.append( tracks.cropResults.get_nowait() )
+  while not results.empty():
+    messages.append( results.get_nowait() )
   result = next( message for message in messages if message.kind == "done" )
 
-  assert capture.seeks == [ 0, 2, 4, 5, 7, 9, 1, 1, 8 ]
-  assert [ crop[ 0 ] for crop in result.crops[ 1 ] ] == [ 0, 2, 4, 5, 7, 9 ]
-  assert [ crop[ 0 ] for crop in result.crops[ 2 ] ] == [ 0, 2, 4, 5, 7, 9 ]
+  assert operations[ 0:2 ] == [ "plan", "open" ]
+  assert len( capture.seeks ) == len( set( capture.seeks ) )
+  assert len( capture.seeks ) <= 10
+  assert len( result.crops[ 1 ] ) == 6
+  assert len( result.crops[ 2 ] ) == 6
   assert [ crop[ 0 ] for crop in result.crops[ 3 ] ] == [ 1 ]
-  assert [ crop[ 0 ] for crop in result.crops[ 4 ] ] == [ 1, 2, 4, 5, 7, 8 ]
+  assert len( result.crops[ 4 ] ) == 6
+
+
+def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatch):
+  class SourceCapture:
+    def __init__( self ):
+      self.frame_number = 0
+      self.read_count = 0
+
+    def isOpened( self ):
+      return True
+
+    def set( self, _property_id, frame_number ):
+      self.frame_number = frame_number
+
+    def read( self ):
+      self.read_count += 1
+      if self.read_count <= 2:
+        return False, None
+      frame = np.zeros( ( 40, 40, 3 ), dtype=np.uint8 )
+      return True, frame
+
+    def release( self ):
+      pass
+
+  capture = SourceCapture()
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", Mock( return_value=capture ) )
+  results = queue.Queue()
+  box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
+  worker = CropExtractionWorker( 8, "video.mp4", [ ( 1, [ box( frame ) for frame in range( 8 ) ] ) ], results )
+
+  worker.run()
+
+  messages = []
+  while not results.empty():
+    messages.append( results.get_nowait() )
+  result = next( message for message in messages if message.kind == "done" )
+  assert capture.read_count == 8
+  assert len( result.crops[ 1 ] ) == 6
+
+
+def test_crop_worker_cancellation_prevents_video_io(monkeypatch):
+  def unexpected_video_open( _video_file ):
+    raise AssertionError( "Cancelled crop work must not open the video." )
+
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", unexpected_video_open )
+  box = BoundingBox( 2, 2, 12, 12, 0.9, 0, 0 )
+  results = queue.Queue()
+  worker = CropExtractionWorker( 9, "video.mp4", [ ( 1, [ box ] ) ], results )
+  worker.cancel()
+
+  worker.run()
+
+  assert results.empty()
 
 
 def test_view_change_redraws_detection_and_track_overlays():
