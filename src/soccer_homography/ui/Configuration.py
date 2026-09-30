@@ -20,7 +20,7 @@ class TkinterLogHandler( logging.Handler ):
 
   def _append( self, msg ):
     self.text_widget.insert( tk.END, msg + "\n" )
-    self.text_widget.see( tk.END )  # auto-scroll
+    self.text_widget.yview_moveto( 1.0 )
 
 
 class Log:
@@ -29,8 +29,8 @@ class Log:
     self.tab = tab
 
   def setup( self ):
-    self.txtLog = ScrolledText( self.tab, width=80, height=20, state="normal" )
-    self.txtLog.pack( fill="both", expand=True )
+    self.txtLog = ScrolledText( self.tab, width=150, height=12, state="normal" )
+    self.txtLog.pack( anchor="nw", padx=4, pady=4 )
 
 
 class Configuration:

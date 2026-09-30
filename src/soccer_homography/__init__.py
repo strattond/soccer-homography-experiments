@@ -1,6 +1,6 @@
 import queue
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
 import cv2
 from PIL import Image, ImageTk
@@ -162,10 +162,8 @@ class App:
     self.lblSourceAction.place( x=left, y=top, width=100, height=24 )
 
     # Load Video from file or database
-    self.btnSourceVideo = tk.Button( self.root, text="Video", font=( "Arial", 12 ), command=self.cmdSourceVideo )
-    self.btnSourceVideo.place( x=left + 140, y=top, width=60, height=36 )
     self.btnSourceDB = tk.Button( self.root, text="DB", font=( "Arial", 12 ), command=self.cmdSourceDB )
-    self.btnSourceDB.place( x=left + 200, y=top, width=60, height=36 )
+    self.btnSourceDB.place( x=left + 140, y=top, width=60, height=36 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
 
@@ -227,13 +225,6 @@ class App:
     max = self.maxFrame.get()
     self.prgHomography.setRange( min, max )
     self.livePreviewController.play( min, max, encoder )
-
-  def cmdSourceVideo( self ):
-    filetypes = ( ( 'Video files', [ '*.mp4', '*.mkv' ] ),)
-
-    filename = filedialog.askopenfilename( title='Open video', initialdir='.', filetypes=filetypes )
-    if filename is not None:
-      self.loadSourceVideo( filename )
 
   def cmdSourceDB( self ):
     if self.appState.db is None:
