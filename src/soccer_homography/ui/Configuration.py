@@ -3,6 +3,7 @@ from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
 from soccer_homography.appState import AppState
+from soccer_homography.db import listClipParticipants
 from soccer_homography.log import logging
 from soccer_homography.ui.config import ImageOptionsUI, ImagePreview, Tracks, homographyData
 
@@ -31,6 +32,51 @@ class Log:
   def setup( self ):
     self.txtLog = ScrolledText( self.tab, width=150, height=12, state="normal" )
     self.txtLog.pack( anchor="nw", padx=4, pady=4 )
+
+
+class ClipParticipants:
+
+  def __init__( self, state: AppState, tab: ttk.Frame ) -> None:
+    self.state = state
+    self.tab = tab
+
+  def setup( self ):
+    self.participantTree = ttk.Treeview(
+        self.tab,
+        columns=( "shirt", "first", "last", "role" ),
+        show="headings",
+    )
+    for column, heading, width in (
+        ( "shirt", "Shirt", 70 ),
+        ( "first", "First name", 180 ),
+        ( "last", "Last name", 220 ),
+        ( "role", "Role", 180 ),
+    ):
+      self.participantTree.heading( column, text=heading )
+      self.participantTree.column( column, width=width, anchor="w" )
+    self.participantTree.place( x=0, y=24, width=600, height=160 )
+    scrollbar = ttk.Scrollbar( self.tab, orient="vertical", command=self.participantTree.yview )
+    scrollbar.place( x=600, y=24, height=160 )
+    self.participantTree.configure( yscrollcommand=scrollbar.set )
+    self.refresh()
+
+  def refresh( self ):
+    self.participantTree.delete( *self.participantTree.get_children() )
+    if self.state.db is None or self.state.curClipID <= 0:
+      return
+
+    for participant in listClipParticipants( self.state.db, self.state.curClipID ):
+      self.participantTree.insert(
+          "",
+          "end",
+          iid=str( participant.person_id.id ),
+          values=(
+              participant.shirt_number if participant.shirt_number is not None else "",
+              participant.person_id.first_name,
+              participant.person_id.last_name,
+              participant.role.replace( "_", " " ),
+          ),
+      )
 
 
 class Configuration:
@@ -67,6 +113,7 @@ class Configuration:
     self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
     self.tabLog = Log( self.createTab( "Log" ) )
+    self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
     self.tabTracks = Tracks( self.appState, self.createTab( "Tracks" ) )
     #self.tabCams = Cameras( self.appState, self.createTab( "Cameras" ) )
     #self.tabVideos = Videos( self.appState, self.createTab( "Videos" ) )
@@ -74,10 +121,15 @@ class Configuration:
     #self.tabPeople = People( self.appState, self.createTab( "People" ) )
     #self.tabClips = Clips( self.appState, self.createTab( "Matches" ) )
     self.nbControl.pack( expand=1, fill='both' )
-    self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabTracks ]
+    self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks ]
+    self.nbControl.bind( "<<NotebookTabChanged>>", self.onTabChanged )
 
     for tab in self.allTabs:
       tab.setup()
+
+  def onTabChanged( self, _event=None ):
+    if self.nbControl.select() == str( self.tabClipParticipants.tab ):
+      self.tabClipParticipants.refresh()
 
   def createTab( self, text ):
     newTab = ttk.Frame( self.nbControl )

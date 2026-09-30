@@ -225,3 +225,47 @@ class TestUpsertClip:
     persist.upsertClip( conn, clip_obj )
     
     assert isinstance( persist.getClipByID( conn, clip_obj.id ), persist.ClipDB ), "Should return a persist.ClipDB instance"
+
+
+class TestClipParticipants:
+
+  @pytest.mark.usefixtures( "clear_test_database" )
+  def test_list_clip_participants_returns_only_people_from_clip_match( self, conn ):
+    video = persist.upsertVideo( conn, persist.Video( id=0, file="participants.mp4" ) )
+    first_match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
+    second_match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="C", away="D", division="D" ) )
+    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="participants-cam" ) )
+    first_clip = persist.upsertClip(
+        conn,
+        persist.ClipDB( id=0, video_id=video.id, match_id=first_match.id, camera_id=camera.id, sequence=1 ),
+    )
+    second_clip = persist.upsertClip(
+        conn,
+        persist.ClipDB( id=0, video_id=video.id, match_id=second_match.id, camera_id=camera.id, sequence=1 ),
+    )
+    first_person = persist.upsertPerson( conn, persist.Person( id=0, first_name="Alex", last_name="Smith" ) )
+    second_person = persist.upsertPerson( conn, persist.Person( id=0, first_name="Jordan", last_name="Lee" ) )
+    other_match_person = persist.upsertPerson( conn, persist.Person( id=0, first_name="Taylor", last_name="Brown" ) )
+    persist.upsertPersonParticipation(
+        conn,
+        persist.PersonParticipationDB( first_match.id, first_person.id, 7, "home_player" ),
+    )
+    persist.upsertPersonParticipation(
+        conn,
+        persist.PersonParticipationDB( first_match.id, second_person.id, 10, "away_player" ),
+    )
+    persist.upsertPersonParticipation(
+        conn,
+        persist.PersonParticipationDB( second_match.id, other_match_person.id, 1, "home_goalkeeper" ),
+    )
+
+    participants = persist.listClipParticipants( conn, first_clip.id )
+
+    assert all( isinstance( participant, persist.PersonParticipation ) for participant in participants )
+    assert [ participant.person_id.id for participant in participants ] == [ first_person.id, second_person.id ]
+    assert participants[ 0 ].person_id.first_name == "Alex"
+    assert participants[ 0 ].person_id.last_name == "Smith"
+    assert participants[ 0 ].match_id.id == first_match.id
+    assert participants[ 0 ].shirt_number == 7
+    assert participants[ 0 ].role == "home_player"
+    assert persist.listClipParticipants( conn, second_clip.id )[ 0 ].person_id.id == other_match_person.id

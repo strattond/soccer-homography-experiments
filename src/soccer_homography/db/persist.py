@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import duckdb
 from squadi_data.fixed import DivisionData
@@ -66,7 +66,7 @@ class Person:
 class PersonParticipationDB:
   match_id: int
   person_id: int
-  shirt_number: int
+  shirt_number: int | None
   role: ParticipationRole
 
 
@@ -84,7 +84,7 @@ class Clip:
 class PersonParticipation:
   match_id: Match
   person_id: Person
-  shirt_number: int
+  shirt_number: int | None
   role: ParticipationRole
 
 
@@ -314,6 +314,43 @@ def getClipByID( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> ClipDB | Non
   return ClipDB( id=int( row[ 0 ] ), video_id=int( row[ 1 ] ), match_id=int( row[ 2 ] ), camera_id=int( row[ 3 ] ), sequence=int( row[ 4 ] ) )
 
 
+def listClipParticipants( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> list[ PersonParticipation ]:
+  rows = conn.execute(
+      """
+      SELECT
+        m.id, m.date, m.home, m.away, m.division, m.squadi_id,
+        p.id, p.first_name, p.last_name,
+        pp.shirt_number, pp.role
+      FROM clips AS c
+      JOIN matches AS m ON m.id = c.match_id
+      JOIN PersonParticipation AS pp ON pp.match_id = m.id
+      JOIN Person AS p ON p.id = pp.person_id
+      WHERE c.id = ?
+      ORDER BY pp.shirt_number NULLS LAST, p.last_name, p.first_name
+      """,
+      [ clip_id ],
+  ).fetchall()
+  return [
+      PersonParticipation(
+          match_id=Match(
+              id=int( row[ 0 ] ),
+              date=row[ 1 ],
+              home=str( row[ 2 ] or "" ),
+              away=str( row[ 3 ] or "" ),
+              division=str( row[ 4 ] or "" ),
+              squadi_id=int( row[ 5 ] ) if row[ 5 ] is not None else None,
+          ),
+          person_id=Person(
+              id=int( row[ 6 ] ),
+              first_name=str( row[ 7 ] ),
+              last_name=str( row[ 8 ] ),
+          ),
+          shirt_number=int( row[ 9 ] ) if row[ 9 ] is not None else None,
+          role=cast( ParticipationRole, str( row[ 10 ] ) ),
+      ) for row in rows
+  ]
+
+
 def listClips( conn: duckdb.DuckDBPyConnection, *, video_id: int | None = None, match_id: int | None = None, camera_id: int | None = None ) -> list[ ClipDB ]:
   clauses: list[ str ] = []
   params: list[ int ] = []
@@ -385,7 +422,7 @@ def upsertPersonParticipation( conn: duckdb.DuckDBPyConnection, participation: P
   return PersonParticipationDB(
       match_id=int( result[ 0 ] ),
       person_id=int( result[ 1 ] ),
-      shirt_number=int( result[ 2 ] ),
+      shirt_number=int( result[ 2 ] ) if result[ 2 ] is not None else None,
       role=participation.role,
   )
 

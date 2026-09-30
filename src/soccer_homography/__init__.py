@@ -15,8 +15,11 @@ from soccer_homography.dataTypes import (
     VideoData,
 )
 from soccer_homography.db import (
+    getCameraByID,
+    getMatchByID,
+    getVideoByID,
     initDB,
-    listVideos,
+    listClips,
     writeBatchDetections,
     writeBatchTracking,
 )
@@ -162,7 +165,7 @@ class App:
     self.lblSourceAction.place( x=left, y=top, width=100, height=24 )
 
     # Load Video from file or database
-    self.btnSourceDB = tk.Button( self.root, text="DB", font=( "Arial", 12 ), command=self.cmdSourceDB )
+    self.btnSourceDB = tk.Button( self.root, text="Clip", font=( "Arial", 12 ), command=self.cmdSourceClip )
     self.btnSourceDB.place( x=left + 140, y=top, width=60, height=36 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
@@ -226,40 +229,70 @@ class App:
     self.prgHomography.setRange( min, max )
     self.livePreviewController.play( min, max, encoder )
 
-  def cmdSourceDB( self ):
-    if self.appState.db is None:
-      self.appState.db = initDB()
-    videos = listVideos( self.appState.db )
-    if not videos:
-      messagebox.showinfo( "No videos", "There are no videos enrolled in the database.", parent=self.root )
+  def cmdSourceClip( self ):
+    conn = self.appState.db
+    if conn is None:
+      conn = initDB()
+      self.appState.db = conn
+    clips = listClips( conn )
+    if not clips:
+      messagebox.showinfo( "No clips", "There are no clips registered in the database.", parent=self.root )
       return
 
     window = tk.Toplevel( self.root )
-    window.title( "Select database video" )
+    window.title( "Select clip" )
     window.transient( self.root )
     window.grab_set()
     window.geometry( "800x400" )
-    tree = ttk.Treeview( window, columns=( "id", "file" ), show="headings", selectmode="browse" )
-    tree.heading( "id", text="ID" )
-    tree.heading( "file", text="File" )
-    tree.column( "id", width=70, anchor="center" )
-    tree.column( "file", width=680, anchor="w" )
-    tree.pack( fill="both", expand=True, padx=8, pady=8 )
-    for video in videos:
-      tree.insert( "", "end", iid=str( video.id ), values=( video.id, video.file ) )
+    content = ttk.Frame( window )
+    content.pack( fill="both", expand=True, padx=8, pady=8 )
+    tree = ttk.Treeview( content, columns=( "id", "match", "camera", "sequence", "file" ), show="headings", selectmode="browse" )
+    for column, heading, width in (
+        ( "id", "Clip ID", 70 ),
+        ( "match", "Match", 220 ),
+        ( "camera", "Camera", 120 ),
+        ( "sequence", "Sequence", 80 ),
+        ( "file", "Video", 300 ),
+    ):
+      tree.heading( column, text=heading )
+      tree.column( column, width=width, anchor="w" )
+    vertical_scrollbar = ttk.Scrollbar( content, orient="vertical", command=tree.yview )
+    horizontal_scrollbar = ttk.Scrollbar( content, orient="horizontal", command=tree.xview )
+    tree.configure( yscrollcommand=vertical_scrollbar.set, xscrollcommand=horizontal_scrollbar.set )
+    tree.grid( row=0, column=0, sticky="nsew" )
+    vertical_scrollbar.grid( row=0, column=1, sticky="ns" )
+    horizontal_scrollbar.grid( row=1, column=0, sticky="ew" )
+    content.rowconfigure( 0, weight=1 )
+    content.columnconfigure( 0, weight=1 )
+    clips_by_id = { clip.id: clip for clip in clips }
+    for clip in clips:
+      video = getVideoByID( conn, clip.video_id )
+      match = getMatchByID( conn, clip.match_id )
+      camera = getCameraByID( conn, clip.camera_id )
+      if video is None or match is None or camera is None:
+        logger.warning( f"Skipping clip {clip.id}: its video, match, or camera record is missing." )
+        continue
+      date = match.date.strftime( "%Y-%m-%d %H:%M" ) if match.date is not None else ""
+      tree.insert(
+          "",
+          "end",
+          iid=str( clip.id ),
+          values=( clip.id, f"{date} {match.home} v {match.away}", camera.name, clip.sequence, video.file ),
+      )
 
     def load_selected( _event=None ):
       selected = tree.selection()
       if not selected:
         return
-      video = next( ( item for item in videos if item.id == int( selected[ 0 ] ) ), None )
-      if video is not None and self.loadSourceVideo( video.file ):
+      clip = clips_by_id.get( int( selected[ 0 ] ) )
+      video = getVideoByID( conn, clip.video_id ) if clip is not None else None
+      if clip is not None and video is not None and self.loadSourceVideo( video.file, clip.id ):
         window.destroy()
 
     tree.bind( "<Double-1>", load_selected )
-    ttk.Button( window, text="Load selected", command=load_selected ).pack( pady=( 0, 8 ) )
+    ttk.Button( window, text="Load selected clip", command=load_selected ).pack( pady=( 0, 8 ) )
 
-  def loadSourceVideo( self, filename: str ) -> bool:
+  def loadSourceVideo( self, filename: str, clip_id: int ) -> bool:
     capture = cv2.VideoCapture( filename )
     if not capture.isOpened():
       capture.release()
@@ -269,6 +302,12 @@ class App:
       self.appState.cap.release()
     self.appState.videoFile = filename
     self.appState.cap = capture
+    self.appState.curClipID = clip_id
+    self.appState.boxes.clear()
+    self.appState.tracks.clear()
+    self.appState.framesProcessed = 0
+    self.appState.detectChunk = 0
+    self.appState.trackChunk = 0
     vidData = VideoData( capture )
     self.sldVideoFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.minFrame.setMax( max( 0, vidData.frames - 1 ) )
@@ -276,6 +315,7 @@ class App:
     self.mainImageController.load( capture, vidData )
     self.mainImageController.setFrame( 0 )
     self.minimap.updateTotalFrames( vidData.frames )
+    self.tabData.tabClipParticipants.refresh()
     self.checkButtonState()
     return True
 
