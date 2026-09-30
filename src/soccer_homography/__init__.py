@@ -98,10 +98,12 @@ class App:
 
     # imagePreview
     self.imagePreview = tk.Canvas( self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d1d5db" )
-    self.imagePreview.place( x=50, y=50, width=1280, height=720 )
+    self.imagePreview.place( x=50, y=20, width=1280, height=720 )
 
     # Tabular data + line detection options
     self.tabData = Configuration( parent=self.root, state=self.appState, on_change=self.on_options_change )
+    self.crops = ttk.LabelFrame( self.root, text="Crops" )
+    self.crops.place( x=680, y=690 + 56, width=650, height=240 )
 
     # radarMap
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
@@ -119,18 +121,13 @@ class App:
     self.lblLivePreview = tk.Label( self.root, text="Live Preview", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblLivePreview.place( x=1460, y=350, width=100, height=24 )
 
-    # lblHomography
-    self.lblHomography = tk.Label( self.root, text="Homography Point Matcher", fg="#000000", font=( "Arial", 12 ), anchor="center" )
-    self.lblHomography.place( x=50, y=20, width=200, height=24 )
-
     self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace )
 
     self.createWidgetsDetection( 1460, 740 )
     self.createWidgetsTrack( 1460, 780 )
     self.createWidgetsSource( 1460, 820 )
-    self.createWidgetsFrameControl( 740, 800 )
+    self.createWidgetsFrameControl( 1460, 900 )
     self.createWidgetsMisc( 1460, 900 )
-    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 12 ), command=self.openDataMaintenance ).place( x=1600, y=860, width=180, height=36 )
 
   def openDataMaintenance( self ):
     if self.appState.db is None:
@@ -143,12 +140,12 @@ class App:
     self.lblDetectAction.place( x=left, y=top, width=100, height=24 )
 
     # btnRunYoloDetection
-    self.btnYoloOneFrame = tk.Button( self.root, text="Frame", font=( "Arial", 12 ), command=self.cmdYoloOneFrame, state=tk.DISABLED )
-    self.btnYoloOneFrame.place( x=left + 140, y=top, width=60, height=36 )
+    self.btnYoloOneFrame = tk.Button( self.root, text="Frame", font=( "Arial", 10 ), command=self.cmdYoloOneFrame, state=tk.DISABLED )
+    self.btnYoloOneFrame.place( x=left + 110, y=top, width=52, height=28 )
 
     # btnRunYoloVidDetection
-    self.btnYoloRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdYoloRange, state=tk.DISABLED )
-    self.btnYoloRange.place( x=left + 200, y=top, width=60, height=36 )
+    self.btnYoloRange = tk.Button( self.root, text="Range", font=( "Arial", 10 ), command=self.cmdYoloRange, state=tk.DISABLED )
+    self.btnYoloRange.place( x=left + 162, y=top, width=52, height=28 )
 
   def createWidgetsTrack( self, left: int, top: int ):
     # lblDetectAction
@@ -156,8 +153,8 @@ class App:
     self.lblTrackAction.place( x=left, y=top, width=100, height=24 )
 
     # btnRunYoloVidDetection
-    self.btnTrackRange = tk.Button( self.root, text="Range", font=( "Arial", 12 ), command=self.cmdTrackRange, state=tk.DISABLED )
-    self.btnTrackRange.place( x=left + 140, y=top, width=60, height=36 )
+    self.btnTrackRange = tk.Button( self.root, text="Range", font=( "Arial", 10 ), command=self.cmdTrackRange, state=tk.DISABLED )
+    self.btnTrackRange.place( x=left + 110, y=top, width=52, height=28 )
 
   def createWidgetsSource( self, left: int, top: int ):
     # lblDetectAction
@@ -165,27 +162,30 @@ class App:
     self.lblSourceAction.place( x=left, y=top, width=100, height=24 )
 
     # Load Video from file or database
-    self.btnSourceDB = tk.Button( self.root, text="Clip", font=( "Arial", 12 ), command=self.cmdSourceClip )
-    self.btnSourceDB.place( x=left + 140, y=top, width=60, height=36 )
+    self.btnSourceDB = tk.Button( self.root, text="Clip", font=( "Arial", 10 ), command=self.cmdSourceClip )
+    self.btnSourceDB.place( x=left + 110, y=top, width=52, height=28 )
+    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 10 ), command=self.openDataMaintenance ).place(
+        x=left + 162, y=top, width=120, height=28
+    )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
 
     self.minimap = FrameMinimap( master=self.root, total_frames=0 )
-    self.minimap.place( x=left, y=top, width=500, height=24 )
+    self.minimap.place( x=1390, y=20, width=30, height=720 )
     # sliderVideoFrame
-    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 190, y=top + 60, width=200, height=24 )
+    self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 110, y=top, width=300, height=24 )
 
     # lblVideoFrameSlider
-    self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 12 ), anchor="center" )
-    self.lblVideoFrameSlider.place( x=left, y=top + 60, width=100, height=24 )
+    self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 10 ), anchor="center" )
+    self.lblVideoFrameSlider.place( x=left, y=top, width=100, height=24 )
 
-    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 110, width=200, height=24, offset=190, label="Start" )
-    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 190, y=top + 135, width=200, height=24, offset=190, label="Finish", initValue=100 )
+    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 90, y=top + 40, width=100, height=24, offset=80, label="Start" )
+    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 90, y=top + 68, width=100, height=24, offset=80, label="Finish", initValue=100 )
 
-    self.btnResetZoom = tk.Button( self.root, text="Reset Zoom", font=( "Arial", 12 ), command=self.cmdResetZoom )
-    self.btnResetZoom.place( x=left + 190, y=top + 170, width=100, height=36 )
-    self.btnResetPan = tk.Button( self.root, text="Reset Pan", font=( "Arial", 12 ), command=self.cmdResetPan )
-    self.btnResetPan.place( x=left + 290, y=top + 170, width=100, height=36 )
+    self.btnResetZoom = tk.Button( self.root, text="Reset Zoom", font=( "Arial", 10 ), command=self.cmdResetZoom )
+    self.btnResetZoom.place( x=left + 210, y=top + 40, width=88, height=28 )
+    self.btnResetPan = tk.Button( self.root, text="Reset Pan", font=( "Arial", 10 ), command=self.cmdResetPan )
+    self.btnResetPan.place( x=left + 298, y=top + 40, width=88, height=28 )
 
   def createWidgetsMisc( self, left: int, top: int ):
 
@@ -210,8 +210,8 @@ class App:
     self.root.bind( "<Escape>", self.clearPendingMapping )
     self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
-    self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=50, width=24, height=720 )
-    self.prgHomography = ProgressBarETA( root=self.root, x=left - 100, y=50, width=24, height=720 )
+    self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=20, width=24, height=720 )
+    self.prgHomography = ProgressBarETA( root=self.root, x=left - 100, y=20, width=24, height=720 )
 
   # ==========================================
   # Event Handlers - Implement your logic here
@@ -315,6 +315,7 @@ class App:
     self.mainImageController.load( capture, vidData )
     self.mainImageController.setFrame( 0 )
     self.minimap.updateTotalFrames( vidData.frames )
+    self.minimap.setCurrentFrame( 0 )
     self.tabData.tabClipParticipants.refresh()
     self.checkButtonState()
     return True
@@ -323,8 +324,10 @@ class App:
     return len( self.appState.data.world_pts ) >= 4
 
   def cmdUpdateVideoFrame( self, value ):
-    self.mainImageController.setFrame( int( value ) )
-    self.livePreviewController.updateMappings( self.appState.tracks, int( value ) )
+    frame = int( value )
+    self.mainImageController.setFrame( frame )
+    self.minimap.setCurrentFrame( frame )
+    self.livePreviewController.updateMappings( self.appState.tracks, frame )
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()

@@ -10,14 +10,15 @@ class FrameMinimap( tk.Canvas ):
       master,
       *,
       total_frames: int,
-      height: int = 20,
+      width: int = 20,
+      height: int = 200,
       bg_color="#2b2b2b",
       track_color="#404040",
       processed_color="#4CAF50",
       current_frame_color="#FFD54F",
       **kwargs,
   ):
-    super().__init__( master, height=height, bg=bg_color, highlightthickness=0, **kwargs )
+    super().__init__( master, width=width, height=height, bg=bg_color, highlightthickness=0, **kwargs )
 
     self.updateTotalFrames( total_frames )
 
@@ -36,6 +37,7 @@ class FrameMinimap( tk.Canvas ):
   def updateTotalFrames( self, newValue: int ):
     self.total_frames = newValue
     self.clearFrames()
+    self.redraw()
 
   def clearFrames( self ):
 
@@ -100,9 +102,12 @@ class FrameMinimap( tk.Canvas ):
   # Drawing
   # ------------------------------------------------------------------
 
-  def getLeftForFrame( self, frame_idx ):
-    width = self.winfo_width()
-    return width * frame_idx / self.total_frames
+  def getYForFrame( self, frame_idx: int ) -> float:
+    height = self.winfo_height()
+    if self.total_frames <= 1:
+      return float( height )
+    frame_idx = min( max( frame_idx, 0 ), self.total_frames - 1 )
+    return height * ( 1 - frame_idx / ( self.total_frames - 1 ) )
 
   def redraw( self ):
     self.delete( "all" )
@@ -110,7 +115,7 @@ class FrameMinimap( tk.Canvas ):
     width = self.winfo_width()
     height = self.winfo_height()
 
-    if width <= 1:
+    if width <= 1 or height <= 1:
       return
 
     # Background track
@@ -120,15 +125,14 @@ class FrameMinimap( tk.Canvas ):
     # Processed regions
 
     for start, end in self.convertMaskToRanges():
-
-      x0 = self.getLeftForFrame( start )
-      x1 = self.getLeftForFrame( end + 1 )
-
-      self.create_rectangle( x0, 0, x1, height, fill=self.processed_color, outline="" )
+      if self.total_frames <= 0:
+        continue
+      y0 = height * ( 1 - start / self.total_frames )
+      y1 = height * ( 1 - ( end + 1 ) / self.total_frames )
+      self.create_rectangle( 0, y1, width, y0, fill=self.processed_color, outline="" )
 
     # Current frame marker
 
     if self.current_frame is not None:
-
-      x = self.getLeftForFrame( self.current_frame )
-      self.create_line( x, 0, x, height, width=2, fill=self.current_frame_color )
+      y = self.getYForFrame( self.current_frame )
+      self.create_line( 0, y, width, y, width=2, fill=self.current_frame_color )

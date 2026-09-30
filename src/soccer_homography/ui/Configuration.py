@@ -105,21 +105,18 @@ class Configuration:
   # -------------------------------------------------------------
   def createLayout( self, on_change ):
 
-    self.root = ttk.Frame( master=self.parent, width=1280, height=240, borderwidth=5, relief='groove' )
-    self.root.place( x=50, y=720 + 56 )
+    #style = ttk.Style()
+    #style.configure( "Red.TFrame", background="red" )
+    self.root = ttk.LabelFrame( master=self.parent, borderwidth=5, relief='groove', text="Config" ) #, style="Red.TFrame" )
+    self.root.place( x=50, y=690 + 56 )
 
-    self.nbControl = ttk.Notebook( self.root, width=640, height=240 )
+    self.nbControl = ttk.Notebook( self.root, width=600, height=190 )
     self.tabImagePreview = ImagePreview( self.createTab( "Image Preview" ) )
     self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
     self.tabLog = Log( self.createTab( "Log" ) )
     self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
     self.tabTracks = Tracks( self.appState, self.createTab( "Tracks" ) )
-    #self.tabCams = Cameras( self.appState, self.createTab( "Cameras" ) )
-    #self.tabVideos = Videos( self.appState, self.createTab( "Videos" ) )
-    #self.tabMatches = Matches( self.appState, self.createTab( "Matches" ) )
-    #self.tabPeople = People( self.appState, self.createTab( "People" ) )
-    #self.tabClips = Clips( self.appState, self.createTab( "Matches" ) )
     self.nbControl.pack( expand=1, fill='both' )
     self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks ]
     self.nbControl.bind( "<<NotebookTabChanged>>", self.onTabChanged )
