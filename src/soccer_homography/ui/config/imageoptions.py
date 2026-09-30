@@ -1,8 +1,9 @@
 import tkinter as tk
 from dataclasses import dataclass, field
-from tkinter import BooleanVar, StringVar, ttk
+from tkinter import BooleanVar, StringVar, messagebox, ttk
 
 from soccer_homography.appState import AppState
+from soccer_homography.ui.config.vlm import DEFAULT_IDENTIFICATION_PROMPT, loadIdentificationPrompt, saveIdentificationPrompt
 
 
 @dataclass
@@ -15,6 +16,7 @@ class UIOptions:
   closeEdges:  BooleanVar = field( default_factory=tk.BooleanVar ) # Checkbox - close edges
   edgeType:    StringVar  = field( default_factory=tk.StringVar )  # Combo box - edge type - Canny, Scharr
   lineType:    StringVar  = field( default_factory=tk.StringVar )  # Combo box - line type - Hough, LineSegmentDetector
+  identificationModel: StringVar = field( default_factory=lambda: tk.StringVar( value="VLM" ) )
   # yapf: enable
 
 
@@ -25,31 +27,60 @@ class ImageOptionsUI:
     self.appState: AppState = state
     self.uiOpts = UIOptions()
     self.on_change = on_change
+    self.identificationPrompt = DEFAULT_IDENTIFICATION_PROMPT
 
-  def createCheck( self, text, variable ):
-    return ttk.Checkbutton( self.tab, text=text, variable=variable, command=self.uiToState, compound='left' )
+  def createCheck( self, text, variable, parent=None ):
+    return ttk.Checkbutton( parent or self.tab, text=text, variable=variable, command=self.uiToState, compound='left' )
 
   def setup( self ):
-    self.optShowHough = self.createCheck( text="Show Edge Detection", variable=self.uiOpts.showHough )
-    self.optPreBlur = self.createCheck( text="Blur before detection", variable=self.uiOpts.preBlur )
-    self.optRemoveSky = self.createCheck( text="Remove sky?", variable=self.uiOpts.removeSky )
-    self.optEdgeEnhance = self.createCheck( text="Edge enhancement", variable=self.uiOpts.edgeEnhance )
-    self.optCloseEdges = self.createCheck( text="Try close edges", variable=self.uiOpts.closeEdges )
+    optionsFrame = ttk.Frame( self.tab )
+    optionsFrame.pack( side="left", anchor="nw", fill="y", padx=( 4, 8 ), pady=4 )
+    self.optShowHough = self.createCheck( text="Show Edge Detection", variable=self.uiOpts.showHough, parent=optionsFrame )
+    self.optPreBlur = self.createCheck( text="Blur before detection", variable=self.uiOpts.preBlur, parent=optionsFrame )
+    self.optRemoveSky = self.createCheck( text="Remove sky?", variable=self.uiOpts.removeSky, parent=optionsFrame )
+    self.optEdgeEnhance = self.createCheck( text="Edge enhancement", variable=self.uiOpts.edgeEnhance, parent=optionsFrame )
+    self.optCloseEdges = self.createCheck( text="Try close edges", variable=self.uiOpts.closeEdges, parent=optionsFrame )
     edgeTypes = ( 'Canny', 'Scharr' )
-    self.optEdgeType = ttk.Combobox( self.tab, textvariable=self.uiOpts.edgeType, values=edgeTypes )
+    self.optEdgeType = ttk.Combobox( optionsFrame, textvariable=self.uiOpts.edgeType, values=edgeTypes )
     lineTypes = ( 'Hough', 'LineSegmentDetector' )
-    self.optLineType = ttk.Combobox( self.tab, textvariable=self.uiOpts.lineType, values=lineTypes )
+    self.optLineType = ttk.Combobox( optionsFrame, textvariable=self.uiOpts.lineType, values=lineTypes )
+    self.optIdentificationModel = ttk.Combobox(
+        optionsFrame,
+        textvariable=self.uiOpts.identificationModel,
+        values=( "VLM", "Clip" ),
+        state="readonly",
+    )
 
-    self.optShowHough.pack( anchor='w' )
-    self.optPreBlur.pack( anchor='w' )
-    self.optRemoveSky.pack( anchor='w' )
-    self.optEdgeEnhance.pack( anchor='w' )
-    self.optCloseEdges.pack( anchor='w' )
-    self.optEdgeType.pack( anchor='w' )
-    self.optLineType.pack( anchor='w' )
+    for widget in (
+        self.optShowHough,
+        self.optPreBlur,
+        self.optRemoveSky,
+        self.optEdgeEnhance,
+        self.optCloseEdges,
+        self.optEdgeType,
+        self.optLineType,
+    ):
+      widget.pack( anchor="w" )
+    ttk.Label( optionsFrame, text="Person identification model" ).pack( anchor="w" )
+    self.optIdentificationModel.pack( anchor="w" )
+
+    promptFrame = ttk.LabelFrame( self.tab, text="Person identification prompt" )
+    promptFrame.pack( side="left", anchor="nw", fill="both", expand=True, padx=4, pady=4 )
+    self.promptText = tk.Text( promptFrame, height=5, wrap="word", undo=True )
+    self.promptText.pack( side="left", fill="both", expand=True, padx=( 4, 0 ), pady=4 )
+    promptScrollbar = ttk.Scrollbar( promptFrame, orient="vertical", command=self.promptText.yview )
+    promptScrollbar.pack( side="right", fill="y", padx=( 0, 4 ), pady=4 )
+    self.promptText.configure( yscrollcommand=promptScrollbar.set )
+    self.promptSaveButton = ttk.Button( promptFrame, text="Save prompt", command=self.savePrompt )
+    self.promptSaveButton.pack( side="bottom", anchor="e", padx=4, pady=( 0, 4 ) )
+    self.identificationPrompt = loadIdentificationPrompt()
+    self.promptText.insert( "1.0", self.identificationPrompt )
 
     self.optEdgeType.bind( '<<ComboboxSelected>>', self.comboChange )
     self.optLineType.bind( '<<ComboboxSelected>>', self.comboChange )
+
+  def getIdentificationModel( self ) -> str:
+    return self.uiOpts.identificationModel.get()
 
   def uiToState( self ):
     self.appState.imgOpts.closeEdges = self.uiOpts.closeEdges.get()
@@ -75,3 +106,19 @@ class ImageOptionsUI:
     self.uiOpts.preBlur.set( self.appState.imgOpts.preBlur )
     self.uiOpts.removeSky.set( self.appState.imgOpts.removeSky )
     self.uiOpts.showHough.set( self.appState.imgOpts.showHough )
+
+  def getIdentificationPrompt( self ) -> str:
+    return self.promptText.get( "1.0", "end-1c" ).strip()
+
+  def savePrompt( self, prompt: str | None = None ) -> bool:
+    prompt = self.getIdentificationPrompt() if prompt is None else prompt.strip()
+    if not prompt:
+      messagebox.showerror( "Prompt not saved", "The identification prompt cannot be empty.", parent=self.tab )
+      return False
+    try:
+      saveIdentificationPrompt( prompt )
+    except OSError as error:
+      messagebox.showerror( "Prompt not saved", str( error ), parent=self.tab )
+      return False
+    self.identificationPrompt = prompt
+    return True

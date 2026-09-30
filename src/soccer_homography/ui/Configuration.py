@@ -124,7 +124,15 @@ class Configuration:
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
     self.tabLog = Log( self.createTab( "Log" ) )
     self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
-    self.tabTracks = Tracks( self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select )
+    self.tabTracks = Tracks(
+        self.appState,
+        self.createTab( "Tracks" ),
+        self.crops_frame,
+        on_frame_select,
+        self.tabImageOptions.getIdentificationPrompt,
+        self.tabImageOptions.savePrompt,
+        self.tabImageOptions.getIdentificationModel,
+    )
     self.nbControl.pack( expand=1, fill='both' )
     self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks ]
     self.nbControl.bind( "<<NotebookTabChanged>>", self.onTabChanged )

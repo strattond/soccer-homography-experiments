@@ -1,7 +1,7 @@
 import queue
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 
 import duckdb
 from PIL import Image, ImageTk
@@ -12,7 +12,17 @@ from soccer_homography.dataTypes import Person as TrackPerson
 from soccer_homography.db import ClipTrackDB, PersonParticipation, listClipParticipants, listClipTracks, upsertClipTrack
 from soccer_homography.log import logger
 from soccer_homography.ui.config.crop_worker import CropCache, CropExtractionWorker, CropJobMessage, CropSet
-from soccer_homography.ui.config.vlm import MoondreamVLM, VLMInferenceWorker, VLMJobMessage
+from soccer_homography.ui.config.vlm import (
+    DEFAULT_IDENTIFICATION_PROMPT,
+    ClipImageResult,
+    ClipRoleClassifier,
+    IdentificationImageResult,
+    MoondreamVLM,
+    VLMInferenceWorker,
+    VLMJobMessage,
+    mostLikelyRole,
+    roleVoteCounts,
+)
 
 
 class Tracks:
@@ -32,6 +42,9 @@ class Tracks:
       tab: ttk.Frame,
       crops_frame: ttk.LabelFrame,
       on_frame_select: Callable[ [ int ], None ] | None = None,
+      prompt_provider: Callable[ [], str ] | None = None,
+      prompt_saver: Callable[ [ str ], bool ] | None = None,
+      model_provider: Callable[ [], str ] | None = None,
   ) -> None:
     self.appState = appState
     self.tab = tab
@@ -42,6 +55,7 @@ class Tracks:
     self.editor: ttk.Combobox | None = None
     self.cropImages: list[ ImageTk.PhotoImage ] = []
     self.cropLabels: list[ ttk.Label ] = []
+    self.cropResultLabels: dict[ int, ttk.Label ] = {}
     self.cropResults: queue.Queue[ CropJobMessage ] = queue.Queue()
     self.cropGeneration = 0
     self.selTrackID: int | None = None
@@ -49,6 +63,9 @@ class Tracks:
     self.cropCache: CropCache = {}
     self.cropCacheClipID: int | None = None
     self.frameSelectCallback: Callable[ [ int ], None ] | None = on_frame_select
+    self.promptProvider = prompt_provider
+    self.promptSaver = prompt_saver
+    self.modelProvider = model_provider
 
   def setup( self ) -> None:
     colNames = [ "Track ID", "Num Frames", "Person", "Role" ]
@@ -80,16 +97,11 @@ class Tracks:
     self.cropWorker: CropExtractionWorker | None = None
     self.vlmWorker: VLMInferenceWorker | None = None
     self.vlmModel = MoondreamVLM()
+    self.clipModel = ClipRoleClassifier()
     self.vlmResults: queue.Queue[ VLMJobMessage ] = queue.Queue()
     self.vlmGeneration = 0
     self.vlmButton: tk.Button | None = None
     self.cropsButtonEnabled = False
-    self.vlmPrompt = (
-        "Identify the role of the person in the crop. "
-        "A home player is wearing a red and white striped shirt; an away player is wearing the opposing team's kit. "
-        "A goalkeeper may wear a distinct goalkeeper kit. "
-        "A referee is wearing a bright yellow shirt, or a black shirt and holding a flag."
-    )
     self.refresh()
     self.tab.after( 50, self.pollCropResults )
     self.tab.after( 100, self.pollVLMResults )
@@ -348,6 +360,14 @@ class Tracks:
     if self.vlmButton is not None:
       self.vlmButton.config( state=tk.NORMAL if enabled else tk.DISABLED )
 
+  def setPromptProvider(
+      self,
+      provider: Callable[ [], str ],
+      saver: Callable[ [ str ], bool ],
+  ) -> None:
+    self.promptProvider = provider
+    self.promptSaver = saver
+
   def runVLM( self ) -> None:
     if self.selTrackID is None:
       messagebox.showinfo( "VLM role suggestion", "Select a track with cached crops first.", parent=self.tab )
@@ -357,20 +377,22 @@ class Tracks:
       messagebox.showinfo( "VLM role suggestion", "Collect crops before requesting a role suggestion.", parent=self.tab )
       self.updateVLMButtonState()
       return
-    prompt = simpledialog.askstring(
-        "VLM role prompt",
-        "Describe the team shirts or clues to help identify the role:",
-        initialvalue=self.vlmPrompt,
-        parent=self.tab,
-    )
-    if prompt is None:
-      return
-    prompt = prompt.strip()
-    if not prompt:
-      messagebox.showerror( "VLM role prompt", "Enter a prompt before running the VLM.", parent=self.tab )
+    model_name = self.modelProvider() if self.modelProvider is not None else "VLM"
+    if model_name == "Clip":
+      prompt = ""
+      model = self.clipModel
+    elif model_name == "VLM":
+      prompt = self.promptProvider() if self.promptProvider is not None else DEFAULT_IDENTIFICATION_PROMPT
+      if not prompt:
+        messagebox.showerror( "VLM role prompt", "Enter a prompt in the Image Options tab before running the VLM.", parent=self.tab )
+        return
+      if self.promptSaver is not None and not self.promptSaver( prompt ):
+        return
+      model = self.vlmModel
+    else:
+      messagebox.showerror( "Identification model unavailable", f"Unsupported identification model: {model_name}", parent=self.tab )
       return
 
-    self.vlmPrompt = prompt
     self.vlmGeneration += 1
     self.vlmWorker = VLMInferenceWorker(
         self.vlmGeneration,
@@ -378,10 +400,11 @@ class Tracks:
         self.selTrackID,
         list( crops ),
         prompt,
-        self.vlmModel,
+        model,
         self.vlmResults,
     )
-    self.cropStatus.config( text=f"Analyzing Track {self.selTrackID} crops with Moondream..." )
+    self.activeIdentifier = model_name
+    self.cropStatus.config( text=f"Analyzing Track {self.selTrackID} crops with {model_name}..." )
     self.updateVLMButtonState()
     self.vlmWorker.start()
 
@@ -457,46 +480,105 @@ class Tracks:
       if message.generation != self.vlmGeneration or message.clip_id != self.appState.curClipID:
         continue
       if message.kind == "progress":
-        self.cropStatus.config( text=f"Analyzing Track {message.track_id}: crop {message.completed} / {message.total}" )
+        self.cropStatus.config(
+            text=f"Analyzing Track {message.track_id} with {self.activeIdentifier}: "
+            f"crop {message.completed} / {message.total}"
+        )
+      elif message.kind == "answer" and message.image_result is not None:
+        self.updateCropResultLabel( message.image_result )
+        self.cropStatus.config(
+            text=f"Track {message.track_id}, frame {message.image_result.frame_number}: "
+            f"{self.formatIdentificationGuess( message.image_result )}"
+        )
       elif message.kind == "error":
         self.vlmWorker = None
         self.updateVLMButtonState()
-        self.cropStatus.config( text="VLM role analysis failed." )
+        self.cropStatus.config( text=f"{self.activeIdentifier} role analysis failed." )
         if message.error is not None:
-          logger.error( f"VLM role analysis failed: {message.error}" )
-          messagebox.showerror( "VLM role analysis failed", str( message.error ), parent=self.tab )
+          logger.error( f"{self.activeIdentifier} role analysis failed: {message.error}" )
+          messagebox.showerror( f"{self.activeIdentifier} role analysis failed", str( message.error ), parent=self.tab )
       elif message.kind == "done":
         self.vlmWorker = None
         self.updateVLMButtonState()
         answers = message.answers or []
-        answer_text = "\n".join( f"Frame {frame_number}: {answer}" for frame_number, answer in answers )
-        if message.role is None:
+        vote_counts = message.vote_counts or roleVoteCounts( answers )
+        role = message.role if message.vote_counts is not None else mostLikelyRole( vote_counts )
+        report = self.formatIdentificationReport( role, vote_counts, answers )
+        if role is None:
           messagebox.showinfo(
-              "VLM role suggestion",
-              f"Could not identify one consistent role from the crop responses.\n\n{answer_text}",
+              f"{self.activeIdentifier} role votes",
+              report,
               parent=self.tab,
           )
-          self.cropStatus.config( text=f"VLM could not determine a consistent role for Track {message.track_id}." )
+          self.cropStatus.config( text=f"{self.activeIdentifier} did not produce a unique role for Track {message.track_id}." )
         else:
           apply_role = messagebox.askyesno(
-              "VLM role suggestion",
-              f"Suggested role for Track {message.track_id}: {message.role.replace( '_', ' ' )}\n\n"
-              f"{answer_text}\n\nApply and save this role?",
+              f"{self.activeIdentifier} role votes",
+              f"Track {message.track_id}\n\n{report}\n\nApply and save the most likely role?",
               parent=self.tab,
           )
           if apply_role:
             track = self.appState.tracks.get( message.track_id )
             if track is None:
               continue
-            if self.persistAssignment( track.id, track.numId(), message.role ):
-              track.role = message.role
+            if self.persistAssignment( track.id, track.numId(), role ):
+              track.role = role
               self.refresh()
               if self.tblTrackData.exists( str( track.id ) ):
                 self.tblTrackData.selection_set( str( track.id ) )
-              self.cropStatus.config( text=f"Saved VLM role {message.role.replace( '_', ' ' )} for Track {track.id}." )
+              self.cropStatus.config(
+                  text=f"Saved {self.activeIdentifier} role {role.replace( '_', ' ' )} for Track {track.id}."
+              )
           else:
-            self.cropStatus.config( text=f"VLM suggested {message.role.replace( '_', ' ' )} for Track {message.track_id}." )
+            self.cropStatus.config(
+                text=f"{self.activeIdentifier} most likely role: {role.replace( '_', ' ' )} "
+                f"for Track {message.track_id}."
+            )
     self.tab.after( 100, self.pollVLMResults )
+
+  @staticmethod
+  def formatIdentificationGuess( result: IdentificationImageResult ) -> str:
+    guess = result.role.replace( "_", " " ) if result.role is not None else "no role guess"
+    if isinstance( result, ClipImageResult ):
+      return f"{guess} ({result.confidence:.0%} confidence)"
+    return guess
+
+  @staticmethod
+  def formatIdentificationReport(
+      role: ParticipationRole | None,
+      counts: dict[ ParticipationRole, int ],
+      answers: list[ IdentificationImageResult ],
+  ) -> str:
+    max_count = max( counts.values(), default=0 )
+    if role is not None:
+      result = f"Most likely: {role.replace( '_', ' ' )} ({max_count} vote(s))"
+    elif max_count:
+      tied_roles = [ name.replace( "_", " " ) for name, count in counts.items() if count == max_count ]
+      result = f"Most likely: tie ({max_count} votes each for {', '.join( tied_roles )})"
+    else:
+      result = "Most likely: no role could be identified"
+    votes = "\n".join(
+        f"{name.replace( '_', ' ' )}: {counts.get( name, 0 )}"
+        for name in Tracks.roles
+    )
+    clip_confidences = [
+        answer.confidence
+        for answer in answers
+        if isinstance( answer, ClipImageResult ) and answer.role == role
+    ]
+    if role is not None and clip_confidences:
+      confidence = sum( clip_confidences ) / len( clip_confidences )
+      result += f"\nMean CLIP confidence for most likely role: {confidence:.0%}"
+    crop_results = "\n".join(
+        f"Frame {answer.frame_number}: {Tracks.formatIdentificationGuess( answer )}"
+        for answer in answers
+    )
+    return f"{result}\n\nVotes:\n{votes}\n\nCrop results:\n{crop_results}"
+
+  def updateCropResultLabel( self, result: IdentificationImageResult ) -> None:
+    label = self.cropResultLabels.get( result.frame_number )
+    if label is not None and label.winfo_exists():
+      label.config( text=self.formatIdentificationGuess( result ) )
 
   def displayCrops( self, crops: CropSet ) -> None:
     for slot, ( frame_number, crop ) in enumerate( crops ):
@@ -506,6 +588,10 @@ class Tracks:
       label.bind( "<Button-1>", lambda _event, frame=frame_number: self.selectCropFrame( frame ) )
       label.grid( row=0, column=slot, padx=2, pady=( 58, 0 ), sticky="n" )
       self.cropLabels.append( label )
+      result_label = ttk.Label( self.cropsFrame, text="Role: not analyzed", wraplength=105, justify="center" )
+      result_label.grid( row=1, column=slot, padx=2, pady=( 2, 0 ), sticky="n" )
+      result_label.bind( "<Button-1>", lambda _event, frame=frame_number: self.selectCropFrame( frame ) )
+      self.cropResultLabels[ frame_number ] = result_label
 
   def selectCropFrame( self, frame_number: int ) -> None:
     if self.frameSelectCallback is not None:
@@ -514,5 +600,8 @@ class Tracks:
   def clearCropImages( self ) -> None:
     for label in self.cropLabels:
       label.destroy()
+    for label in self.cropResultLabels.values():
+      label.destroy()
     self.cropLabels.clear()
+    self.cropResultLabels.clear()
     self.cropImages.clear()

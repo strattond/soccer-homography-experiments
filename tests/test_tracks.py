@@ -12,10 +12,21 @@ from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
 from soccer_homography.ui.config.vlm import (
+    DEFAULT_IDENTIFICATION_PROMPT,
+    ClipImageResult,
+    ClipResponse,
+    ClipRoleClassifier,
     MIN_VLM_GPU_MEMORY_BYTES,
     MoondreamVLM,
+    VLMImageResult,
+    VLMResponse,
     VLMInferenceWorker,
     guessRole,
+    loadIdentificationPrompt,
+    mostLikelyRole,
+    roleVoteCounts,
+    saveIdentificationPrompt,
+    selectClipDevice,
     selectVLMDeviceMap,
 )
 from soccer_homography.ui.components import Slider
@@ -371,7 +382,8 @@ def test_moondream_vlm_queries_rgb_crop_and_role_votes():
   model.model = fake_model
   image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
 
-  assert model.query( image, "Identify the role." ) == "home_player"
+  response = model.query( image, "Identify the role." )
+  assert response == VLMResponse( "home_player" )
   assert fake_model.images[ 0 ].size == ( 10, 10 )
   worker = VLMInferenceWorker(
       1,
@@ -429,10 +441,101 @@ def test_moondream_load_uses_the_selected_single_device(monkeypatch):
   )
 
 
+def test_identification_prompt_loads_default_or_saved_multiline_content(tmp_path):
+  prompt_path = tmp_path / "identificationPrompt.txt"
+
+  assert loadIdentificationPrompt( prompt_path ) == DEFAULT_IDENTIFICATION_PROMPT
+
+  prompt = "Home team wears stripes.\nThe referee wears yellow."
+  saveIdentificationPrompt( prompt, prompt_path )
+
+  assert prompt_path.read_text( encoding="utf-8" ) == prompt + "\n"
+  assert loadIdentificationPrompt( prompt_path ) == prompt
+
+
+def test_moondream_response_ignores_confidence():
+  class FakeModel:
+    def query( self, _image, prompt ):
+      self.prompt = prompt
+      return { "answer": "referee", "confidence": 0.94 }
+
+  model = MoondreamVLM()
+  model.model = FakeModel()
+  image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
+
+  assert model.query( image, "Identify the role." ) == VLMResponse( "referee" )
+
+
+def test_identification_guess_shows_confidence_only_for_clip():
+  clip_result = ClipImageResult( 12, "home_player", 0.94 )
+  vlm_result = VLMImageResult( 20, "referee", "referee" )
+
+  assert Tracks.formatIdentificationGuess( clip_result ) == "home player (94% confidence)"
+  assert Tracks.formatIdentificationGuess( vlm_result ) == "referee"
+
+
+def test_clip_role_classifier_returns_top_role_and_softmax_confidence():
+  import torch
+
+  class FakeProcessor:
+    def __call__( self, *, text, images, return_tensors, padding ):
+      assert len( text ) == 6
+      assert images.size == ( 10, 10 )
+      assert return_tensors == "pt"
+      assert padding is True
+      return { "pixel_values": torch.zeros( ( 1, 3, 10, 10 ) ) }
+
+  class FakeModel:
+    def __call__( self, **_inputs ):
+      return SimpleNamespace( logits_per_image=torch.tensor( [ [ 0.0, 0.0, 0.0, 0.0, 5.0, 0.0 ] ] ) )
+
+  model = ClipRoleClassifier()
+  model.model = FakeModel()
+  model.processor = FakeProcessor()
+  image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
+
+  result = model.query( image )
+
+  assert result.role == "referee"
+  assert 0.9 < result.confidence < 1.0
+
+
+def test_clip_device_selection_falls_back_when_gpu_memory_is_low():
+  cpu_only = SimpleNamespace( cuda=SimpleNamespace( is_available=lambda: False ) )
+  low_memory = SimpleNamespace( cuda=SimpleNamespace( is_available=lambda: True, mem_get_info=lambda _device: ( 0, 0 ) ) )
+  enough_memory = SimpleNamespace(
+      cuda=SimpleNamespace( is_available=lambda: True, mem_get_info=lambda _device: ( 2 * 1024**3, 4 * 1024**3 ) )
+  )
+
+  assert selectClipDevice( cpu_only ) == "cpu"
+  assert selectClipDevice( low_memory ) == "cpu"
+  assert selectClipDevice( enough_memory ) == "cuda:0"
+
+
+def test_clip_model_load_uses_one_selected_device( monkeypatch ):
+  model_loader = Mock( return_value=object() )
+  processor_loader = Mock( return_value=object() )
+  transformers_stub = SimpleNamespace(
+      CLIPModel=SimpleNamespace( from_pretrained=model_loader ),
+      CLIPProcessor=SimpleNamespace( from_pretrained=processor_loader ),
+  )
+  monkeypatch.setitem( sys.modules, "transformers", transformers_stub )
+  monkeypatch.setattr( "soccer_homography.ui.config.vlm.selectClipDevice", lambda _torch: "cpu" )
+  classifier = ClipRoleClassifier()
+
+  model, processor, device = classifier.loadModel()
+
+  assert model is model_loader.return_value
+  assert processor is processor_loader.return_value
+  assert device == "cpu"
+  model_loader.assert_called_once_with( "openai/clip-vit-base-patch32", device_map={ "": "cpu" } )
+  processor_loader.assert_called_once_with( "openai/clip-vit-base-patch32" )
+
+
 def test_vlm_worker_returns_per_crop_responses_and_role_guess():
   class FakeVLM(MoondreamVLM):
-    def query( self, _image, _prompt ):
-      return "referee"
+    def query( self, image, prompt ):
+      return VLMResponse( "referee" )
 
   results = queue.Queue()
   crops = [
@@ -447,8 +550,60 @@ def test_vlm_worker_returns_per_crop_responses_and_role_guess():
   while not results.empty():
     messages.append( results.get_nowait() )
   result = next( message for message in messages if message.kind == "done" )
-  assert result.answers == [ ( 12, "referee" ), ( 20, "referee" ) ]
+  assert [ answer.answer for answer in result.answers ] == [ "referee", "referee" ]
   assert result.role == "referee"
+  assert result.vote_counts[ "referee" ] == 2
+
+
+def test_identification_worker_votes_across_clip_crops_and_continues():
+  class FakeClip( ClipRoleClassifier ):
+    def __init__( self ):
+      super().__init__()
+      self.index = 0
+
+    def query( self, image, prompt="" ):
+      self.index += 1
+      return ClipResponse( "home_player" if self.index <= 2 else "referee", 0.95 )
+
+  results = queue.Queue()
+  crops = [ ( number, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) for number in ( 12, 20, 30 ) ]
+  worker = VLMInferenceWorker( 5, 7, 8, crops, "", FakeClip(), results )
+
+  worker.run()
+
+  messages = []
+  while not results.empty():
+    messages.append( results.get_nowait() )
+  done = next( message for message in messages if message.kind == "done" )
+  assert done.kind == "done"
+  assert len( done.answers ) == 3
+  assert done.role == "home_player"
+  assert done.vote_counts[ "home_player" ] == 2
+  assert done.vote_counts[ "referee" ] == 1
+  assert all( result.confidence == 0.95 for result in done.answers )
+
+
+def test_role_vote_tie_has_no_unique_winner():
+  counts = roleVoteCounts(
+      [
+          ClipImageResult( 12, "home_player", 0.8 ),
+          ClipImageResult( 20, "referee", 0.7 ),
+      ]
+  )
+
+  assert counts[ "home_player" ] == 1
+  assert counts[ "referee" ] == 1
+  assert mostLikelyRole( counts ) is None
+  report = Tracks.formatIdentificationReport( None, counts, [] )
+  assert "Most likely: tie" in report
+  assert "home player: 1" in report
+  assert "referee: 1" in report
+  clip_report = Tracks.formatIdentificationReport(
+      "home_player",
+      counts,
+      [ ClipImageResult( 12, "home_player", 0.8 ) ],
+  )
+  assert "Mean CLIP confidence for most likely role: 80%" in clip_report
 
 
 def test_view_change_redraws_detection_and_track_overlays():
