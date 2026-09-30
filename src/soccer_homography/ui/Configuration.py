@@ -81,14 +81,21 @@ class ClipParticipants:
 
 class Configuration:
 
-  def __init__( self, parent: tk.Tk, state: AppState, on_change=None, crops_frame: ttk.LabelFrame | None = None ):
+  def __init__(
+      self,
+      parent: tk.Tk,
+      state: AppState,
+      on_change=None,
+      crops_frame: ttk.LabelFrame | None = None,
+      on_frame_select=None,
+  ):
 
     self.parent = parent
     self.appState: AppState = state
     self.crops_frame = crops_frame or ttk.LabelFrame( parent, text="Crops" )
 
     # Build UI
-    self.createLayout( on_change )
+    self.createLayout( on_change, on_frame_select )
 
     # Set options based on current config
     self.tabImageOptions.stateToUI()
@@ -104,7 +111,7 @@ class Configuration:
   # -------------------------------------------------------------
   # Layout controls
   # -------------------------------------------------------------
-  def createLayout( self, on_change ):
+  def createLayout( self, on_change, on_frame_select ):
 
     #style = ttk.Style()
     #style.configure( "Red.TFrame", background="red" )
@@ -117,7 +124,7 @@ class Configuration:
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
     self.tabLog = Log( self.createTab( "Log" ) )
     self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
-    self.tabTracks = Tracks( self.appState, self.createTab( "Tracks" ), self.crops_frame )
+    self.tabTracks = Tracks( self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select )
     self.nbControl.pack( expand=1, fill='both' )
     self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks ]
     self.nbControl.bind( "<<NotebookTabChanged>>", self.onTabChanged )

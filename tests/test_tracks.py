@@ -1,4 +1,5 @@
 import queue
+import sys
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -9,6 +10,15 @@ import numpy as np
 from soccer_homography import App
 from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
+from soccer_homography.ui.config.tracks import Tracks
+from soccer_homography.ui.config.vlm import (
+    MIN_VLM_GPU_MEMORY_BYTES,
+    MoondreamVLM,
+    VLMInferenceWorker,
+    guessRole,
+    selectVLMDeviceMap,
+)
+from soccer_homography.ui.components import Slider
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.ui.LivePreview import LivePreview
 
@@ -294,6 +304,151 @@ def test_crop_worker_cancellation_prevents_video_io(monkeypatch):
   worker.run()
 
   assert results.empty()
+
+
+def test_slider_set_value_updates_position_and_runs_frame_callback():
+  slider = Slider.__new__( Slider )
+  slider.min = 0
+  slider.max = 100
+  slider.root = Mock()
+  slider._debounce_job = "pending"
+  slider.interSnap = False
+  slider.slider = Mock()
+  slider.boundVar = Mock()
+  slider.lblRadar = Mock()
+  slider.command = Mock()
+
+  slider.setValue( 42 )
+
+  slider.root.after_cancel.assert_called_once_with( "pending" )
+  slider.slider.set.assert_called_once_with( 42 )
+  slider.boundVar.set.assert_called_once_with( 42 )
+  slider.lblRadar.config.assert_called_once_with( text="42" )
+  slider.command.assert_called_once_with( 42 )
+  assert slider._debounce_job is None
+  assert slider.interSnap is False
+
+
+def test_clicking_crop_sends_its_frame_to_the_main_slider_callback():
+  tracks = Tracks.__new__( Tracks )
+  tracks.frameSelectCallback = Mock()
+
+  tracks.selectCropFrame( 73 )
+
+  tracks.frameSelectCallback.assert_called_once_with( 73 )
+
+
+def test_vlm_button_requires_enabled_crop_action_and_selected_track_crops():
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = SimpleNamespace( curClipID=4 )
+  tracks.cropCacheClipID = 4
+  tracks.cropCache = { 9: [ ( 13, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) ] }
+  tracks.selTrackID = 9
+  tracks.cropsButtonEnabled = False
+  tracks.vlmWorker = None
+  tracks.vlmButton = Mock()
+
+  tracks.updateVLMButtonState()
+  tracks.vlmButton.config.assert_called_once_with( state="disabled" )
+
+  tracks.updateVLMButtonState( crops_enabled=True )
+  tracks.vlmButton.config.assert_called_with( state="normal" )
+
+
+def test_moondream_vlm_queries_rgb_crop_and_role_votes():
+  class FakeModel:
+    def __init__( self ):
+      self.images = []
+      self.prompts = []
+
+    def query( self, image, prompt ):
+      self.images.append( image )
+      self.prompts.append( prompt )
+      return { "answer": "home_player" }
+
+  model = MoondreamVLM()
+  fake_model = FakeModel()
+  model.model = fake_model
+  image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
+
+  assert model.query( image, "Identify the role." ) == "home_player"
+  assert fake_model.images[ 0 ].size == ( 10, 10 )
+  worker = VLMInferenceWorker(
+      1,
+      2,
+      3,
+      [ ( 1, image ) ],
+      "Identify the role.",
+      model,
+      queue.Queue(),
+  )
+  assert "home_goalkeeper" in worker.prompt
+  assert guessRole( [ "home_player", "This looks like a home_player." ] ) == "home_player"
+  assert guessRole( [ "home_player", "away_player" ] ) is None
+
+
+def test_moondream_selects_single_device_and_avoids_tight_gpu_memory():
+  cpu_only = SimpleNamespace( cuda=SimpleNamespace( is_available=lambda: False ) )
+  low_memory = SimpleNamespace(
+      cuda=SimpleNamespace(
+          is_available=lambda: True,
+          mem_get_info=lambda _device: ( MIN_VLM_GPU_MEMORY_BYTES - 1, MIN_VLM_GPU_MEMORY_BYTES ),
+      )
+  )
+  enough_memory = SimpleNamespace(
+      cuda=SimpleNamespace(
+          is_available=lambda: True,
+          mem_get_info=lambda _device: ( MIN_VLM_GPU_MEMORY_BYTES, MIN_VLM_GPU_MEMORY_BYTES ),
+      )
+  )
+
+  assert selectVLMDeviceMap( cpu_only ) == { "": "cpu" }
+  assert selectVLMDeviceMap( low_memory ) == { "": "cpu" }
+  assert selectVLMDeviceMap( enough_memory ) == { "": "cuda:0" }
+
+
+def test_moondream_load_uses_the_selected_single_device(monkeypatch):
+  loader = Mock( return_value=object() )
+  transformers_stub = SimpleNamespace(
+      AutoModelForCausalLM=SimpleNamespace( from_pretrained=loader )
+  )
+  monkeypatch.setitem( sys.modules, "transformers", transformers_stub )
+  monkeypatch.setattr(
+      "soccer_homography.ui.config.vlm.selectVLMDeviceMap",
+      lambda _torch: { "": "cpu" },
+  )
+  model = MoondreamVLM()
+
+  loaded = model.loadModel()
+
+  assert loaded is loader.return_value
+  loader.assert_called_once_with(
+      "vikhyatk/moondream2",
+      trust_remote_code=True,
+      device_map={ "": "cpu" },
+  )
+
+
+def test_vlm_worker_returns_per_crop_responses_and_role_guess():
+  class FakeVLM(MoondreamVLM):
+    def query( self, _image, _prompt ):
+      return "referee"
+
+  results = queue.Queue()
+  crops = [
+      ( 12, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ),
+      ( 20, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ),
+  ]
+  worker = VLMInferenceWorker( 3, 7, 8, crops, "Identify the role.", FakeVLM(), results )
+
+  worker.run()
+
+  messages = []
+  while not results.empty():
+    messages.append( results.get_nowait() )
+  result = next( message for message in messages if message.kind == "done" )
+  assert result.answers == [ ( 12, "referee" ), ( 20, "referee" ) ]
+  assert result.role == "referee"
 
 
 def test_view_change_redraws_detection_and_track_overlays():

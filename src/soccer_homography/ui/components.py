@@ -24,12 +24,30 @@ class Slider:
     self._debounce_job = None
 
   def setMax( self, value ):
+    self.max = value
     self.slider.config( to=value )
 
   def setEnabled( self, value ):
     self.slider.config( state=tk.NORMAL if value else tk.DISABLED )
 
+  def setValue( self, value: int ) -> None:
+    value = max( self.min, min( self.max, value ) )
+    if self._debounce_job is not None:
+      self.root.after_cancel( self._debounce_job )
+      self._debounce_job = None
+    self.interSnap = True
+    try:
+      self.slider.set( value )
+      self.boundVar.set( value )
+      self.lblRadar.config( text=str( value ) )
+    finally:
+      self.interSnap = False
+    if self.command is not None:
+      self.command( value )
+
   def internalCommand( self, value ):
+    if self.interSnap:
+      return
 
     # Cancel any pending callback
     if self._debounce_job is not None:

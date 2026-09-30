@@ -118,6 +118,7 @@ class App:
         state=self.appState,
         on_change=self.on_options_change,
         crops_frame=self.crops,
+        on_frame_select=self.setVideoFrame,
     )
 
     # radarMap
@@ -172,8 +173,9 @@ class App:
     self.btnTrackRange.place( x=left + 110, y=top, width=52, height=28 )
     self.btnCrops = tk.Button( self.root, text="Crops", font=( "Arial", 10 ), command=self.tabData.tabTracks.collectCrops, state=tk.DISABLED )
     self.btnCrops.place( x=left + 162, y=top, width=52, height=28 )
-    self.btnVLM = tk.Button( self.root, text="VLM", font=( "Arial", 10 ), state=tk.DISABLED )
+    self.btnVLM = tk.Button( self.root, text="VLM", font=( "Arial", 10 ), command=self.tabData.tabTracks.runVLM, state=tk.DISABLED )
     self.btnVLM.place( x=left + 214, y=top, width=52, height=28 )
+    self.tabData.tabTracks.setVLMButton( self.btnVLM )
 
   def createWidgetsSource( self, left: int, top: int ):
     # lblDetectAction
@@ -380,6 +382,9 @@ class App:
     self.minimap.setCurrentFrame( frame )
     self.livePreviewController.updateMappings( self.appState.tracks, frame )
 
+  def setVideoFrame( self, frame: int ) -> None:
+    self.sldVideoFrame.setValue( frame )
+
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
     homoable = self.hasHomography() and len( self.appState.tracks.items() ) > 0
@@ -388,6 +393,7 @@ class App:
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnTrackRange.config( state=tk.NORMAL if trackable else tk.DISABLED )
     self.btnCrops.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
+    self.tabData.tabTracks.updateVLMButtonState( bool( self.appState.tracks ) )
     self.uiHomography.setEnableStatus( self.hasHomography(), homoable, self.appState.curClipID > 0 )
     self.sldVideoFrame.setEnabled( cappable )
 
