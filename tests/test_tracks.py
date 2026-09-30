@@ -1,3 +1,5 @@
+import queue
+import threading
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -138,7 +140,7 @@ def test_crop_coordinates_scale_to_source_frame_dimensions():
       self.frame[ 10:20, 10:20 ] = ( 0, 0, 255 )
 
     def set( self, _property_id, _frame_number ):
-      pass
+      self.position = ( _property_id, _frame_number )
 
     def read( self ):
       return True, self.frame
@@ -151,6 +153,52 @@ def test_crop_coordinates_scale_to_source_frame_dimensions():
   assert len( crops ) == 1
   assert crops[ 0 ][ 1 ].shape[:2] == ( 10, 10 )
   assert np.all( crops[ 0 ][ 1 ][ :, :, 0 ] == 255 )
+
+
+def test_crop_collection_reads_shared_frames_once_then_falls_back_for_unmatched_tracks(monkeypatch):
+  class SourceCapture:
+    def __init__( self ):
+      self.frame_number = 0
+      self.seeks: list[ int ] = []
+
+    def isOpened( self ):
+      return True
+
+    def set( self, _property_id, frame_number ):
+      self.position = ( _property_id, frame_number )
+      self.frame_number = frame_number
+      self.seeks.append( frame_number )
+
+    def read( self ):
+      frame = np.zeros( ( 40, 40, 3 ), dtype=np.uint8 )
+      frame[ :, :, 0 ] = self.frame_number
+      return True, frame
+
+    def release( self ):
+      pass
+
+  capture = SourceCapture()
+  monkeypatch.setattr( "soccer_homography.ui.config.tracks.cv2.VideoCapture", Mock( return_value=capture ) )
+  tracks = Tracks.__new__( Tracks )
+  tracks.cropResults = queue.Queue()
+  box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
+  unknown_tracks = [
+      ( 1, [ box( frame ) for frame in range( 10 ) ] ),
+      ( 2, [ box( frame ) for frame in range( 10 ) ] ),
+      ( 3, [ box( 1 ) ] ),
+  ]
+
+  tracks.collectCropsWorker( 7, "video.mp4", unknown_tracks, threading.Event() )
+
+  messages = []
+  while not tracks.cropResults.empty():
+    messages.append( tracks.cropResults.get_nowait() )
+  result = next( message for message in messages if message.kind == "done" )
+
+  assert capture.seeks == [ 0, 2, 4, 5, 7, 9, 1 ]
+  assert [ crop[ 0 ] for crop in result.crops[ 1 ] ] == [ 0, 2, 4, 5, 7, 9 ]
+  assert [ crop[ 0 ] for crop in result.crops[ 2 ] ] == [ 0, 2, 4, 5, 7, 9 ]
+  assert [ crop[ 0 ] for crop in result.crops[ 3 ] ] == [ 1 ]
 
 
 def test_view_change_redraws_detection_and_track_overlays():

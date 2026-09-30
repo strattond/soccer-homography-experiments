@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import queue
 import threading
 import tkinter as tk
@@ -27,6 +28,7 @@ class CropJobMessage:
   total: int = 0
   crops: CropCache | None = None
   error: Exception | None = None
+  stage: str = ""
 
 
 class Tracks:
@@ -306,7 +308,7 @@ class Tracks:
     self.cropCancel = cancel_event
     self.cropProgress.configure( maximum=len( unknown_tracks ), value=0 )
     self.cropProgress.place( x=8, y=50 )
-    self.cropStatus.config( text=f"Collecting crops: 0 / {len(unknown_tracks)} tracks" )
+    self.cropStatus.config( text=f"Collecting crops for {len(unknown_tracks)} unknown tracks..." )
     self.cropCacheClipID = self.appState.curClipID
     threading.Thread(
         target=self.collectCropsWorker,
@@ -348,49 +350,106 @@ class Tracks:
       capture.release()
       self.cropResults.put( CropJobMessage( generation, "error", error=RuntimeError( f"Could not open video: {video_file}" ) ) )
       return
-    cache: CropCache = {}
+    cache: CropCache = { track_id: [] for track_id, _boxes in tracks }
     try:
-      total = len( tracks )
-      for completed, ( track_id, boxes ) in enumerate( tracks, start=1 ):
+      boxes_by_frame: dict[ int, list[ tuple[ int, BoundingBox ] ] ] = {}
+      for track_id, boxes in tracks:
+        for box in boxes:
+          boxes_by_frame.setdefault( box.frame, [] ).append( ( track_id, box ) )
+
+      shared_frames = self.selectSharedCropFrames( sorted( boxes_by_frame ) )
+      for completed, frame_number in enumerate( shared_frames, start=1 ):
         if cancel_event.is_set():
           return
-        cache[ track_id ] = self.extractTrackCrops( capture, track_id, boxes )
-        self.cropResults.put( CropJobMessage( generation, "progress", completed, total ) )
+        capture.set( cv2.CAP_PROP_POS_FRAMES, frame_number )
+        success, frame = capture.read()
+        if success:
+          for track_id, box in boxes_by_frame[ frame_number ]:
+            crop = self.cropFromFrame( frame, box )
+            if crop is not None:
+              cache[ track_id ].append( ( frame_number, crop ) )
+        else:
+          logger.warning( f"Could not read shared crop frame {frame_number}." )
+        self.cropResults.put(
+            CropJobMessage( generation, "progress", completed, len( shared_frames ), stage="shared frames" )
+        )
+
+      fallback_tracks = [
+          ( track_id, boxes )
+          for track_id, boxes in tracks
+          if not cache[ track_id ] and boxes
+      ]
+      for completed, ( track_id, boxes ) in enumerate( fallback_tracks, start=1 ):
+        if cancel_event.is_set():
+          return
+        cache[ track_id ] = self.extractTrackCrops( capture, track_id, boxes, cancel_event )
+        self.cropResults.put(
+            CropJobMessage( generation, "progress", completed, len( fallback_tracks ), stage="fallback tracks" )
+        )
       if not cancel_event.is_set():
-        self.cropResults.put( CropJobMessage( generation, "done", total, total, cache ) )
+        self.cropResults.put(
+            CropJobMessage(
+                generation,
+                "done",
+                len( shared_frames ) + len( fallback_tracks ),
+                len( shared_frames ) + len( fallback_tracks ),
+                cache,
+            )
+        )
     except Exception as error:
       if not cancel_event.is_set():
         self.cropResults.put( CropJobMessage( generation, "error", error=error ) )
     finally:
       capture.release()
 
-  def extractTrackCrops( self, capture: cv2.VideoCapture, track_id: int, boxes: list[ BoundingBox ] ) -> CropSet:
+  @staticmethod
+  def selectSharedCropFrames( frame_numbers: Sequence[ int ] ) -> list[ int ]:
+    if len( frame_numbers ) <= 6:
+      return list( frame_numbers )
+    indices = [ round( i * ( len( frame_numbers ) - 1 ) / 5 ) for i in range( 6 ) ]
+    return [ frame_numbers[ index ] for index in indices ]
+
+  def extractTrackCrops(
+      self,
+      capture: cv2.VideoCapture,
+      track_id: int,
+      boxes: list[ BoundingBox ],
+      cancel_event: threading.Event | None = None,
+  ) -> CropSet:
     count = min( 6, len( boxes ) )
     if count == 0:
       return []
     indices = [ round( i * ( len( boxes ) - 1 ) / max( count - 1, 1 ) ) for i in range( count ) ]
     crops: CropSet = []
     for box_index in indices:
+      if cancel_event is not None and cancel_event.is_set():
+        break
       box = boxes[ box_index ]
       capture.set( cv2.CAP_PROP_POS_FRAMES, box.frame )
       success, frame = capture.read()
       if not success:
         logger.warning( f"Could not read frame {box.frame} for track {track_id} crop." )
         continue
-      height, width = frame.shape[ :2 ]
-      x1 = max( 0, min( width, box.x1 ) )
-      y1 = max( 0, min( height, box.y1 ) )
-      x2 = max( 0, min( width, box.x2 ) )
-      y2 = max( 0, min( height, box.y2 ) )
-      if x2 <= x1 or y2 <= y1:
-        continue
-      crop = cv2.cvtColor( frame[ y1:y2, x1:x2 ], cv2.COLOR_BGR2RGB )
-      crop_height, crop_width = crop.shape[ :2 ]
-      scale = min( 100 / crop_width, 150 / crop_height, 1.0 )
-      if scale < 1.0:
-        crop = cv2.resize( crop, ( max( 1, round( crop_width * scale ) ), max( 1, round( crop_height * scale ) ) ) )
-      crops.append( ( box.frame, crop ) )
+      crop = self.cropFromFrame( frame, box )
+      if crop is not None:
+        crops.append( ( box.frame, crop ) )
     return crops
+
+  @staticmethod
+  def cropFromFrame( frame: np.ndarray, box: BoundingBox ) -> np.ndarray | None:
+    height, width = frame.shape[ :2 ]
+    x1 = max( 0, min( width, box.x1 ) )
+    y1 = max( 0, min( height, box.y1 ) )
+    x2 = max( 0, min( width, box.x2 ) )
+    y2 = max( 0, min( height, box.y2 ) )
+    if x2 <= x1 or y2 <= y1:
+      return None
+    crop = cv2.cvtColor( frame[ y1:y2, x1:x2 ], cv2.COLOR_BGR2RGB )
+    crop_height, crop_width = crop.shape[ :2 ]
+    scale = min( 100 / crop_width, 150 / crop_height, 1.0 )
+    if scale < 1.0:
+      crop = cv2.resize( crop, ( max( 1, round( crop_width * scale ) ), max( 1, round( crop_height * scale ) ) ) )
+    return crop
 
   def pollCropResults( self ) -> None:
     if not self.tab.winfo_exists():
@@ -403,8 +462,9 @@ class Tracks:
       if message.generation != self.cropGeneration:
         continue
       if message.kind == "progress":
-        self.cropProgress.configure( value=message.completed )
-        self.cropStatus.config( text=f"Collecting crops: {message.completed} / {message.total} tracks" )
+        if message.total > 0:
+          self.cropProgress.configure( maximum=message.total, value=message.completed )
+        self.cropStatus.config( text=f"Collecting crops ({message.stage}): {message.completed} / {message.total}" )
       elif message.kind == "error":
         self.cropCancel = None
         self.cropProgress.place_forget()
