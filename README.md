@@ -44,4 +44,6 @@ In the app, open **Data Maintenance**, select the **Matches** tab, and choose **
 
 To load a registered database clip, choose **Clip** in the main window and select a clip from the list. The **Clip Participants** tab shows the people associated with that clip's match.
 
+When a clip is loaded, existing detection and tracking Parquet chunks in `tracking/` are restored into the canvases and Tracks table. Detection and tracking boxes are stored in source-frame coordinates; **Crops** uses those coordinates directly against the decoded source frame for full-resolution crops. The box overlays are redrawn when the canvas is panned or zoomed.
+
 After tracks are available, assign a participant or role from the Tracks table; assignments are saved to DuckDB for the selected clip. Click **Crops** to collect up to six cached samples for each track without an assigned participant. Homographies can be saved to the database explicitly with **Save Homography**; the initial save uses a locked-off camera range.

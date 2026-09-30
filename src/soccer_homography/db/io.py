@@ -1,80 +1,65 @@
-# io.py
-
 from pathlib import Path
 
-import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from soccer_homography.dataTypes import BoundingBox, Track
 
-# ---------------------------------------------------------
-# Schema for writing tracking details to a Parquet file
-# ---------------------------------------------------------
-
-# yapf: disable
 BBOX_SCHEMA = pa.schema( [
-                              ( "clip", pa.int32() ),
-                              ( "frame", pa.int32() ),
-                              ( "x1", pa.float32() ),
-                              ( "y1", pa.float32() ),
-                              ( "x2", pa.float32() ),
-                              ( "y2", pa.float32() ),
-                              ( "cls", pa.int32() ),
-                              ( "confidence", pa.float32() )
-                            ] )
-# yapf: enable
+    ( "clip", pa.int32() ),
+    ( "frame", pa.int32() ),
+    ( "x1", pa.float32() ),
+    ( "y1", pa.float32() ),
+    ( "x2", pa.float32() ),
+    ( "y2", pa.float32() ),
+    ( "cls", pa.int32() ),
+    ( "confidence", pa.float32() ),
+] )
 
 TRACK_SCHEMA = pa.schema( [
-    # Identifiers
-    ( "clip", pa.int32() ), ( "frame", pa.int32() ), ( "track", pa.int32() ),
-    # Smoothed bounding box (Kalman-filtered)
-    ( "x1", pa.float32() ), ( "y1", pa.float32() ), ( "x2", pa.float32() ), ( "y2", pa.float32() ),
-    # Class and confidence
-    ( "cls", pa.int32() ), ( "confidence", pa.float32() )
+    ( "clip", pa.int32() ),
+    ( "frame", pa.int32() ),
+    ( "track", pa.int32() ),
+    ( "x1", pa.float32() ),
+    ( "y1", pa.float32() ),
+    ( "x2", pa.float32() ),
+    ( "y2", pa.float32() ),
+    ( "cls", pa.int32() ),
+    ( "confidence", pa.float32() ),
 ] )
 
-TRACK_ASSOC_SCHEMA = pa.schema( [
-    # Identifiers
-    ( "clip", pa.int32() ), ( "track", pa.int32() ), ( "person", pa.int32() )
-] )
+
+def boxToRow( clip_id: int, box: BoundingBox, track_id: int | None = None ) -> dict[ str, int | float | None ]:
+  row: dict[ str, int | float | None ] = {
+      "clip": clip_id,
+      "frame": box.frame,
+      "x1": float( box.x1 ),
+      "y1": float( box.y1 ),
+      "x2": float( box.x2 ),
+      "y2": float( box.y2 ),
+      "cls": box.cls,
+      "confidence": float( box.conf ),
+  }
+  if track_id is not None:
+    row[ "track" ] = track_id
+  return row
 
 
 def tracksToArrow( records: list[ Track ] ) -> pa.Table:
-  flat = []
-  for r in records:
-    for t in r.boxes:
-      flat.append( {
-          "clip": 1,
-          "frame": t.frame,
-          "track": r.id,
-          "x1": float( t.x1 ),
-          "y1": float( t.y1 ),
-          "x2": float( t.x2 ),
-          "y2": float( t.y2 ),
-          "cls": int( t.cls ),
-          "confidence": float( t.conf )
-      } )
-
+  flat = [
+      boxToRow( track.clip, box, track.id )
+      for track in records
+      for box in track.boxes
+  ]
   return pa.Table.from_pylist( flat, schema=TRACK_SCHEMA )
 
 
-def boxesToArrow( records: dict[ int, list[ BoundingBox ] ] ) -> pa.Table:
-  flat = []
-  for k, v in records.items():
-    for t in v:
-      flat.append( {
-          "clip": 1,
-          "frame": t.frame,
-          "track": k,
-          "x1": float( t.x1 ),
-          "y1": float( t.y1 ),
-          "x2": float( t.x2 ),
-          "y2": float( t.y2 ),
-          "cls": int( t.cls ),
-          "confidence": float( t.conf )
-      } )
-
+def boxesToArrow( clip_id: int, records: dict[ int, list[ BoundingBox ] ] ) -> pa.Table:
+  flat = [
+      boxToRow( clip_id, box )
+      for boxes in records.values()
+      for box in boxes
+  ]
   return pa.Table.from_pylist( flat, schema=BBOX_SCHEMA )
 
 
@@ -82,46 +67,52 @@ def fileFromClipChunk( clipID: int, chunkID: int, type: str ) -> str:
   return f"tracking/chunk_{type}_{clipID}_{chunkID}.parquet"
 
 
-def writeBatchDetections( clipID: int, chunkID: int, records: dict[ int, list[ BoundingBox ] ] ):
-  table = boxesToArrow( records )
-  path = fileFromClipChunk( clipID, chunkID, "detections" )
-  pq.write_table( table, path, compression="zstd" )
+def writeBatchDetections( clipID: int, chunkID: int, records: dict[ int, list[ BoundingBox ] ] ) -> None:
+  path = Path( fileFromClipChunk( clipID, chunkID, "detections" ) )
+  path.parent.mkdir( parents=True, exist_ok=True )
+  pq.write_table( boxesToArrow( clipID, records ), path, compression="zstd" )
 
 
-def writeBatchTracking( clipID: int, chunkID: int, records: list[ Track ] ):
-  table = tracksToArrow( records )
-  path = fileFromClipChunk( clipID, chunkID, "tracking" )
-  pq.write_table( table, path, compression="zstd" )
+def writeBatchTracking( clipID: int, chunkID: int, records: list[ Track ] ) -> None:
+  path = Path( fileFromClipChunk( clipID, chunkID, "tracking" ) )
+  path.parent.mkdir( parents=True, exist_ok=True )
+  pq.write_table( tracksToArrow( records ), path, compression="zstd" )
 
 
-def readAllData( clipID: int ) -> pl.DataFrame | None:
-  out_dir = Path( "tracking" )
-  files = sorted( out_dir.glob( f"chunk_{clipID}_*.parquet" ) )
-
-  if not files:
-    return None
-
-  # Concatenate all chunks vertically
-  df = pl.concat( [ pl.read_parquet( f ) for f in files ], how="vertical" )
-
-  # Ensure correct ordering
-  df = df.sort( [ "track", "frame" ] )
+def _chunkFiles( clip_id: int, data_type: str ) -> list[ Path ]:
+  return sorted( Path( "tracking" ).glob( f"chunk_{data_type}_{clip_id}_*.parquet" ) )
 
 
-def readBatch( clipID: int ) -> list[ Track ]:
+def _boundingBoxFromRow( row: dict ) -> BoundingBox:
+  return BoundingBox(
+      x1=int( row[ "x1" ] ),
+      y1=int( row[ "y1" ] ),
+      x2=int( row[ "x2" ] ),
+      y2=int( row[ "y2" ] ),
+      conf=float( row[ "confidence" ] ),
+      cls=int( row[ "cls" ] ),
+      frame=int( row[ "frame" ] ),
+  )
 
-  df = readAllData( clipID )
-  if df is None:
-    return []
 
-  tracks = {}
-  for row in df.iter_rows( named=True ):
-    tid = row[ 'track' ]
+def readDetectionChunks( clip_id: int ) -> dict[ int, list[ BoundingBox ] ]:
+  detections: dict[ int, list[ BoundingBox ] ] = {}
+  for path in _chunkFiles( clip_id, "detections" ):
+    for row in pq.read_table( path ).to_pylist():
+      frame = int( row[ "frame" ] )
+      detections.setdefault( frame, [] ).append( _boundingBoxFromRow( row ) )
+  for boxes in detections.values():
+    boxes.sort( key=lambda box: box.frame )
+  return detections
 
-    if tid not in tracks:
-      tracks[ tid ] = Track( clipID, tid, None, [] )
-      # At this point, we need to do a person lookup ...
 
-    tracks[ tid ].boxes.append( BoundingBox( row[ 'x1' ], row[ 'y1' ], row[ 'x2' ], row[ 'y2' ], row[ 'confidence' ], row[ 'frame' ], row[ 'det_class' ] ) )
-
-  return list( tracks.values() )
+def readTrackingChunks( clip_id: int ) -> dict[ int, Track ]:
+  tracks: dict[ int, Track ] = {}
+  for path in _chunkFiles( clip_id, "tracking" ):
+    for row in pq.read_table( path ).to_pylist():
+      track_id = int( row[ "track" ] )
+      track = tracks.setdefault( track_id, Track( clip_id, track_id ) )
+      track.boxes.append( _boundingBoxFromRow( row ) )
+  for track in tracks.values():
+    track.boxes.sort( key=lambda box: box.frame )
+  return tracks

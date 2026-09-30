@@ -4,6 +4,7 @@ from tkinter import messagebox, ttk
 
 import cv2
 import duckdb
+import pyarrow as pa
 from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
@@ -23,6 +24,8 @@ from soccer_homography.db import (
     getVideoByID,
     initDB,
     listClips,
+    readDetectionChunks,
+    readTrackingChunks,
     saveClipHomography,
     writeBatchDetections,
     writeBatchTracking,
@@ -77,6 +80,8 @@ class App:
         lambda chunk_id, error: self.on_chunk_write_error( "tracking", chunk_id, error ),
         lambda records: sum( len( track.boxes ) for track in records ),
     )
+    self.pendingDetectionChunks: set[ int ] = set()
+    self.pendingTrackingChunks: set[ int ] = set()
 
     # Initialize variables
 
@@ -324,6 +329,8 @@ class App:
     self.appState.framesProcessed = 0
     self.appState.detectChunk = 0
     self.appState.trackChunk = 0
+    self.pendingDetectionChunks.clear()
+    self.pendingTrackingChunks.clear()
     if had_loaded_clip:
       self.appState.data = Homography()
     if self.appState.db is not None:
@@ -335,6 +342,14 @@ class App:
       if stored_homography is not None:
         self.appState.data.load_dict( stored_homography.payload )
         self.appState.curHomographyID = stored_homography.homography_id
+    try:
+      self.appState.boxes.update( readDetectionChunks( clip_id ) )
+      self.appState.tracks.update( readTrackingChunks( clip_id ) )
+    except ( OSError, ValueError, pa.ArrowException ) as error:
+      logger.exception( f"Could not load tracking data for clip {clip_id}." )
+      messagebox.showerror( "Load tracking data failed", str( error ), parent=self.root )
+      self.appState.boxes.clear()
+      self.appState.tracks.clear()
     self.tabData.tabTracks.onClipLoaded()
     vidData = VideoData( capture )
     self.sldVideoFrame.setMax( max( 0, vidData.frames - 1 ) )
@@ -345,7 +360,13 @@ class App:
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
     self.minimap.updateTotalFrames( vidData.frames )
+    processed_frames = set( self.appState.boxes ) | {
+        box.frame for track in self.appState.tracks.values() for box in track.boxes
+    }
+    self.minimap.markFramesAsDone( list( processed_frames ) )
     self.minimap.setCurrentFrame( 0 )
+    if self.appState.tracks and self.appState.data.hom4k is not None:
+      self.refreshHomographyData( 0 )
     self.tabData.tabClipParticipants.refresh()
     self.checkButtonState()
     return True
@@ -398,8 +419,9 @@ class App:
     if self.tracking is not None:
       # Step 2 - do it
       # But clear out existing bounding data...
-      for f in range( minFrame, maxFrame ):
+      for f in range( minFrame, maxFrame + 1 ):
         if f in self.appState.boxes:
+          self.pendingDetectionChunks.add( f // CHUNK_SIZE )
           del self.appState.boxes[ f ]
       logger.info( f"Identifying frames {minFrame} to {maxFrame}" )
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
@@ -418,7 +440,16 @@ class App:
       # Step 2 - do it
       # But clear out existing homography data...
       for value in self.appState.tracks.values():
+        retained = [ box for box in value.boxes if not minFrame <= box.frame <= maxFrame ]
+        if len( retained ) != len( value.boxes ):
+          self.pendingTrackingChunks.update(
+              box.frame // CHUNK_SIZE for box in value.boxes if minFrame <= box.frame <= maxFrame
+          )
+          value.boxes = retained
         value.clearHomography()
+      self.appState.tracks = {
+          track_id: track for track_id, track in self.appState.tracks.items() if track.boxes
+      }
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
       self.prgHomography.setRange( 0, 0 )
@@ -449,12 +480,14 @@ class App:
         if bbox.frame not in self.appState.boxes:
           self.appState.boxes[ bbox.frame ] = []
         self.appState.boxes[ bbox.frame ].append( bbox )
+        self.pendingDetectionChunks.add( bbox.frame // CHUNK_SIZE )
         pollDelay = 1
       if data.type == OutputType.TRACK and data.data is not None and isinstance( data.data, TrackData ):
         track = data.data
         if track.tid not in self.appState.tracks:
           self.appState.tracks[ track.tid ] = Track( track.clip, track.tid )
         self.appState.tracks[ track.tid ].boxes.append( track.data )
+        self.pendingTrackingChunks.add( track.data.frame // CHUNK_SIZE )
         pollDelay = 2
       elif data.type == OutputType.NEW_FRAME:
         self.appState.framesProcessed += 1
@@ -477,6 +510,8 @@ class App:
         pollDelay = 2
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
+        self.chunkDetections()
+        self.chunkTracking()
         self.refreshHomographyData( self.mainImageController.frame_num )
         self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
         self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num )
@@ -495,21 +530,28 @@ class App:
     self.runTracking( self.minFrame.get(), self.maxFrame.get() )
 
   def chunkDetections( self ):
-    loTrack = self.appState.detectChunk * CHUNK_SIZE
-    hiTrack = ( self.appState.detectChunk + 1 ) * CHUNK_SIZE
-    export = { k: list( boxes ) for k, boxes in self.appState.boxes.items() if loTrack <= k < hiTrack }
-    self.detection_writer.submit( 1, self.appState.detectChunk, export )
+    for chunk_id in sorted( self.pendingDetectionChunks ):
+      lo_frame = chunk_id * CHUNK_SIZE
+      hi_frame = lo_frame + CHUNK_SIZE
+      export = {
+          frame: list( boxes )
+          for frame, boxes in self.appState.boxes.items()
+          if lo_frame <= frame < hi_frame
+      }
+      self.detection_writer.submit( self.appState.curClipID, chunk_id, export )
+    self.pendingDetectionChunks.clear()
 
   def chunkTracking( self ):
-    loTrack = self.appState.trackChunk * CHUNK_SIZE
-    hiTrack = ( self.appState.trackChunk + 1 ) * CHUNK_SIZE
-    export: list[ Track ] = []
-    for value in self.appState.tracks.values():
-      toAdd = value.forExport( loTrack, hiTrack )
-      if len( toAdd.boxes ) > 0:
-        export.append( toAdd )
-
-    self.tracking_writer.submit( 1, self.appState.trackChunk, export )
+    for chunk_id in sorted( self.pendingTrackingChunks ):
+      lo_frame = chunk_id * CHUNK_SIZE
+      hi_frame = lo_frame + CHUNK_SIZE
+      export = [
+          partial
+          for track in self.appState.tracks.values()
+          if ( partial := track.forExport( lo_frame, hi_frame ) ).boxes
+      ]
+      self.tracking_writer.submit( self.appState.curClipID, chunk_id, export )
+    self.pendingTrackingChunks.clear()
 
   def on_chunk_write_error( self, data_type: str, chunk_id: int, error: Exception ) -> None:
     messagebox.showerror(
@@ -559,6 +601,8 @@ class App:
 
     self.tabData.tabImagePreview.refresh( xf )
 
+    self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
+    self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num )
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
 

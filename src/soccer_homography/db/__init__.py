@@ -1,4 +1,4 @@
-from .io import writeBatchDetections, writeBatchTracking
+from .io import readDetectionChunks, readTrackingChunks, writeBatchDetections, writeBatchTracking
 from .chunk_writer import AsyncChunkWriter
 from .persist import (
   Camera,
@@ -71,6 +71,8 @@ __all__ = [
   "listVideos",
   "parseMatchDate",
   "reorderClips",
+  "readDetectionChunks",
+  "readTrackingChunks",
   "saveClipHomography",
   "upsertPerson",
   "upsertPersonParticipation",

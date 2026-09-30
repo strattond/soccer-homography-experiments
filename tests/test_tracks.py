@@ -7,6 +7,7 @@ import numpy as np
 
 from soccer_homography import App
 from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
+from soccer_homography.ui.config.tracks import Tracks
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.ui.LivePreview import LivePreview
 
@@ -94,8 +95,14 @@ def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
       data=Homography(),
   )
   state.data.hom4k = np.eye( 3 )
+  detections = { 0: [ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ] }
+  restored_tracks = { 5: Track( 1, 5, boxes=[ BoundingBox( 5, 6, 7, 8, 0.8, 0, 0 ) ] ) }
+  monkeypatch.setattr( "soccer_homography.readDetectionChunks", lambda clip_id: detections if clip_id == 1 else {} )
+  monkeypatch.setattr( "soccer_homography.readTrackingChunks", lambda clip_id: restored_tracks if clip_id == 1 else {} )
   app = cast( Any, App.__new__( App ) )
   app.appState = state
+  app.pendingDetectionChunks = set()
+  app.pendingTrackingChunks = set()
   app.root = Mock()
   app.tabData = SimpleNamespace(
       tabTracks=SimpleNamespace( onClipLoaded=Mock() ),
@@ -108,12 +115,59 @@ def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
   app.radarMapController = Mock()
   app.minimap = Mock()
   app.checkButtonState = Mock()
+  app.refreshHomographyData = Mock()
   loaded_homography = state.data
 
   assert app.loadSourceVideo( "clip.mp4", 1 )
   assert state.data is loaded_homography
   assert state.data.hom4k is not None
+  assert state.boxes == detections
+  assert state.tracks == restored_tracks
+  app.tabData.tabTracks.onClipLoaded.assert_called_once()
+  app.refreshHomographyData.assert_called_once_with( 0 )
 
   assert app.loadSourceVideo( "next.mp4", 2 )
   assert state.data is not loaded_homography
   assert state.data.hom4k is None
+
+
+def test_crop_coordinates_scale_to_source_frame_dimensions():
+  class SourceCapture:
+    def __init__( self ):
+      self.frame = np.zeros( ( 400, 400, 3 ), dtype=np.uint8 )
+      self.frame[ 10:20, 10:20 ] = ( 0, 0, 255 )
+
+    def set( self, _property_id, _frame_number ):
+      pass
+
+    def read( self ):
+      return True, self.frame
+
+  tracks = Tracks.__new__( Tracks )
+  box = BoundingBox( 10, 10, 20, 20, 0.9, 0, 0 )
+
+  crops = tracks.extractTrackCrops( cast( cv2.VideoCapture, SourceCapture() ), 8, [ box ] )
+
+  assert len( crops ) == 1
+  assert crops[ 0 ][ 1 ].shape[:2] == ( 10, 10 )
+  assert np.all( crops[ 0 ][ 1 ][ :, :, 0 ] == 255 )
+
+
+def test_view_change_redraws_detection_and_track_overlays():
+  app = cast( Any, App.__new__( App ) )
+  transform = object()
+  app.mainImageController = Mock()
+  app.mainImageController.transform = transform
+  app.mainImageController.frame_num = 23
+  app.tabData = SimpleNamespace( tabImagePreview=Mock() )
+  app.appState = SimpleNamespace(
+      boxes={ 23: [ BoundingBox( 1, 2, 3, 4, 0.9, 0, 23 ) ] },
+      tracks={ 8: Track( 1, 8 ) },
+      data=Homography(),
+  )
+  app.radarMapController = Mock()
+
+  app.on_main_view_change()
+
+  app.mainImageController.updateBoundingBoxes.assert_called_once_with( app.appState.boxes, 23 )
+  app.mainImageController.updateTracks.assert_called_once_with( app.appState.tracks, 23 )

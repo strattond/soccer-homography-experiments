@@ -209,7 +209,7 @@ class Tracks:
         role = next( role for role in self.roles if role.replace( "_", " " ) == selection )
         person_id = track.numId()
 
-      if not self._persistAssignment( track.id, person_id, role ):
+      if not self.persistAssignment( track.id, person_id, role ):
         self.refresh()
         return
       track.person = person
@@ -219,11 +219,11 @@ class Tracks:
       self.renderSelectedCrops( track )
 
     self.editor.bind( "<<ComboboxSelected>>", apply_selection )
-    self.editor.bind( "<FocusOut>", lambda _event: self._closeEditor() )
+    self.editor.bind( "<FocusOut>", lambda _event: self.closeEditor() )
     self.editor.focus_set()
     return "break"
 
-  def _persistAssignment( self, track_id: int, person_id: int | None, role: ParticipationRole ) -> bool:
+  def persistAssignment( self, track_id: int, person_id: int | None, role: ParticipationRole ) -> bool:
     if self.appState.db is None or self.appState.curClipID <= 0:
       messagebox.showerror( "Track update failed", "Load a registered clip before assigning its tracks.", parent=self.tab )
       return False
@@ -243,7 +243,7 @@ class Tracks:
       return False
     return True
 
-  def _closeEditor( self ) -> None:
+  def closeEditor( self ) -> None:
     if self.editor is not None:
       self.editor.destroy()
       self.editor = None
@@ -296,7 +296,7 @@ class Tracks:
       self.cropStatus.config( text="No unknown tracks with bounding boxes." )
       return
 
-    self._cancelCropJob()
+    self.cancelCropJob()
     self.cropCache.clear()
     self.clearCropImages()
     self.cropCacheClipID = self.appState.curClipID
@@ -309,19 +309,19 @@ class Tracks:
     self.cropStatus.config( text=f"Collecting crops: 0 / {len(unknown_tracks)} tracks" )
     self.cropCacheClipID = self.appState.curClipID
     threading.Thread(
-        target=self._collectCropsWorker,
+        target=self.collectCropsWorker,
         args=( generation, self.appState.videoFile, unknown_tracks, cancel_event ),
         daemon=True,
         name=f"clip-crops-{self.appState.curClipID}",
     ).start()
 
-  def _cancelCropJob( self ) -> None:
+  def cancelCropJob( self ) -> None:
     if self.cropCancel is not None:
       self.cropCancel.set()
       self.cropCancel = None
 
   def onClipLoaded( self ) -> None:
-    self._cancelCropJob()
+    self.cancelCropJob()
     self.cropGeneration += 1
     self.cropCache.clear()
     self.cropCacheClipID = self.appState.curClipID if self.appState.curClipID > 0 else None
@@ -333,10 +333,10 @@ class Tracks:
     self.refresh()
 
   def shutdown( self ) -> None:
-    self._cancelCropJob()
+    self.cancelCropJob()
     self.cropGeneration += 1
 
-  def _collectCropsWorker(
+  def collectCropsWorker(
       self,
       generation: int,
       video_file: str,
@@ -378,10 +378,10 @@ class Tracks:
         logger.warning( f"Could not read frame {box.frame} for track {track_id} crop." )
         continue
       height, width = frame.shape[ :2 ]
-      x1 = max( 0, min( width, int( box.x1 ) ) )
-      y1 = max( 0, min( height, int( box.y1 ) ) )
-      x2 = max( 0, min( width, int( box.x2 ) ) )
-      y2 = max( 0, min( height, int( box.y2 ) ) )
+      x1 = max( 0, min( width, box.x1 ) )
+      y1 = max( 0, min( height, box.y1 ) )
+      x2 = max( 0, min( width, box.x2 ) )
+      y2 = max( 0, min( height, box.y2 ) )
       if x2 <= x1 or y2 <= y1:
         continue
       crop = cv2.cvtColor( frame[ y1:y2, x1:x2 ], cv2.COLOR_BGR2RGB )

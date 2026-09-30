@@ -4,9 +4,16 @@ from pathlib import Path
 from typing import TypeVar
 
 import pyarrow.parquet as pq
+import pytest
 
 from soccer_homography.dataTypes import BoundingBox, Track
-from soccer_homography.db import AsyncChunkWriter, writeBatchDetections, writeBatchTracking
+from soccer_homography.db import (
+    AsyncChunkWriter,
+    readDetectionChunks,
+    readTrackingChunks,
+    writeBatchDetections,
+    writeBatchTracking,
+)
 
 T = TypeVar( "T" )
 
@@ -105,6 +112,10 @@ def test_detection_and_tracking_writers_write_separate_parquet_chunks( tmp_path,
 
     assert pq.read_table( "tracking/chunk_detections_4_0.parquet" ).num_rows == 1
     assert pq.read_table( "tracking/chunk_tracking_4_0.parquet" ).num_rows == 1
+    loaded_detections = readDetectionChunks( 4 )
+    loaded_tracks = readTrackingChunks( 4 )
+    assert loaded_detections[ 4 ][ 0 ].conf == pytest.approx( detections[ 4 ][ 0 ].conf )
+    assert loaded_tracks[ 9 ].boxes[ 0 ].conf == pytest.approx( tracks[ 0 ].boxes[ 0 ].conf )
     assert not errors
   finally:
     detection_writer.shutdown()
