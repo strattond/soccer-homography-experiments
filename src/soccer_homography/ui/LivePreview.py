@@ -53,7 +53,7 @@ class LivePreview:
     scaleW, scaleL = self.pitch.get_pitch_scale
     for track in tracks.values():
       lkpIndex = track.getListIndex( frame_index )
-      if lkpIndex is not None:
+      if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_smooth ):
         self.draw( track.homog[ lkpIndex ], self.pitch.colors.point_color.as_hex(), scaleW, scaleL )
         self.draw( track.homog_smooth[ lkpIndex ], self.pitch.colors.hover_color.as_hex(), scaleW, scaleL )
 

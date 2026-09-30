@@ -69,6 +69,7 @@ class AppState:
 
   # Current info being processed
   curClipID:        int                              = -1
+  curHomographyID:  int | None                       = None
   db:               duckdb.DuckDBPyConnection | None = None
 
   def __post_init__( self ):

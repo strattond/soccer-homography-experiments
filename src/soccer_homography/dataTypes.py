@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict, dataclass, field
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -148,8 +149,11 @@ class Homography:
     with open( path, "r" ) as f:
       data = json.load( f )
 
+    self.load_dict( data )
+
+  def load_dict( self, data: dict ):
     # --- Homography ---
-    self.hom4k = np.array( data[ "homography" ], dtype=np.float64 )
+    self.hom4k = np.array( data[ "homography" ], dtype=np.float64 ) if data[ "homography" ] is not None else None
 
     # --- Points ---
     self.img_pts_4k = [ SelectionPoint( index=d[ "index" ], coords=self.load_point( d ) ) for d in data[ "points" ][ "image" ] ]
@@ -172,6 +176,9 @@ class Person:
   id:     int       = 0
   name:   str       = ""
   # yapf: enable
+
+
+ParticipationRole = Literal[ "home_player", "home_goalkeeper", "away_player", "away_goalkeeper", "referee", "unknown" ]
 
 
 @dataclass
@@ -208,7 +215,8 @@ class Track:
   clip:          int
   id:            int
   person:        Person | int | None = None
-  boxes:         list[BoundingBox]     = field( default_factory=list )
+  boxes:         list[BoundingBox]   = field( default_factory=list )
+  role:          ParticipationRole   = "unknown"
   homog:         list[Point2D]       = field( default_factory=list )
   homog_smooth:  list[Point2D]       = field( default_factory=list )
   smooth_pos:    np.ndarray | None   = None
@@ -217,18 +225,17 @@ class Track:
   def forExport( self, lo: int, hi: int ):
     nBoxes = [ box for box in self.boxes if box.frame >= lo and box.frame < hi ]
 
-    return Track( self.clip, self.id, self.person, nBoxes )
+    return Track( self.clip, self.id, self.person, nBoxes, self.role )
 
   def numId( self ) -> int | None:
-    actId = None
-    if isinstance( self.id, Person ):
-      actId = self.id.id
-    elif isinstance( self.id, int ):
-      actId = self.id
-    return actId
+    if isinstance( self.person, Person ):
+      return self.person.id
+    if isinstance( self.person, int ):
+      return self.person
+    return None
 
   def to_dict( self ):
-    return { "id": self.id, "person": self.numId(), "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
+    return { "id": self.id, "person": self.numId(), "role": self.role, "boxes": [ [ box.to_dict() for box in self.boxes ] ]}
 
   def getByIndex( self, index: int ) -> BoundingBox | None:
     return next( ( box for box in self.boxes if box.frame == index ), None )
@@ -247,6 +254,8 @@ class Track:
     self.homog_smooth.clear()
 
   def refreshHomography( self, transformer: Homography ):
+    if transformer.hom4k is None:
+      return
     boxLen = len( self.boxes )
     hmgLen = len( self.homog )
     positions: list[ list[ float ] ] = []

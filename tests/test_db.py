@@ -269,3 +269,49 @@ class TestClipParticipants:
     assert participants[ 0 ].shirt_number == 7
     assert participants[ 0 ].role == "home_player"
     assert persist.listClipParticipants( conn, second_clip.id )[ 0 ].person_id.id == other_match_person.id
+
+
+class TestClipTrack:
+
+  @pytest.mark.usefixtures( "clear_test_database" )
+  def test_clip_track_upsert_allows_unknown_person_and_updates_role( self, conn ):
+    video = persist.upsertVideo( conn, persist.Video( id=0, file="track.mp4" ) )
+    match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
+    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="track-camera" ) )
+    clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
+    person = persist.upsertPerson( conn, persist.Person( id=0, first_name="Sam", last_name="Player" ) )
+
+    unknown = persist.upsertClipTrack( conn, persist.ClipTrackDB( clip.id, 3, None, "unknown" ) )
+    assigned = persist.upsertClipTrack( conn, persist.ClipTrackDB( clip.id, 3, person.id, "home_player" ) )
+    tracks = persist.listClipTracks( conn, clip.id )
+
+    assert unknown.person_id is None
+    assert assigned.person_id == person.id
+    assert tracks[ 3 ] == assigned
+    assert len( tracks ) == 1
+
+
+class TestClipHomography:
+
+  @pytest.mark.usefixtures( "clear_test_database" )
+  def test_save_clip_homography_creates_then_updates_locked_off_record( self, conn ):
+    video = persist.upsertVideo( conn, persist.Video( id=0, file="homography.mp4" ) )
+    match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
+    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="homography-camera" ) )
+    clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
+    first_payload = { "homography": [[1, 0], [0, 1]], "points": { "image": [], "world": [] } }
+    saved = persist.saveClipHomography( conn, clip.id, first_payload )
+    updated_payload = { **first_payload, "revision": 2 }
+    updated = persist.saveClipHomography( conn, clip.id, updated_payload, homography_id=saved.homography_id )
+    loaded = persist.getClipHomography( conn, clip.id )
+
+    assert saved.homography_id == updated.homography_id
+    assert loaded is not None
+    assert loaded.payload == updated_payload
+    assert loaded.frame_start is None
+    assert loaded.frame_end is None
+
+  @pytest.mark.usefixtures( "clear_test_database" )
+  def test_save_clip_homography_requires_complete_frame_range( self, conn ):
+    with pytest.raises( ValueError, match="both start and end" ):
+      persist.saveClipHomography( conn, 1, {}, frame_start=0 )

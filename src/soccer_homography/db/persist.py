@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, cast
 
 import duckdb
 from squadi_data.fixed import DivisionData
 
-ParticipationRole = Literal[ "home_player", "home_goalkeeper", "away_player", "away_goalkeeper", "referee", "unknown" ]
+from soccer_homography.dataTypes import ParticipationRole
+
 fixedTZ = datetime.now().astimezone().tzinfo
 
 
@@ -53,6 +55,23 @@ class ClipDB:
   match_id: int
   camera_id: int
   sequence: int
+
+
+@dataclass( slots=True )
+class ClipTrackDB:
+  clip_id: int
+  track_id: int
+  person_id: int | None
+  role: ParticipationRole
+
+
+@dataclass( slots=True )
+class ClipHomographyDB:
+  clip_id: int
+  homography_id: int
+  payload: dict[ str, Any ]
+  frame_start: int | None
+  frame_end: int | None
 
 
 @dataclass( slots=True )
@@ -101,6 +120,7 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
     CREATE SEQUENCE IF NOT EXISTS camera_seq;
     CREATE SEQUENCE IF NOT EXISTS clip_seq;
     CREATE SEQUENCE IF NOT EXISTS person_seq;
+    CREATE SEQUENCE IF NOT EXISTS homography_seq;
     
     CREATE TABLE IF NOT EXISTS videos (
       id INTEGER PRIMARY KEY DEFAULT nextval('video_seq'),
@@ -147,6 +167,33 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
       PRIMARY KEY( match_id, person_id ),
       FOREIGN KEY( match_id ) REFERENCES matches( id ),
       FOREIGN KEY( person_id ) REFERENCES Person( id )
+    );
+
+    CREATE TABLE IF NOT EXISTS ClipTrack (
+      clip_id INTEGER NOT NULL,
+      track_id INTEGER NOT NULL,
+      person_id INTEGER,
+      role VARCHAR NOT NULL CHECK (role IN ('home_player', 'home_goalkeeper', 'away_player', 'away_goalkeeper', 'referee', 'unknown')),
+      PRIMARY KEY (clip_id, track_id),
+      FOREIGN KEY (clip_id) REFERENCES clips( id ),
+      FOREIGN KEY (person_id) REFERENCES Person( id )
+    );
+
+    CREATE TABLE IF NOT EXISTS Homographies (
+      id INTEGER PRIMARY KEY DEFAULT nextval('homography_seq'),
+      payload JSON NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ClipHomography (
+      clip_id INTEGER NOT NULL,
+      homography_id INTEGER NOT NULL,
+      frame_start INTEGER,
+      frame_end INTEGER,
+      PRIMARY KEY (clip_id, homography_id),
+      FOREIGN KEY (clip_id) REFERENCES clips( id ),
+      FOREIGN KEY (homography_id) REFERENCES Homographies( id ),
+      CHECK ((frame_start IS NULL AND frame_end IS NULL) OR
+             (frame_start IS NOT NULL AND frame_end IS NOT NULL AND frame_start <= frame_end))
     );
 
   """
@@ -349,6 +396,119 @@ def listClipParticipants( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> lis
           role=cast( ParticipationRole, str( row[ 10 ] ) ),
       ) for row in rows
   ]
+
+
+def listClipTracks( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> dict[ int, ClipTrackDB ]:
+  rows = conn.execute(
+      "SELECT clip_id, track_id, person_id, role FROM ClipTrack WHERE clip_id = ? ORDER BY track_id",
+      [ clip_id ],
+  ).fetchall()
+  return {
+      int( row[ 1 ] ): ClipTrackDB(
+          clip_id=int( row[ 0 ] ),
+          track_id=int( row[ 1 ] ),
+          person_id=int( row[ 2 ] ) if row[ 2 ] is not None else None,
+          role=cast( ParticipationRole, str( row[ 3 ] ) ),
+      )
+      for row in rows
+  }
+
+
+def upsertClipTrack( conn: duckdb.DuckDBPyConnection, clip_track: ClipTrackDB ) -> ClipTrackDB:
+  row = conn.execute(
+      """
+      INSERT INTO ClipTrack(clip_id, track_id, person_id, role)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (clip_id, track_id) DO UPDATE
+      SET person_id = excluded.person_id, role = excluded.role
+      RETURNING clip_id, track_id, person_id, role
+      """,
+      [ clip_track.clip_id, clip_track.track_id, clip_track.person_id, clip_track.role ],
+  ).fetchone()
+  if row is None:
+    raise RuntimeError( f"Could not save track {clip_track.track_id} for clip {clip_track.clip_id}." )
+  return ClipTrackDB(
+      clip_id=int( row[ 0 ] ),
+      track_id=int( row[ 1 ] ),
+      person_id=int( row[ 2 ] ) if row[ 2 ] is not None else None,
+      role=cast( ParticipationRole, str( row[ 3 ] ) ),
+  )
+
+
+def getClipHomography( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> ClipHomographyDB | None:
+  row = conn.execute(
+      """
+      SELECT ch.clip_id, ch.homography_id, h.payload::VARCHAR, ch.frame_start, ch.frame_end
+      FROM ClipHomography AS ch
+      JOIN Homographies AS h ON h.id = ch.homography_id
+      WHERE ch.clip_id = ?
+      ORDER BY ch.homography_id DESC
+      LIMIT 1
+      """,
+      [ clip_id ],
+  ).fetchone()
+  if row is None:
+    return None
+  payload = json.loads( str( row[ 2 ] ) )
+  if not isinstance( payload, dict ):
+    raise TypeError( f"Stored homography {row[ 1 ]} must contain a JSON object." )
+  return ClipHomographyDB(
+      clip_id=int( row[ 0 ] ),
+      homography_id=int( row[ 1 ] ),
+      payload=payload,
+      frame_start=int( row[ 3 ] ) if row[ 3 ] is not None else None,
+      frame_end=int( row[ 4 ] ) if row[ 4 ] is not None else None,
+  )
+
+
+def saveClipHomography(
+    conn: duckdb.DuckDBPyConnection,
+    clip_id: int,
+    payload: dict[ str, Any ],
+    homography_id: int | None = None,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+) -> ClipHomographyDB:
+  if ( frame_start is None ) != ( frame_end is None ):
+    raise ValueError( "Homography frame range must specify both start and end, or neither for a locked-off camera." )
+  if frame_start is not None and frame_end is not None and frame_start > frame_end:
+    raise ValueError( "Homography frame range start must not exceed its end." )
+  payload_json = json.dumps( payload )
+  with transaction( conn ):
+    if homography_id is None:
+      row = conn.execute(
+          "INSERT INTO Homographies(payload) VALUES (CAST(? AS JSON)) RETURNING id",
+          [ payload_json ],
+      ).fetchone()
+      if row is None:
+        raise RuntimeError( "Could not create homography record." )
+      homography_id = int( row[ 0 ] )
+      conn.execute(
+          """
+          INSERT INTO ClipHomography(clip_id, homography_id, frame_start, frame_end)
+          VALUES (?, ?, ?, ?)
+          """,
+          [ clip_id, homography_id, frame_start, frame_end ],
+      )
+    else:
+      association = conn.execute(
+          "SELECT 1 FROM ClipHomography WHERE clip_id = ? AND homography_id = ?",
+          [ clip_id, homography_id ],
+      ).fetchone()
+      if association is None:
+        raise ValueError( f"Homography {homography_id} is not associated with clip {clip_id}." )
+      conn.execute( "UPDATE Homographies SET payload = CAST(? AS JSON) WHERE id = ?", [ payload_json, homography_id ] )
+      conn.execute(
+          "UPDATE ClipHomography SET frame_start = ?, frame_end = ? WHERE clip_id = ? AND homography_id = ?",
+          [ frame_start, frame_end, clip_id, homography_id ],
+      )
+  return ClipHomographyDB(
+      clip_id=clip_id,
+      homography_id=homography_id,
+      payload=payload,
+      frame_start=frame_start,
+      frame_end=frame_end,
+  )
 
 
 def listClips( conn: duckdb.DuckDBPyConnection, *, video_id: int | None = None, match_id: int | None = None, camera_id: int | None = None ) -> list[ ClipDB ]:

@@ -3,12 +3,14 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import cv2
+import duckdb
 from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
 from soccer_homography.constants import CHUNK_SIZE
 from soccer_homography.dataTypes import (
     BoundingBox,
+    Homography,
     SelectionPoint,
     Track,
     TrackData,
@@ -16,10 +18,12 @@ from soccer_homography.dataTypes import (
 )
 from soccer_homography.db import (
     getCameraByID,
+    getClipHomography,
     getMatchByID,
     getVideoByID,
     initDB,
     listClips,
+    saveClipHomography,
     writeBatchDetections,
     writeBatchTracking,
 )
@@ -88,6 +92,7 @@ class App:
         print( "Forcibly terminating" )
     self.detection_writer.shutdown()
     self.tracking_writer.shutdown()
+    self.tabData.tabTracks.shutdown()
     if self.appState.db is not None:
       self.appState.db.close()
 
@@ -101,9 +106,14 @@ class App:
     self.imagePreview.place( x=50, y=20, width=1280, height=720 )
 
     # Tabular data + line detection options
-    self.tabData = Configuration( parent=self.root, state=self.appState, on_change=self.on_options_change )
     self.crops = ttk.LabelFrame( self.root, text="Crops" )
     self.crops.place( x=680, y=690 + 56, width=650, height=240 )
+    self.tabData = Configuration(
+        parent=self.root,
+        state=self.appState,
+        on_change=self.on_options_change,
+        crops_frame=self.crops,
+    )
 
     # radarMap
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
@@ -121,7 +131,7 @@ class App:
     self.lblLivePreview = tk.Label( self.root, text="Live Preview", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblLivePreview.place( x=1460, y=350, width=100, height=24 )
 
-    self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace )
+    self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace, self.saveClipHomography )
 
     self.createWidgetsDetection( 1460, 740 )
     self.createWidgetsTrack( 1460, 780 )
@@ -155,6 +165,10 @@ class App:
     # btnRunYoloVidDetection
     self.btnTrackRange = tk.Button( self.root, text="Range", font=( "Arial", 10 ), command=self.cmdTrackRange, state=tk.DISABLED )
     self.btnTrackRange.place( x=left + 110, y=top, width=52, height=28 )
+    self.btnCrops = tk.Button( self.root, text="Crops", font=( "Arial", 10 ), command=self.tabData.tabTracks.collectCrops, state=tk.DISABLED )
+    self.btnCrops.place( x=left + 162, y=top, width=52, height=28 )
+    self.btnVLM = tk.Button( self.root, text="VLM", font=( "Arial", 10 ), state=tk.DISABLED )
+    self.btnVLM.place( x=left + 214, y=top, width=52, height=28 )
 
   def createWidgetsSource( self, left: int, top: int ):
     # lblDetectAction
@@ -298,22 +312,38 @@ class App:
       capture.release()
       messagebox.showerror( "Unable to open video", f"OpenCV could not open:\n{filename}", parent=self.root )
       return False
+    had_loaded_clip = self.appState.curClipID > 0
     if self.appState.cap is not None:
       self.appState.cap.release()
     self.appState.videoFile = filename
     self.appState.cap = capture
     self.appState.curClipID = clip_id
+    self.appState.curHomographyID = None
     self.appState.boxes.clear()
     self.appState.tracks.clear()
     self.appState.framesProcessed = 0
     self.appState.detectChunk = 0
     self.appState.trackChunk = 0
+    if had_loaded_clip:
+      self.appState.data = Homography()
+    if self.appState.db is not None:
+      try:
+        stored_homography = getClipHomography( self.appState.db, clip_id )
+      except ( duckdb.Error, ValueError ) as error:
+        stored_homography = None
+        messagebox.showerror( "Load Homography failed", str( error ), parent=self.root )
+      if stored_homography is not None:
+        self.appState.data.load_dict( stored_homography.payload )
+        self.appState.curHomographyID = stored_homography.homography_id
+    self.tabData.tabTracks.onClipLoaded()
     vidData = VideoData( capture )
     self.sldVideoFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.minFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.maxFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.mainImageController.load( capture, vidData )
     self.mainImageController.setFrame( 0 )
+    self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
+    self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
     self.minimap.updateTotalFrames( vidData.frames )
     self.minimap.setCurrentFrame( 0 )
     self.tabData.tabClipParticipants.refresh()
@@ -336,8 +366,27 @@ class App:
     self.btnYoloOneFrame.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnTrackRange.config( state=tk.NORMAL if trackable else tk.DISABLED )
-    self.uiHomography.setEnableStatus( self.hasHomography(), homoable )
+    self.btnCrops.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
+    self.uiHomography.setEnableStatus( self.hasHomography(), homoable, self.appState.curClipID > 0 )
     self.sldVideoFrame.setEnabled( cappable )
+
+  def saveClipHomography( self ) -> None:
+    if self.appState.db is None or self.appState.curClipID <= 0:
+      messagebox.showerror( "Save Homography", "Load a registered clip before saving its homography.", parent=self.root )
+      return
+    try:
+      saved = saveClipHomography(
+          self.appState.db,
+          self.appState.curClipID,
+          self.appState.data.to_dict(),
+          homography_id=self.appState.curHomographyID,
+      )
+    except ( duckdb.Error, RuntimeError, ValueError ) as error:
+      logger.exception( "Could not save homography for the active clip." )
+      messagebox.showerror( "Save Homography failed", str( error ), parent=self.root )
+      return
+    self.appState.curHomographyID = saved.homography_id
+    logger.info( f"Saved homography {saved.homography_id} for clip {saved.clip_id}" )
 
   def setProgRange( self, prog: ttk.Progressbar, val: int, max: int ):
     prog[ 'value' ] = val
@@ -408,21 +457,24 @@ class App:
         self.appState.tracks[ track.tid ].boxes.append( track.data )
         pollDelay = 2
       elif data.type == OutputType.NEW_FRAME:
-        self.prgDetection.tick()
         self.appState.framesProcessed += 1
-        if self.tracking is not None and self.tracking.curMode == CommandType.RUN_BBOX and isinstance( data.data, int ):
-          self.minimap.markFrameAsDone( data.data )
-        if self.tracking is not None and self.tracking.curMode == CommandType.RUN_BBOX and self.appState.framesProcessed % CHUNK_SIZE == 0:
-          # Write out the saved data
-          self.chunkDetections()
-          logger.info( f"Writing chunk {self.appState.detectChunk}" )
-          self.appState.detectChunk += 1
-        elif self.tracking is not None and self.tracking.curMode == CommandType.RUN_TRACK and self.appState.framesProcessed % CHUNK_SIZE == 0:
-          # Write out the saved data
-          self.chunkTracking()
-          logger.info( f"Writing chunk {self.appState.trackChunk}" )
-          self.appState.trackChunk += 1
-        pollDelay = 5
+        self.prgDetection.tick()
+        if self.tracking is not None:
+          tMode = self.tracking.curMode
+          if tMode == CommandType.RUN_BBOX and isinstance( data.data, int ):
+            self.minimap.markFrameAsDone( data.data )
+            self.minimap.redraw()
+          if tMode == CommandType.RUN_BBOX and self.appState.framesProcessed % CHUNK_SIZE == 0:
+            # Write out the saved data
+            self.chunkDetections()
+            logger.info( f"Writing chunk {self.appState.detectChunk}" )
+            self.appState.detectChunk += 1
+          elif tMode == CommandType.RUN_TRACK and self.appState.framesProcessed % CHUNK_SIZE == 0:
+            # Write out the saved data
+            self.chunkTracking()
+            logger.info( f"Writing chunk {self.appState.trackChunk}" )
+            self.appState.trackChunk += 1
+        pollDelay = 2
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.refreshHomographyData( self.mainImageController.frame_num )
@@ -536,6 +588,7 @@ class App:
     for value in self.appState.tracks.values():
       value.clearHomography()
     self.refreshHomographyData()
+    self.checkButtonState()
 
   def bumpIt( self ):
     self.prgHomography.tick()

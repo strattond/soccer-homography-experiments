@@ -1,1 +1,1 @@
-CHUNK_SIZE = 25
+CHUNK_SIZE: int = 250
