@@ -6,7 +6,6 @@ from unittest.mock import Mock
 
 import cv2
 import numpy as np
-from pytz import NonExistentTimeError
 
 from soccer_homography import App
 from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
@@ -345,7 +344,7 @@ def test_clicking_crop_sends_its_frame_to_the_main_slider_callback():
 
 def test_vlm_button_requires_enabled_crop_action_and_selected_track_crops():
   tracks = Tracks.__new__( Tracks )
-  tracks.appState = SimpleNamespace( curClipID=4 )
+  cast( Any, tracks ).appState = SimpleNamespace( curClipID=4 )
   tracks.cropCacheClipID = 4
   tracks.cropCache = { 9: [ ( 13, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) ] }
   tracks.selTrackID = 9
@@ -377,7 +376,7 @@ def test_moondream_vlm_queries_rgb_crop_and_role_votes():
   image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
 
   response = model.query( image, "Identify the role." )
-  assert response == VLMResponse( role=None, confidence=None, answer="home_player" )
+  assert response == VLMResponse( role="home_player", confidence=None, answer="home_player" )
   assert fake_model.images[ 0 ].size == ( 10, 10 )
   worker = CropInferenceWorker(
       1,
@@ -419,7 +418,7 @@ def test_moondream_load_uses_the_selected_single_device(monkeypatch):
       AutoModelForCausalLM=SimpleNamespace( from_pretrained=loader )
   )
   monkeypatch.setitem( sys.modules, "transformers", transformers_stub )
-  monkeypatch.setattr( "soccer_homography.inference.abstractions.selectModelDevice", lambda _torch, _min_memory: "cpu" )
+  monkeypatch.setattr( "soccer_homography.inference.clip_model.selectModelDevice", lambda _torch, _min_memory: "cpu" )
   model = MoondreamVLM()
 
   loaded = model.loadModel()
@@ -454,7 +453,7 @@ def test_moondream_response_ignores_confidence():
   model.model = FakeModel()
   image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
 
-  assert model.query( image, "Identify the role." ) == VLMResponse( "referee" )
+  assert model.query( image, "Identify the role." ) == VLMResponse( role="referee", confidence=None, answer="referee" )
 
 
 def test_identification_guess_shows_confidence_only_for_clip():
@@ -488,6 +487,7 @@ def test_clip_role_classifier_returns_top_role_and_softmax_confidence():
   result = model.query( image )
 
   assert result.role == "referee"
+  assert result.confidence is not None
   assert 0.9 < result.confidence < 1.0
 
 
@@ -511,7 +511,7 @@ def test_clip_model_load_uses_one_selected_device( monkeypatch ):
       CLIPProcessor=SimpleNamespace( from_pretrained=processor_loader ),
   )
   monkeypatch.setitem( sys.modules, "transformers", transformers_stub )
-  monkeypatch.setattr( "soccer_homography.inference.abstractions.selectModelDevice", lambda _torch, _min_memory: "cpu" )
+  monkeypatch.setattr( "soccer_homography.inference.clip_model.selectModelDevice", lambda _torch, _min_memory: "cpu" )
   classifier = ClipRoleClassifier()
 
   model, processor, device = classifier.loadModel()
@@ -526,7 +526,7 @@ def test_clip_model_load_uses_one_selected_device( monkeypatch ):
 def test_vlm_worker_returns_per_crop_responses_and_role_guess():
   class FakeVLM(MoondreamVLM):
     def query( self, image, prompt ):
-      return VLMResponse( "referee" )
+      return VLMResponse( role="referee", confidence=None, answer="referee" )
 
   results = queue.Queue()
   crops = [
