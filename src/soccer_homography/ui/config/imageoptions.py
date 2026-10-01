@@ -3,7 +3,11 @@ from dataclasses import dataclass, field
 from tkinter import BooleanVar, StringVar, messagebox, ttk
 
 from soccer_homography.appState import AppState
-from soccer_homography.ui.config.vlm import DEFAULT_IDENTIFICATION_PROMPT, loadIdentificationPrompt, saveIdentificationPrompt
+from soccer_homography.inference.crop_inference import (
+  DEFAULT_IDENTIFICATION_PROMPT,
+  loadIdentificationPrompt,
+  saveIdentificationPrompt,
+)
 
 
 @dataclass

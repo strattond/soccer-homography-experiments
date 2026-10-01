@@ -7,34 +7,24 @@ import duckdb
 from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import ParticipationRole, Track
+from soccer_homography.dataTypes import ParticipationRole, Track, roles
 from soccer_homography.dataTypes import Person as TrackPerson
 from soccer_homography.db import ClipTrackDB, PersonParticipation, listClipParticipants, listClipTracks, upsertClipTrack
-from soccer_homography.log import logger
-from soccer_homography.ui.config.crop_worker import CropCache, CropExtractionWorker, CropJobMessage, CropSet
-from soccer_homography.ui.config.vlm import (
+from soccer_homography.inference.abstractions import AbstractInferenceModel, IdentificationImageResult
+from soccer_homography.inference.clip_model import ClipImageResult, ClipRoleClassifier
+from soccer_homography.inference.crop_inference import (
     DEFAULT_IDENTIFICATION_PROMPT,
-    ClipImageResult,
-    ClipRoleClassifier,
-    IdentificationImageResult,
-    MoondreamVLM,
-    VLMInferenceWorker,
-    VLMJobMessage,
+    CropInferenceJobMessage,
+    CropInferenceWorker,
     mostLikelyRole,
     roleVoteCounts,
 )
+from soccer_homography.inference.vlm_model import MoondreamVLM
+from soccer_homography.log import logger
+from soccer_homography.ui.config.crop_worker import CropCache, CropExtractionWorker, CropJobMessage, CropSet
 
 
 class Tracks:
-
-  roles: tuple[ ParticipationRole, ...] = (
-      "home_player",
-      "home_goalkeeper",
-      "away_player",
-      "away_goalkeeper",
-      "referee",
-      "unknown",
-  )
 
   def __init__(
       self,
@@ -95,10 +85,10 @@ class Tracks:
     self.cropProgress.place( x=8, y=30 )
     self.cropProgress.place_forget()
     self.cropWorker: CropExtractionWorker | None = None
-    self.vlmWorker: VLMInferenceWorker | None = None
-    self.vlmModel = MoondreamVLM()
-    self.clipModel = ClipRoleClassifier()
-    self.vlmResults: queue.Queue[ VLMJobMessage ] = queue.Queue()
+    self.vlmWorker: CropInferenceWorker | None = None
+    self.vlmModel: AbstractInferenceModel = MoondreamVLM()
+    self.clipModel: AbstractInferenceModel = ClipRoleClassifier()
+    self.vlmResults: queue.Queue[ CropInferenceJobMessage ] = queue.Queue()
     self.vlmGeneration = 0
     self.vlmButton: tk.Button | None = None
     self.cropsButtonEnabled = False
@@ -197,7 +187,7 @@ class Tracks:
     if self.editor is not None:
       self.editor.destroy()
 
-    options = self.person_options if column == "#3" else tuple( role.replace( "_", " " ) for role in self.roles )
+    options = self.person_options if column == "#3" else tuple( role.replace( "_", " " ) for role in roles )
     self.editor = ttk.Combobox( self.tab, state="readonly", values=options )
     x, y, width, height = bbox
     self.editor.place( x=self.tblTrackData.winfo_x() + x, y=self.tblTrackData.winfo_y() + y, width=width, height=height )
@@ -224,7 +214,7 @@ class Tracks:
           person_id = db_person.id
           role = participant.role
       else:
-        role = next( role for role in self.roles if role.replace( "_", " " ) == selection )
+        role = next( role for role in roles if role.replace( "_", " " ) == selection )
         person_id = track.numId()
 
       if not self.persistAssignment( track.id, person_id, role ):
@@ -351,11 +341,7 @@ class Tracks:
   def updateVLMButtonState( self, crops_enabled: bool | None = None ) -> None:
     if crops_enabled is not None:
       self.cropsButtonEnabled = crops_enabled
-    has_crops = (
-        self.selTrackID is not None
-        and self.cropCacheClipID == self.appState.curClipID
-        and bool( self.cropCache.get( self.selTrackID, [] ) )
-    )
+    has_crops = ( self.selTrackID is not None and self.cropCacheClipID == self.appState.curClipID and bool( self.cropCache.get( self.selTrackID, [] ) ) )
     enabled = self.cropsButtonEnabled and has_crops and self.vlmWorker is None
     if self.vlmButton is not None:
       self.vlmButton.config( state=tk.NORMAL if enabled else tk.DISABLED )
@@ -394,7 +380,7 @@ class Tracks:
       return
 
     self.vlmGeneration += 1
-    self.vlmWorker = VLMInferenceWorker(
+    self.vlmWorker = CropInferenceWorker(
         self.vlmGeneration,
         self.appState.curClipID,
         self.selTrackID,
@@ -480,16 +466,12 @@ class Tracks:
       if message.generation != self.vlmGeneration or message.clip_id != self.appState.curClipID:
         continue
       if message.kind == "progress":
-        self.cropStatus.config(
-            text=f"Analyzing Track {message.track_id} with {self.activeIdentifier}: "
-            f"crop {message.completed} / {message.total}"
-        )
+        self.cropStatus.config( text=f"Analyzing Track {message.track_id} with {self.activeIdentifier}: "
+                                f"crop {message.completed} / {message.total}" )
       elif message.kind == "answer" and message.image_result is not None:
         self.updateCropResultLabel( message.image_result )
-        self.cropStatus.config(
-            text=f"Track {message.track_id}, frame {message.image_result.frame_number}: "
-            f"{self.formatIdentificationGuess( message.image_result )}"
-        )
+        self.cropStatus.config( text=f"Track {message.track_id}, frame {message.image_result.frame_number}: "
+                                f"{self.formatIdentificationGuess( message.image_result )}" )
       elif message.kind == "error":
         self.vlmWorker = None
         self.updateVLMButtonState()
@@ -526,14 +508,10 @@ class Tracks:
               self.refresh()
               if self.tblTrackData.exists( str( track.id ) ):
                 self.tblTrackData.selection_set( str( track.id ) )
-              self.cropStatus.config(
-                  text=f"Saved {self.activeIdentifier} role {role.replace( '_', ' ' )} for Track {track.id}."
-              )
+              self.cropStatus.config( text=f"Saved {self.activeIdentifier} role {role.replace( '_', ' ' )} for Track {track.id}." )
           else:
-            self.cropStatus.config(
-                text=f"{self.activeIdentifier} most likely role: {role.replace( '_', ' ' )} "
-                f"for Track {message.track_id}."
-            )
+            self.cropStatus.config( text=f"{self.activeIdentifier} most likely role: {role.replace( '_', ' ' )} "
+                                    f"for Track {message.track_id}." )
     self.tab.after( 100, self.pollVLMResults )
 
   @staticmethod
@@ -557,22 +535,12 @@ class Tracks:
       result = f"Most likely: tie ({max_count} votes each for {', '.join( tied_roles )})"
     else:
       result = "Most likely: no role could be identified"
-    votes = "\n".join(
-        f"{name.replace( '_', ' ' )}: {counts.get( name, 0 )}"
-        for name in Tracks.roles
-    )
-    clip_confidences = [
-        answer.confidence
-        for answer in answers
-        if isinstance( answer, ClipImageResult ) and answer.role == role
-    ]
+    votes = "\n".join( f"{name.replace( '_', ' ' )}: {counts.get( name, 0 )}" for name in roles )
+    clip_confidences = [ answer.confidence for answer in answers if isinstance( answer, ClipImageResult ) and answer.role == role and answer.confidence is not None ]
     if role is not None and clip_confidences:
       confidence = sum( clip_confidences ) / len( clip_confidences )
       result += f"\nMean CLIP confidence for most likely role: {confidence:.0%}"
-    crop_results = "\n".join(
-        f"Frame {answer.frame_number}: {Tracks.formatIdentificationGuess( answer )}"
-        for answer in answers
-    )
+    crop_results = "\n".join( f"Frame {answer.frame_number}: {Tracks.formatIdentificationGuess( answer )}" for answer in answers )
     return f"{result}\n\nVotes:\n{votes}\n\nCrop results:\n{crop_results}"
 
   def updateCropResultLabel( self, result: IdentificationImageResult ) -> None:

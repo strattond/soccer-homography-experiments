@@ -6,31 +6,25 @@ from unittest.mock import Mock
 
 import cv2
 import numpy as np
+from pytz import NonExistentTimeError
 
 from soccer_homography import App
 from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
+from soccer_homography.inference.abstractions import selectModelDevice
+from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ClipImageResult, ClipResponse, ClipRoleClassifier
+from soccer_homography.inference.crop_inference import (
+  DEFAULT_IDENTIFICATION_PROMPT,
+  CropInferenceWorker,
+  loadIdentificationPrompt,
+  mostLikelyRole,
+  roleVoteCounts,
+  saveIdentificationPrompt,
+)
+from soccer_homography.inference.vlm_model import MIN_VLM_GPU_MEMORY_BYTES, MoondreamVLM, VLMImageResult, VLMResponse, guessRole
+from soccer_homography.pitch import SoccerPitchImage
+from soccer_homography.ui.components import Slider
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
-from soccer_homography.ui.config.vlm import (
-    DEFAULT_IDENTIFICATION_PROMPT,
-    ClipImageResult,
-    ClipResponse,
-    ClipRoleClassifier,
-    MIN_VLM_GPU_MEMORY_BYTES,
-    MoondreamVLM,
-    VLMImageResult,
-    VLMResponse,
-    VLMInferenceWorker,
-    guessRole,
-    loadIdentificationPrompt,
-    mostLikelyRole,
-    roleVoteCounts,
-    saveIdentificationPrompt,
-    selectClipDevice,
-    selectVLMDeviceMap,
-)
-from soccer_homography.ui.components import Slider
-from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.ui.LivePreview import LivePreview
 
 
@@ -383,9 +377,9 @@ def test_moondream_vlm_queries_rgb_crop_and_role_votes():
   image = np.zeros( ( 10, 10, 3 ), dtype=np.uint8 )
 
   response = model.query( image, "Identify the role." )
-  assert response == VLMResponse( "home_player" )
+  assert response == VLMResponse( role=None, confidence=None, answer="home_player" )
   assert fake_model.images[ 0 ].size == ( 10, 10 )
-  worker = VLMInferenceWorker(
+  worker = CropInferenceWorker(
       1,
       2,
       3,
@@ -414,9 +408,9 @@ def test_moondream_selects_single_device_and_avoids_tight_gpu_memory():
       )
   )
 
-  assert selectVLMDeviceMap( cpu_only ) == { "": "cpu" }
-  assert selectVLMDeviceMap( low_memory ) == { "": "cpu" }
-  assert selectVLMDeviceMap( enough_memory ) == { "": "cuda:0" }
+  assert selectModelDevice( cpu_only, MIN_VLM_GPU_MEMORY_BYTES ) == "cpu"
+  assert selectModelDevice( low_memory, MIN_VLM_GPU_MEMORY_BYTES ) == "cpu"
+  assert selectModelDevice( enough_memory, MIN_VLM_GPU_MEMORY_BYTES ) == "cuda:0"
 
 
 def test_moondream_load_uses_the_selected_single_device(monkeypatch):
@@ -425,10 +419,7 @@ def test_moondream_load_uses_the_selected_single_device(monkeypatch):
       AutoModelForCausalLM=SimpleNamespace( from_pretrained=loader )
   )
   monkeypatch.setitem( sys.modules, "transformers", transformers_stub )
-  monkeypatch.setattr(
-      "soccer_homography.ui.config.vlm.selectVLMDeviceMap",
-      lambda _torch: { "": "cpu" },
-  )
+  monkeypatch.setattr( "soccer_homography.inference.abstractions.selectModelDevice", lambda _torch, _min_memory: "cpu" )
   model = MoondreamVLM()
 
   loaded = model.loadModel()
@@ -437,7 +428,7 @@ def test_moondream_load_uses_the_selected_single_device(monkeypatch):
   loader.assert_called_once_with(
       "vikhyatk/moondream2",
       trust_remote_code=True,
-      device_map={ "": "cpu" },
+      device_map="cpu",
   )
 
 
@@ -457,7 +448,7 @@ def test_moondream_response_ignores_confidence():
   class FakeModel:
     def query( self, _image, prompt ):
       self.prompt = prompt
-      return { "answer": "referee", "confidence": 0.94 }
+      return { "role": None, "answer": "referee", "confidence": 0.94 }
 
   model = MoondreamVLM()
   model.model = FakeModel()
@@ -468,7 +459,7 @@ def test_moondream_response_ignores_confidence():
 
 def test_identification_guess_shows_confidence_only_for_clip():
   clip_result = ClipImageResult( 12, "home_player", 0.94 )
-  vlm_result = VLMImageResult( 20, "referee", "referee" )
+  vlm_result = VLMImageResult( 20, "referee", None )
 
   assert Tracks.formatIdentificationGuess( clip_result ) == "home player (94% confidence)"
   assert Tracks.formatIdentificationGuess( vlm_result ) == "referee"
@@ -507,9 +498,9 @@ def test_clip_device_selection_falls_back_when_gpu_memory_is_low():
       cuda=SimpleNamespace( is_available=lambda: True, mem_get_info=lambda _device: ( 2 * 1024**3, 4 * 1024**3 ) )
   )
 
-  assert selectClipDevice( cpu_only ) == "cpu"
-  assert selectClipDevice( low_memory ) == "cpu"
-  assert selectClipDevice( enough_memory ) == "cuda:0"
+  assert selectModelDevice( cpu_only, MIN_CLIP_GPU_MEMORY_BYTES ) == "cpu"
+  assert selectModelDevice( low_memory, MIN_CLIP_GPU_MEMORY_BYTES ) == "cpu"
+  assert selectModelDevice( enough_memory, MIN_CLIP_GPU_MEMORY_BYTES ) == "cuda:0"
 
 
 def test_clip_model_load_uses_one_selected_device( monkeypatch ):
@@ -520,7 +511,7 @@ def test_clip_model_load_uses_one_selected_device( monkeypatch ):
       CLIPProcessor=SimpleNamespace( from_pretrained=processor_loader ),
   )
   monkeypatch.setitem( sys.modules, "transformers", transformers_stub )
-  monkeypatch.setattr( "soccer_homography.ui.config.vlm.selectClipDevice", lambda _torch: "cpu" )
+  monkeypatch.setattr( "soccer_homography.inference.abstractions.selectModelDevice", lambda _torch, _min_memory: "cpu" )
   classifier = ClipRoleClassifier()
 
   model, processor, device = classifier.loadModel()
@@ -542,7 +533,7 @@ def test_vlm_worker_returns_per_crop_responses_and_role_guess():
       ( 12, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ),
       ( 20, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ),
   ]
-  worker = VLMInferenceWorker( 3, 7, 8, crops, "Identify the role.", FakeVLM(), results )
+  worker = CropInferenceWorker( 3, 7, 8, crops, "Identify the role.", FakeVLM(), results )
 
   worker.run()
 
@@ -567,7 +558,7 @@ def test_identification_worker_votes_across_clip_crops_and_continues():
 
   results = queue.Queue()
   crops = [ ( number, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) for number in ( 12, 20, 30 ) ]
-  worker = VLMInferenceWorker( 5, 7, 8, crops, "", FakeClip(), results )
+  worker = CropInferenceWorker( 5, 7, 8, crops, "", FakeClip(), results )
 
   worker.run()
 

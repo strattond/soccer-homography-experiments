@@ -180,6 +180,16 @@ class Person:
 
 ParticipationRole = Literal[ "home_player", "home_goalkeeper", "away_player", "away_goalkeeper", "referee", "unknown" ]
 
+roles: tuple[ ParticipationRole, ...] = (
+    "home_player",
+    "home_goalkeeper",
+    "away_player",
+    "away_goalkeeper",
+    "referee",
+    "unknown",
+)
+
+
 
 @dataclass
 class BoundingBox:
