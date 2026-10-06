@@ -17,7 +17,6 @@ class DetectionAdapter:
     self.raw = raw
     # Detect YOLO (Ultralytics) format
     if isinstance( raw, list ) and hasattr( raw[ 0 ], "boxes" ):
-      #print( raw[0] )
       self.from_yolo( raw[ 0 ] )
 
     elif isinstance( raw, ultralytics.engine.results.Results ):

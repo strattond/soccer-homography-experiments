@@ -42,8 +42,6 @@ class Mp4Encoder( BaseVideoEncoder ):
     height, width = self.dimensions( frames[ 0 ] )
     fps = int( source.get( cv2.CAP_PROP_FPS ) )
 
-    print( "Saving homography " )
-
     # Configure MP4 writer
     fourcc = cv2.VideoWriter.fourcc( *"mp4v" )
     writer = cv2.VideoWriter( "saved_homography.mp4", fourcc, fps, ( width, height ) )

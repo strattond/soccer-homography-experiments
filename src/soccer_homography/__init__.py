@@ -365,7 +365,8 @@ class App:
     processed_frames = set( self.appState.boxes ) | {
         box.frame for track in self.appState.tracks.values() for box in track.boxes
     }
-    self.minimap.markFramesAsDone( list( processed_frames ) )
+    if( len( processed_frames ) > 0 ):
+      self.minimap.markFramesAsDone( list( processed_frames ) )
     self.minimap.setCurrentFrame( 0 )
     if self.appState.tracks and self.appState.data.hom4k is not None:
       self.refreshHomographyData( 0 )
@@ -487,14 +488,14 @@ class App:
           self.appState.boxes[ bbox.frame ] = []
         self.appState.boxes[ bbox.frame ].append( bbox )
         self.pendingDetectionChunks.add( bbox.frame // CHUNK_SIZE )
-        pollDelay = 1
+        pollDelay = 0
       if data.type == OutputType.TRACK and data.data is not None and isinstance( data.data, TrackData ):
         track = data.data
         if track.tid not in self.appState.tracks:
           self.appState.tracks[ track.tid ] = Track( track.clip, track.tid )
         self.appState.tracks[ track.tid ].boxes.append( track.data )
         self.pendingTrackingChunks.add( track.data.frame // CHUNK_SIZE )
-        pollDelay = 2
+        pollDelay = 0
       elif data.type == OutputType.NEW_FRAME:
         self.appState.framesProcessed += 1
         self.prgDetection.tick()
@@ -513,7 +514,7 @@ class App:
             self.chunkTracking()
             logger.info( f"Writing chunk {self.appState.trackChunk}" )
             self.appState.trackChunk += 1
-        pollDelay = 2
+        pollDelay = 0
       elif data.type == OutputType.COMPLETED:
         self.prgDetection.stop()
         self.chunkDetections()
@@ -569,7 +570,6 @@ class App:
   def allocateModelTracking( self ):
     if self.tracking is not None and self.tracking.thread is not None and self.tracking.thread.is_alive():
       return
-    print( "Creating SportsTracker" )
     self.tracking = SportsTracker( self.appState.mdlOpts, self.appState.videoFile )
     self.tracking.start()
 
@@ -648,7 +648,6 @@ class App:
     logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
     self.prgHomography.setRange( 0, len( self.appState.tracks.items() ) )
     for ( i, value ) in self.appState.tracks.items():
-      print( f"Refreshing homography for track {i}" )
       value.refreshHomography( self.appState.data )
       self.root.after( 0, self.bumpIt )
     self.livePreviewController.updateMappings( self.appState.tracks, index )

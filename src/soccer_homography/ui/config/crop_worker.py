@@ -175,10 +175,10 @@ class CropExtractionWorker( threading.Thread ):
 
 def cropFromFrame( frame: np.ndarray, box: BoundingBox ) -> np.ndarray | None:
   height, width = frame.shape[ :2 ]
-  x1 = max( 0, min( width, box.x1 ) )
-  y1 = max( 0, min( height, box.y1 ) )
-  x2 = max( 0, min( width, box.x2 ) )
-  y2 = max( 0, min( height, box.y2 ) )
+  x1 = max( 0, min( width, int( box.x1 ) ) )
+  y1 = max( 0, min( height, int( box.y1 ) ) )
+  x2 = max( 0, min( width, int( box.x2 ) ) )
+  y2 = max( 0, min( height, int( box.y2 ) ) )
   if x2 <= x1 or y2 <= y1:
     return None
   crop = cv2.cvtColor( frame[ y1:y2, x1:x2 ], cv2.COLOR_BGR2RGB )

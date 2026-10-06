@@ -4,6 +4,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from soccer_homography.dataTypes import BoundingBox, Track
+from soccer_homography.log import logger
 
 BBOX_SCHEMA = pa.schema( [
     ( "clip", pa.int32() ),
@@ -70,20 +71,22 @@ def fileFromClipChunk( clipID: int, chunkID: int, type: str ) -> str:
 def writeBatchDetections( clipID: int, chunkID: int, records: dict[ int, list[ BoundingBox ] ] ) -> None:
   path = Path( fileFromClipChunk( clipID, chunkID, "detections" ) )
   path.parent.mkdir( parents=True, exist_ok=True )
+  logger.info( f"Writing {len(records)} detection frames to {path}" )
   pq.write_table( boxesToArrow( clipID, records ), path, compression="zstd" )
 
 
 def writeBatchTracking( clipID: int, chunkID: int, records: list[ Track ] ) -> None:
   path = Path( fileFromClipChunk( clipID, chunkID, "tracking" ) )
   path.parent.mkdir( parents=True, exist_ok=True )
+  logger.info( f"Writing {len(records)} tracking frames to {path}" )
   pq.write_table( tracksToArrow( records ), path, compression="zstd" )
 
 
-def _chunkFiles( clip_id: int, data_type: str ) -> list[ Path ]:
+def getChunkFiles( clip_id: int, data_type: str ) -> list[ Path ]:
   return sorted( Path( "tracking" ).glob( f"chunk_{data_type}_{clip_id}_*.parquet" ) )
 
 
-def _boundingBoxFromRow( row: dict ) -> BoundingBox:
+def getBoundingBoxFromRow( row: dict ) -> BoundingBox:
   return BoundingBox(
       x1=int( row[ "x1" ] ),
       y1=int( row[ "y1" ] ),
@@ -97,10 +100,10 @@ def _boundingBoxFromRow( row: dict ) -> BoundingBox:
 
 def readDetectionChunks( clip_id: int ) -> dict[ int, list[ BoundingBox ] ]:
   detections: dict[ int, list[ BoundingBox ] ] = {}
-  for path in _chunkFiles( clip_id, "detections" ):
+  for path in getChunkFiles( clip_id, "detections" ):
     for row in pq.read_table( path ).to_pylist():
       frame = int( row[ "frame" ] )
-      detections.setdefault( frame, [] ).append( _boundingBoxFromRow( row ) )
+      detections.setdefault( frame, [] ).append( getBoundingBoxFromRow( row ) )
   for boxes in detections.values():
     boxes.sort( key=lambda box: box.frame )
   return detections
@@ -108,11 +111,11 @@ def readDetectionChunks( clip_id: int ) -> dict[ int, list[ BoundingBox ] ]:
 
 def readTrackingChunks( clip_id: int ) -> dict[ int, Track ]:
   tracks: dict[ int, Track ] = {}
-  for path in _chunkFiles( clip_id, "tracking" ):
+  for path in getChunkFiles( clip_id, "tracking" ):
     for row in pq.read_table( path ).to_pylist():
       track_id = int( row[ "track" ] )
       track = tracks.setdefault( track_id, Track( clip_id, track_id ) )
-      track.boxes.append( _boundingBoxFromRow( row ) )
+      track.boxes.append( getBoundingBoxFromRow( row ) )
   for track in tracks.values():
     track.boxes.sort( key=lambda box: box.frame )
   return tracks

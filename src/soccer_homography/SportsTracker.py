@@ -1,3 +1,4 @@
+import gc
 import queue
 import threading
 import time
@@ -61,8 +62,8 @@ class SportsTracker:
   videoFile:        str
   range:            tuple[int, int]              = field( default_factory=tuple[int, int] )
   index:            int                          = 0
-  model:            YOLO                         = field( init=False )
-  tracker:          ByteTrack | OccluBoost       = field( init=False )
+  model:            YOLO | None                  = field( init=False, default=None )
+  tracker:          ByteTrack | OccluBoost | None = field( init=False, default=None )
   data:             Homography                   = field( init=False )
   cap:              cv2.VideoCapture             = field( init=False )
 
@@ -96,8 +97,7 @@ class SportsTracker:
     self.paused = False
 
   def stop( self ):
-    #logger.info( "Stopping SportsTracker" )
-    print( "Stopping SportsTracker" )
+    logger.info( "Stopping SportsTracker" )
     self.paused = False
     self.stopped = True
 
@@ -166,7 +166,7 @@ class SportsTracker:
 
         # Team colour classifier
         x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
-        logger.debug( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
+        #logger.debug( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
         self.out_queue.put( Output( type=OutputType.BBOX, data=BoundingBox( x1, y1, x2, y2, conf, cid, self.index ) ) )
 
       self.index += 1
@@ -184,42 +184,44 @@ class SportsTracker:
     # Prebind these to make Python ignore it
     ret = True
     frame = None
-    while not self.stopped:
-      self.processCommands()
-      while self.paused and not self.stopped:
-        time.sleep( 0.5 )
+    results = None
+    try:
+      while not self.stopped:
         self.processCommands()
+        while self.paused and not self.stopped:
+          time.sleep( 0.5 )
+          self.processCommands()
 
-      # We might go from paused to stopped
-      if self.stopped:
-        break
+        # We might go from paused to stopped
+        if self.stopped:
+          break
 
-      if self.curMode == CommandType.RUN_BBOX or self.curMode == CommandType.RUN_TRACK:
-        ret, frame = self.cap.read()
-        if not ret:
-          logger.error( f"Failed reading cap {ret}" )
-          self.stop()
+        if self.curMode == CommandType.RUN_BBOX or self.curMode == CommandType.RUN_TRACK:
+          ret, frame = self.cap.read()
+          if not ret:
+            logger.error( f"Failed reading cap {ret}" )
+            self.stop()
+            continue
+
+        # Do nothing without a valid frame
+        if frame is None:
           continue
-
-      # Do nothing without a valid frame
-      if frame is None:
-        continue
-
-      if self.curMode == CommandType.RUN_BBOX:
-        #  Predicting
-        results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
-        self.processResults( results )
-      elif self.curMode == CommandType.RUN_TRACK:
-        self.processTracking( frame )
-
-    print( "Quitting thread" )
-    #if hasattr( self.model, "predictor" ) and self.model.predictol0r is not None and hasattr( self.model.predictor, "trackers" ):
-    #  print( "Tracker reset!" )
-    #  for tracker in self.model.predictor.trackers:
-    #    tracker.reset()
-    self.cap.release()
+        if self.curMode == CommandType.RUN_BBOX:
+          if self.model is None:
+            raise RuntimeError( "YOLO model is unavailable while detection is active." )
+          results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
+          self.processResults( results )
+        elif self.curMode == CommandType.RUN_TRACK:
+          self.processTracking( frame )
+    finally:
+      frame = None
+      results = None
+      self.releaseResources()
+      logger.info( "Quitting thread" )
 
   def processTracking( self, frame ):
+    if self.tracker is None:
+      raise RuntimeError( "Tracker is unavailable while tracking is active." )
     currDets = self.inBoxes.get( self.index, [] )
     if currDets:
       dets = np.array( [ d.to_boxmot() for d in currDets ] )
@@ -232,8 +234,20 @@ class SportsTracker:
     for track in tracks:
       x1, y1, x2, y2, track_id, score, cls, _ = track
 
-      bbox = BoundingBox( x1, y1, x2, y2, score, cls, self.index )
+      bbox = BoundingBox( int( x1 ), int( y1 ), int( x2 ), int( y2 ), float( score ), int( cls ), self.index )
       self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( self.curClipID, tid=int( track_id ), data=bbox ) ) )
 
     self.index += 1
     self.checkCompletion()
+
+  def releaseResources( self ) -> None:
+    self.cap.release()
+    self.model = None
+    self.tracker = None
+    self.inBoxes.clear()
+    gc.collect()
+
+    import torch
+
+    if torch.cuda.is_available():
+      torch.cuda.empty_cache()

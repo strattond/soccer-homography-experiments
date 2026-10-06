@@ -309,7 +309,7 @@ class MainCanvasController:
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
         self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "boxes",) )
-        self.canvas.create_text( tlx, tly, text=str( i ), tags=( "boxes",), fill='white', font=( 'Arial', 18 ) )
+        #self.canvas.create_text( tlx, tly, text=str( i ), tags=( "boxes",), fill='white', font=( 'Arial', 18 ) )
 
   def updateTracks( self, tracks: dict[ int, Track ], index: int ):
     self.canvas.delete( "tracking" )

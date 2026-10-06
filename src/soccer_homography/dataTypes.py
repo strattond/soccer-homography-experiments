@@ -7,7 +7,7 @@ import numpy as np
 from cv2.typing import MatLike
 
 
-@dataclass
+@dataclass( slots=True, frozen=True )
 class Point2D:
   x: int = 0
   y: int = 0
@@ -30,7 +30,7 @@ class Point2D:
     return np.array( [ int( self.x ), int( self.y ) ], dtype=np.float32 )
 
 
-@dataclass
+@dataclass( slots=True, frozen=True )
 class SelectionPoint:
   index: int | None = None
   coords: Point2D = field( default_factory=lambda: Point2D() )
@@ -191,7 +191,7 @@ roles: tuple[ ParticipationRole, ...] = (
 
 
 
-@dataclass
+@dataclass( slots=True )
 class BoundingBox:
   # yapf: disable
   x1:        int
@@ -210,7 +210,7 @@ class BoundingBox:
     return [ self.x1, self.y1, self.x2, self.y2, self.conf, self.cls ]
 
 
-@dataclass
+@dataclass( slots=True )
 class TrackData:
   # yapf: disable
   clip:      int
@@ -219,7 +219,7 @@ class TrackData:
   # yapf: enable
 
 
-@dataclass
+@dataclass( slots=True )
 class Track:
   # yapf: disable
   clip:          int
@@ -269,7 +269,6 @@ class Track:
     boxLen = len( self.boxes )
     hmgLen = len( self.homog )
     positions: list[ list[ float ] ] = []
-    print( f"Refreshing from {hmgLen} to {boxLen - 1} homography" )
     for i in range( hmgLen, boxLen ):
       b = self.boxes[ i ]
       # Get the middle bottom of the bounding box aka Da Feet

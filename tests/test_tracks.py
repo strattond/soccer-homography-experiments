@@ -21,6 +21,7 @@ from soccer_homography.inference.crop_inference import (
 )
 from soccer_homography.inference.vlm_model import MIN_VLM_GPU_MEMORY_BYTES, MoondreamVLM, VLMImageResult, VLMResponse, guessRole
 from soccer_homography.pitch import SoccerPitchImage
+from soccer_homography.SportsTracker import SportsTracker
 from soccer_homography.ui.components import Slider
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
@@ -165,6 +166,18 @@ def test_crop_coordinates_scale_to_source_frame_dimensions():
   assert crops is not None
   assert crops.shape[:2] == ( 10, 10 )
   assert np.all( crops[ :, :, 0 ] == 255 )
+
+
+def test_crop_from_frame_converts_fractional_tracker_coordinates_to_slice_indices():
+  frame = np.zeros( ( 40, 40, 3 ), dtype=np.uint8 )
+  frame[ 10:20, 10:20 ] = ( 0, 0, 255 )
+  box = BoundingBox( 10.5, 10.5, 20.5, 20.5, 0.9, 0, 0 )
+
+  crop = cropFromFrame( frame, box )
+
+  assert crop is not None
+  assert crop.shape[:2] == ( 10, 10 )
+  assert np.all( crop[ :, :, 0 ] == 255 )
 
 
 def test_crop_frame_plan_prioritizes_frames_covering_more_tracks():
@@ -357,6 +370,29 @@ def test_vlm_button_requires_enabled_crop_action_and_selected_track_crops():
 
   tracks.updateVLMButtonState( crops_enabled=True )
   tracks.vlmButton.config.assert_called_with( state="normal" )
+
+
+def test_sports_tracker_releases_inference_resources( monkeypatch ):
+  cap = Mock()
+  tracker = cast( Any, SportsTracker.__new__( SportsTracker ) )
+  tracker.cap = cap
+  tracker.model = object()
+  tracker.tracker = object()
+  tracker.inBoxes = { 10: [ object() ] }
+  empty_cache = Mock()
+  monkeypatch.setitem(
+      sys.modules,
+      "torch",
+      SimpleNamespace( cuda=SimpleNamespace( is_available=lambda: True, empty_cache=empty_cache ) ),
+  )
+
+  tracker.releaseResources()
+
+  cap.release.assert_called_once_with()
+  assert tracker.model is None
+  assert tracker.tracker is None
+  assert tracker.inBoxes == {}
+  empty_cache.assert_called_once_with()
 
 
 def test_moondream_vlm_queries_rgb_crop_and_role_votes():
