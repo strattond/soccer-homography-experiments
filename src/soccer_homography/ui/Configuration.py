@@ -5,7 +5,12 @@ from tkinter.scrolledtext import ScrolledText
 from soccer_homography.appState import AppState
 from soccer_homography.db import listClipParticipants
 from soccer_homography.log import logging
-from soccer_homography.ui.config import ImageOptionsUI, ImagePreview, Tracks, homographyData
+from soccer_homography.ui.config import (
+    ImageOptionsUI,
+    ImagePreview,
+    Tracks,
+    homographyData,
+)
 
 
 class TkinterLogHandler( logging.Handler ):
@@ -81,21 +86,14 @@ class ClipParticipants:
 
 class Configuration:
 
-  def __init__(
-      self,
-      parent: tk.Tk,
-      state: AppState,
-      on_change=None,
-      crops_frame: ttk.LabelFrame | None = None,
-      on_frame_select=None,
-  ):
+  def __init__( self, parent: tk.Tk, state: AppState, on_change=None, crops_frame: ttk.LabelFrame | None = None, on_frame_select=None, on_role_changed=None, on_track_changed=None ):
 
     self.parent = parent
     self.appState: AppState = state
     self.crops_frame = crops_frame or ttk.LabelFrame( parent, text="Crops" )
 
     # Build UI
-    self.createLayout( on_change, on_frame_select )
+    self.createLayout( on_change, on_frame_select, on_role_changed, on_track_changed )
 
     # Set options based on current config
     self.tabImageOptions.stateToUI()
@@ -111,11 +109,11 @@ class Configuration:
   # -------------------------------------------------------------
   # Layout controls
   # -------------------------------------------------------------
-  def createLayout( self, on_change, on_frame_select ):
+  def createLayout( self, on_change, on_frame_select, on_role_changed, on_track_changed ):
 
     #style = ttk.Style()
     #style.configure( "Red.TFrame", background="red" )
-    self.root = ttk.LabelFrame( master=self.parent, borderwidth=5, relief='groove', text="Config" ) #, style="Red.TFrame" )
+    self.root = ttk.LabelFrame( master=self.parent, borderwidth=5, relief='groove', text="Config" )  #, style="Red.TFrame" )
     self.root.place( x=50, y=690 + 56 )
 
     self.nbControl = ttk.Notebook( self.root, width=600, height=190 )
@@ -125,13 +123,8 @@ class Configuration:
     self.tabLog = Log( self.createTab( "Log" ) )
     self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
     self.tabTracks = Tracks(
-        self.appState,
-        self.createTab( "Tracks" ),
-        self.crops_frame,
-        on_frame_select,
-        self.tabImageOptions.getIdentificationPrompt,
-        self.tabImageOptions.savePrompt,
-        self.tabImageOptions.getIdentificationModel,
+        self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select, self.tabImageOptions.getIdentificationPrompt, self.tabImageOptions.savePrompt,
+        self.tabImageOptions.getIdentificationModel, on_role_changed, on_track_changed
     )
     self.nbControl.pack( expand=1, fill='both' )
     self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks ]

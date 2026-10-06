@@ -362,7 +362,7 @@ def test_vlm_button_requires_enabled_crop_action_and_selected_track_crops():
   tracks.cropCache = { 9: [ ( 13, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) ] }
   tracks.selTrackID = 9
   tracks.cropsButtonEnabled = False
-  tracks.vlmWorker = None
+  tracks.cropInferenceWorker = None
   tracks.vlmButton = Mock()
 
   tracks.updateVLMButtonState()

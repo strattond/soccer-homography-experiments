@@ -1,6 +1,7 @@
+import json
 import queue
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 import duckdb
@@ -52,6 +53,7 @@ from soccer_homography.ui import (
     RadarCanvas,
     Slider,
 )
+from soccer_homography.ui.frameminimap import TrackingType
 
 
 class App:
@@ -116,9 +118,11 @@ class App:
     self.tabData = Configuration(
         parent=self.root,
         state=self.appState,
-        on_change=self.on_options_change,
+        on_change=self.onOptionsChange,
         crops_frame=self.crops,
-        on_frame_select=self.setVideoFrame,
+        on_frame_select=self.onFrameSelect,
+        on_role_changed=self.onRoleChanged,
+        on_track_changed=self.onTrackChanged
     )
 
     # radarMap
@@ -137,7 +141,7 @@ class App:
     self.lblLivePreview = tk.Label( self.root, text="Live Preview", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblLivePreview.place( x=1460, y=350, width=100, height=24 )
 
-    self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace, self.saveClipHomography )
+    self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace, self.saveClipHomography, self.loadHomographyFromDisk )
 
     self.createWidgetsDetection( 1460, 740 )
     self.createWidgetsTrack( 1460, 780 )
@@ -185,13 +189,11 @@ class App:
     # Load Video from file or database
     self.btnSourceDB = tk.Button( self.root, text="Clip", font=( "Arial", 10 ), command=self.cmdSourceClip )
     self.btnSourceDB.place( x=left + 110, y=top, width=52, height=28 )
-    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 10 ), command=self.openDataMaintenance ).place(
-        x=left + 162, y=top, width=120, height=28
-    )
+    tk.Button( self.root, text="Data Maintenance", font=( "Arial", 10 ), command=self.openDataMaintenance ).place( x=left + 162, y=top, width=120, height=28 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
 
-    self.minimap = FrameMinimap( master=self.root, total_frames=0 )
+    self.minimap = FrameMinimap( master=self.root, totalFrames=0 )
     self.minimap.place( x=1390, y=20, width=30, height=720 )
     # sliderVideoFrame
     self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 110, y=top, width=300, height=24 )
@@ -362,10 +364,8 @@ class App:
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
     self.minimap.updateTotalFrames( vidData.frames )
-    processed_frames = set( self.appState.boxes ) | {
-        box.frame for track in self.appState.tracks.values() for box in track.boxes
-    }
-    if( len( processed_frames ) > 0 ):
+    processed_frames = set( self.appState.boxes ) | { box.frame for track in self.appState.tracks.values() for box in track.boxes }
+    if ( len( processed_frames ) > 0 ):
       self.minimap.markFramesAsDone( list( processed_frames ) )
     self.minimap.setCurrentFrame( 0 )
     if self.appState.tracks and self.appState.data.hom4k is not None:
@@ -383,8 +383,22 @@ class App:
     self.minimap.setCurrentFrame( frame )
     self.livePreviewController.updateMappings( self.appState.tracks, frame )
 
-  def setVideoFrame( self, frame: int ) -> None:
+  def onFrameSelect( self, frame: int ) -> None:
     self.sldVideoFrame.setValue( frame )
+
+  def onRoleChanged( self ) -> None:
+    self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
+
+  def onTrackChanged( self, trackID: int | None ) -> None:
+    if trackID is None:
+      self.minimap.clear( TrackingType.CUR_TRACK )
+    else:
+      trackData = self.appState.tracks.get( trackID, None )
+      if trackData is not None:
+        frames = [ box.frame for box in trackData.boxes ]
+        self.minimap.clearFrames( TrackingType.CUR_TRACK )
+        self.minimap.markFramesAsDone( frames, TrackingType.CUR_TRACK )
+    self.minimap.redraw()
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
@@ -397,6 +411,29 @@ class App:
     self.tabData.tabTracks.updateVLMButtonState( bool( self.appState.tracks ) )
     self.uiHomography.setEnableStatus( self.hasHomography(), homoable, self.appState.curClipID > 0 )
     self.sldVideoFrame.setEnabled( cappable )
+
+  def loadHomographyFromDisk( self ) -> None:
+    if self.appState.curClipID <= 0:
+      messagebox.showerror( "Load Homography", "Load a registered clip before loading its homography.", parent=self.root )
+      return
+
+    path = filedialog.askopenfilename( title="Select homography file" )
+    if not path:
+      return
+
+    try:
+      with open( path, "r" ) as f:
+        data = json.load( f )
+      self.appState.data.load_dict( data )
+      self.appState.data.compute()
+    except ( OSError, ValueError, TypeError, KeyError ) as error:
+      logger.exception( f"Could not load homography from {path}." )
+      messagebox.showerror( "Load Homography failed", str( error ), parent=self.root )
+      return
+
+    self.saveClipHomography()
+    logger.info( f"Loaded and saved homography {self.appState.curHomographyID} for clip {self.appState.curClipID}" )
+    self.homoReplace()
 
   def saveClipHomography( self ) -> None:
     if self.appState.db is None or self.appState.curClipID <= 0:
@@ -449,14 +486,10 @@ class App:
       for value in self.appState.tracks.values():
         retained = [ box for box in value.boxes if not minFrame <= box.frame <= maxFrame ]
         if len( retained ) != len( value.boxes ):
-          self.pendingTrackingChunks.update(
-              box.frame // CHUNK_SIZE for box in value.boxes if minFrame <= box.frame <= maxFrame
-          )
+          self.pendingTrackingChunks.update( box.frame // CHUNK_SIZE for box in value.boxes if minFrame <= box.frame <= maxFrame )
           value.boxes = retained
         value.clearHomography()
-      self.appState.tracks = {
-          track_id: track for track_id, track in self.appState.tracks.items() if track.boxes
-      }
+      self.appState.tracks = { track_id: track for track_id, track in self.appState.tracks.items() if track.boxes }
       logger.info( f"Tracking frames {minFrame} to {maxFrame}" )
       self.prgDetection.setRange( 0, ( maxFrame-minFrame ) + 1 )
       self.prgHomography.setRange( 0, 0 )
@@ -502,7 +535,7 @@ class App:
         if self.tracking is not None:
           tMode = self.tracking.curMode
           if tMode == CommandType.RUN_BBOX and isinstance( data.data, int ):
-            self.minimap.markFrameAsDone( data.data )
+            self.minimap.markFramesAsDone( [ data.data ] )
             self.minimap.redraw()
           if tMode == CommandType.RUN_BBOX and self.appState.framesProcessed % CHUNK_SIZE == 0:
             # Write out the saved data
@@ -540,11 +573,7 @@ class App:
     for chunk_id in sorted( self.pendingDetectionChunks ):
       lo_frame = chunk_id * CHUNK_SIZE
       hi_frame = lo_frame + CHUNK_SIZE
-      export = {
-          frame: list( boxes )
-          for frame, boxes in self.appState.boxes.items()
-          if lo_frame <= frame < hi_frame
-      }
+      export = { frame: list( boxes ) for frame, boxes in self.appState.boxes.items() if lo_frame <= frame < hi_frame }
       self.detection_writer.submit( self.appState.curClipID, chunk_id, export )
     self.pendingDetectionChunks.clear()
 
@@ -552,11 +581,7 @@ class App:
     for chunk_id in sorted( self.pendingTrackingChunks ):
       lo_frame = chunk_id * CHUNK_SIZE
       hi_frame = lo_frame + CHUNK_SIZE
-      export = [
-          partial
-          for track in self.appState.tracks.values()
-          if ( partial := track.forExport( lo_frame, hi_frame ) ).boxes
-      ]
+      export = [ partial for track in self.appState.tracks.values() if ( partial := track.forExport( lo_frame, hi_frame ) ).boxes ]
       self.tracking_writer.submit( self.appState.curClipID, chunk_id, export )
     self.pendingTrackingChunks.clear()
 
@@ -628,7 +653,7 @@ class App:
     self.mainImageController.clearPendingMapping()
     self.radarMapController.clearPendingMapping()
 
-  def on_options_change( self ):
+  def onOptionsChange( self ):
     self.mainImageController.refreshHough()
 
   def redisplayHomographyData( self ):
@@ -647,7 +672,7 @@ class App:
     # Now recalculate
     logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
     self.prgHomography.setRange( 0, len( self.appState.tracks.items() ) )
-    for ( i, value ) in self.appState.tracks.items():
+    for value in self.appState.tracks.values():
       value.refreshHomography( self.appState.data )
       self.root.after( 0, self.bumpIt )
     self.livePreviewController.updateMappings( self.appState.tracks, index )

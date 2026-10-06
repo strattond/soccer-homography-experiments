@@ -6,7 +6,14 @@ from PIL import Image, ImageTk
 from supervision import Color
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import BoundingBox, Point2D, SelectionPoint, Track, VideoData, ViewTransform
+from soccer_homography.dataTypes import (
+  BoundingBox,
+  Point2D,
+  SelectionPoint,
+  Track,
+  VideoData,
+  ViewTransform,
+)
 from soccer_homography.LineDetector import LineDetector
 from soccer_homography.log import logger
 from soccer_homography.pitch import SoccerPitchConfiguration, SoccerPitchImage
@@ -308,7 +315,7 @@ class MainCanvasController:
         # Now we need to scale the box coordinates to our image
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
-        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='yellow', tags=( "boxes",) )
+        self.canvas.create_rectangle( tlx + 2, tly + 2, brx - 2, bry - 2, outline='yellow', tags=( "boxes",) )
         #self.canvas.create_text( tlx, tly, text=str( i ), tags=( "boxes",), fill='white', font=( 'Arial', 18 ) )
 
   def updateTracks( self, tracks: dict[ int, Track ], index: int ):
@@ -320,4 +327,4 @@ class MainCanvasController:
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
         self.canvas.create_rectangle( tlx, tly, brx, bry, outline='lightgreen', tags=( "tracking",) )
-        self.canvas.create_text( tlx, tly, text=str( k ), tags=( "tracking",), fill='lightgreen', font=( 'Arial', 18 ) )
+        self.canvas.create_text( tlx, tly, text="Track " + str( k ), tags=( "tracking",), fill='lightgreen', font=( 'Arial', 20 ) )

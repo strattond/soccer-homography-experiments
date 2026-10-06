@@ -3,7 +3,7 @@ import tkinter as tk
 from PIL import Image, ImageGrab, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import Point2D, Track
+from soccer_homography.dataTypes import Point2D, Track, ParticipationRole
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.pitch import SoccerPitchImage
 
@@ -17,6 +17,16 @@ class LivePreview:
   preserved:   list[ Image.Image ]
   preserve:    bool                = False
   # yapf: enable
+
+  # Marker colours keyed by participation role
+  role_colors: dict[ ParticipationRole, str ] = {
+      "home_player":        "#ff0000",   # Red for Home Player
+      "away_player":        "#0000ff",   # Blue for Away Player
+      "home_goalkeeper":    "#00ff00",   # Bright Green for home goalkeeper
+      "away_goalkeeper":    "#66ccff",   # Light Blue for away goalkeeper
+      "unknown":            "#000000",   # Black for unknown
+      "referee":            "#ffffff",   # White for referee
+  }
 
   def __init__( self, canvas: tk.Canvas, pitch_photo: ImageTk.PhotoImage, state: AppState, bumpFunc ):
 
@@ -54,8 +64,12 @@ class LivePreview:
     for track in tracks.values():
       lkpIndex = track.getListIndex( frame_index )
       if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_smooth ):
-        self.draw( track.homog[ lkpIndex ], self.pitch.colors.point_color.as_hex(), scaleW, scaleL )
-        self.draw( track.homog_smooth[ lkpIndex ], self.pitch.colors.hover_color.as_hex(), scaleW, scaleL )
+        color = self.role_color( track.role )
+        self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL )
+        self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL )
+
+  def role_color( self, role: ParticipationRole ) -> str:
+    return self.role_colors.get( role, "#000000" )
 
   def play( self, min: int, max: int, encoder: BaseVideoEncoder | None ):
     self.preserved = []

@@ -74,15 +74,3 @@ class AppState:
 
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )
-
-  def save( self, path: str ):
-    data = {
-        "homography": self.data.to_dict(),
-        "videoFile": self.videoFile,
-        "imgOpts": self.imgOpts.to_dict(),
-        "mdlOpts": self.mdlOpts.to_dict(),
-        "tracks": { str(k): v.to_dict() for k, v in self.tracks.items() },
-    }
-
-    with open( path, "w" ) as f:
-      json.dump( data, f, indent=2 )

@@ -11,12 +11,13 @@ class HomographyUI:
   appState:    AppState
   # yapf: enable
 
-  def __init__( self, root: tk.Tk, state: AppState, x: int, y: int, playFunc, homoReplaceFunc, saveHomographyFunc ):
+  def __init__( self, root: tk.Tk, state: AppState, x: int, y: int, playFunc, homoReplaceFunc, saveHomographyFunc, loadHomographyFunc ):
     self.root = root
     self.appState = state
     self.playFunc = playFunc
     self.homoReplaceFunc = homoReplaceFunc
     self.saveHomographyFunc = saveHomographyFunc
+    self.loadHomographyFunc = loadHomographyFunc
     self.x = x
     self.y = y
     self.createWidgets()
@@ -38,8 +39,12 @@ class HomographyUI:
     self.btnMP4Homography = tk.Button( self.root, text="MP4", font=( "Arial", 10 ), command=self.cmdMP4Homography, state=tk.DISABLED )
     self.btnMP4Homography.place( x=self.x + 206, y=self.y, width=48, height=28 )
 
-    self.btnSaveHomographyDB = tk.Button( self.root, text="Save Homography", font=( "Arial", 10 ), command=self.saveHomographyFunc, state=tk.DISABLED )
-    self.btnSaveHomographyDB.place( x=self.x + 254, y=self.y, width=108, height=28 )
+    self.btnSaveHomographyDB = tk.Button( self.root, text="Save", font=( "Arial", 10 ), command=self.saveHomographyFunc, state=tk.DISABLED )
+    self.btnSaveHomographyDB.place( x=self.x + 254, y=self.y, width=48, height=28 )
+
+    # btnLoadHomography
+    self.btnLoadHomography = tk.Button( self.root, text="Load", font=( "Arial", 10 ), command=self.loadHomographyFunc, state=tk.DISABLED )
+    self.btnLoadHomography.place( x=self.x + 302, y=self.y, width=48, height=28 )
 
   def cmdPlayHomography( self ):
     self.playFunc( None )
@@ -51,6 +56,7 @@ class HomographyUI:
     self.playFunc( Mp4Encoder() )
 
   def setEnableStatus( self, hasHomography, hasTracks, hasClip=False ):
+    self.btnLoadHomography.config( state=tk.NORMAL if self.appState.curClipID > 0 else tk.DISABLED )
     self.btnSaveHomographyDB.config( state=tk.NORMAL if hasHomography and hasClip else tk.DISABLED )
     self.btnPlayHomography.config( state=tk.NORMAL if hasTracks else tk.DISABLED )
     self.btnGIFHomography.config( state=tk.NORMAL if hasTracks else tk.DISABLED )

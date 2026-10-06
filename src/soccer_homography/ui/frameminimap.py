@@ -1,71 +1,41 @@
+from __future__ import annotations
+
 import tkinter as tk
+from enum import Enum, auto
 
 import numpy as np
 
 
-class FrameMinimap( tk.Canvas ):
+class TrackingType( Enum ):
+  PROCESSING = auto()
+  CUR_TRACK = auto()
 
-  def __init__(
-      self,
-      master,
-      *,
-      total_frames: int,
-      width: int = 20,
-      height: int = 200,
-      bg_color="#2b2b2b",
-      track_color="#404040",
-      processed_color="#4CAF50",
-      current_frame_color="#FFD54F",
-      **kwargs,
-  ):
-    super().__init__( master, width=width, height=height, bg=bg_color, highlightthickness=0, **kwargs )
 
-    self.updateTotalFrames( total_frames )
+class MinimapTracking:
 
-    self.track_color = track_color
-    self.processed_color = processed_color
-    self.current_frame_color = current_frame_color
-
-    self.current_frame = None
-
-    self.bind( "<Configure>", lambda _: self.redraw() )
-
-  # ------------------------------------------------------------------
-  # Public API
-  # ------------------------------------------------------------------
-
-  def updateTotalFrames( self, newValue: int ):
-    self.total_frames = newValue
+  def __init__( self, totalFrames: int, width: int, color: str, owner: FrameMinimap ):
+    self.totalFrames = totalFrames
+    self.color = color
+    self.width = width
+    self.owner = owner
     self.clearFrames()
-    self.redraw()
 
   def clearFrames( self ):
 
     # One bit per frame
-    self.processedFrames = np.zeros( self.total_frames, dtype=bool )
-
-  def markFrameAsDone( self, frame_idx: int ):
-    """Mark a single frame as processed."""
-    # Bounds check it to ensure we don't walk outside the range
-    if 0 <= frame_idx < self.total_frames:
-      self.processedFrames[ frame_idx ] = True
+    self.processedFrames = np.zeros( self.totalFrames, dtype=bool )
 
   def markFramesAsDone( self, frame_indices ):
     """Mark multiple frames at once."""
 
     frame_indices = np.asarray( frame_indices )
     # Sanitise it to those that are in range
-    frame_indices = frame_indices[ ( frame_indices >= 0 ) & ( frame_indices < self.total_frames ) ]
+    frame_indices = frame_indices[ ( frame_indices >= 0 ) & ( frame_indices < self.totalFrames ) ]
 
     self.processedFrames[ frame_indices ] = True
 
   def clear( self ):
     self.processedFrames.fill( False )
-    self.redraw()
-
-  def setCurrentFrame( self, frame_idx: int ):
-    self.current_frame = frame_idx
-    self.redraw()
 
   # ------------------------------------------------------------------
   # Range conversion
@@ -98,16 +68,92 @@ class FrameMinimap( tk.Canvas ):
 
     return list( zip( starts, ends ) )
 
+  def redraw( self ):
+
+    width = self.owner.winfo_width()
+    height = self.owner.winfo_height()
+
+    if width <= 1 or height <= 1:
+      return
+
+    for start, end in self.convertMaskToRanges():
+      if self.totalFrames <= 0:
+        continue
+      y0 = height * ( 1 - start / self.totalFrames )
+      y1 = height * ( 1 - ( end+1 ) / self.totalFrames )
+      self.owner.create_rectangle( 0, y1, self.width, y0, fill=self.color, outline="" )
+
+
+class FrameMinimap( tk.Canvas ):
+
+  def __init__(
+      self,
+      master,
+      *,
+      totalFrames: int,
+      width: int = 30,
+      height: int = 200,
+      colorBG="#2b2b2b",
+      colorTrack="#404040",
+      colorProcessed="#4CAF50",
+      colorFrameCurrent="#FFD54F",
+      **kwargs,
+  ):
+    super().__init__( master, width=width, height=height, bg=colorBG, highlightthickness=0, **kwargs )
+
+    self.tracking: dict[ TrackingType, MinimapTracking ] = {}
+    self.processed = MinimapTracking( totalFrames, width, colorProcessed, self )
+    self.curTrack = MinimapTracking( totalFrames, width // 2, "#FF0000", self )
+    self.tracking[ TrackingType.PROCESSING ] = self.processed
+    self.tracking[ TrackingType.CUR_TRACK ] = self.curTrack
+
+    self.updateTotalFrames( totalFrames )
+
+    self.colorTrack = colorTrack
+    self.colorCurrentFrame = colorFrameCurrent
+
+    self.currentFrame = None
+
+    self.bind( "<Configure>", lambda _: self.redraw() )
+
+  # ------------------------------------------------------------------
+  # Public API
+  # ------------------------------------------------------------------
+
+  def updateTotalFrames( self, newValue: int ):
+    self.totalFrames = newValue
+    for k, v in self.tracking.items():
+      v.totalFrames = newValue
+      self.clearFrames( k )
+    self.redraw()
+
+  def clearFrames( self, mode: TrackingType = TrackingType.PROCESSING ):
+
+    self.tracking[ mode ].clearFrames()
+
+  def markFramesAsDone( self, frame_indices, mode: TrackingType = TrackingType.PROCESSING ):
+    """Mark multiple frames at once."""
+
+    self.tracking[ mode ].markFramesAsDone( frame_indices )
+
+  def clear( self, mode: TrackingType = TrackingType.PROCESSING ):
+    self.tracking[ mode ].clear()
+    self.redraw()
+
+  def setCurrentFrame( self, frame_idx: int ):
+    self.currentFrame = frame_idx
+    self.redraw()
+
   # ------------------------------------------------------------------
   # Drawing
   # ------------------------------------------------------------------
 
   def getYForFrame( self, frame_idx: int ) -> float:
     height = self.winfo_height()
-    if self.total_frames <= 1:
+    if self.totalFrames <= 1:
       return float( height )
-    frame_idx = min( max( frame_idx, 0 ), self.total_frames - 1 )
-    return height * ( 1 - frame_idx / ( self.total_frames - 1 ) )
+    frame_idx = min( max( frame_idx, 0 ), self.totalFrames - 1 )
+    return height * ( 1 - frame_idx / ( self.totalFrames - 1 ) )
 
   def redraw( self ):
     self.delete( "all" )
@@ -120,19 +166,15 @@ class FrameMinimap( tk.Canvas ):
 
     # Background track
 
-    self.create_rectangle( 0, 0, width, height, fill=self.track_color, outline="" )
+    self.create_rectangle( 0, 0, width, height, fill=self.colorTrack, outline="" )
 
     # Processed regions
 
-    for start, end in self.convertMaskToRanges():
-      if self.total_frames <= 0:
-        continue
-      y0 = height * ( 1 - start / self.total_frames )
-      y1 = height * ( 1 - ( end + 1 ) / self.total_frames )
-      self.create_rectangle( 0, y1, width, y0, fill=self.processed_color, outline="" )
+    for v in self.tracking.values():
+      v.redraw()
 
     # Current frame marker
 
-    if self.current_frame is not None:
-      y = self.getYForFrame( self.current_frame )
-      self.create_line( 0, y, width, y, width=2, fill=self.current_frame_color )
+    if self.currentFrame is not None:
+      y = self.getYForFrame( self.currentFrame )
+      self.create_line( 0, y, width, y, width=2, fill=self.colorCurrentFrame )

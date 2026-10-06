@@ -7,7 +7,7 @@ import numpy as np
 from cv2.typing import MatLike
 
 
-@dataclass( slots=True, frozen=True )
+@dataclass( slots=True )
 class Point2D:
   x: int = 0
   y: int = 0
@@ -30,7 +30,7 @@ class Point2D:
     return np.array( [ int( self.x ), int( self.y ) ], dtype=np.float32 )
 
 
-@dataclass( slots=True, frozen=True )
+@dataclass( slots=True )
 class SelectionPoint:
   index: int | None = None
   coords: Point2D = field( default_factory=lambda: Point2D() )

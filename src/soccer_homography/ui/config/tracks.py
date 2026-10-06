@@ -9,8 +9,17 @@ from PIL import Image, ImageTk
 from soccer_homography.appState import AppState
 from soccer_homography.dataTypes import ParticipationRole, Track, roles
 from soccer_homography.dataTypes import Person as TrackPerson
-from soccer_homography.db import ClipTrackDB, PersonParticipation, listClipParticipants, listClipTracks, upsertClipTrack
-from soccer_homography.inference.abstractions import AbstractInferenceModel, IdentificationImageResult
+from soccer_homography.db import (
+    ClipTrackDB,
+    PersonParticipation,
+    listClipParticipants,
+    listClipTracks,
+    upsertClipTrack,
+)
+from soccer_homography.inference.abstractions import (
+    AbstractInferenceModel,
+    IdentificationImageResult,
+)
 from soccer_homography.inference.clip_model import ClipImageResult, ClipRoleClassifier
 from soccer_homography.inference.crop_inference import (
     DEFAULT_IDENTIFICATION_PROMPT,
@@ -21,7 +30,12 @@ from soccer_homography.inference.crop_inference import (
 )
 from soccer_homography.inference.vlm_model import MoondreamVLM
 from soccer_homography.log import logger
-from soccer_homography.ui.config.crop_worker import CropCache, CropExtractionWorker, CropJobMessage, CropSet
+from soccer_homography.ui.config.crop_worker import (
+    CropCache,
+    CropExtractionWorker,
+    CropJobMessage,
+    CropSet,
+)
 
 
 class Tracks:
@@ -35,6 +49,8 @@ class Tracks:
       prompt_provider: Callable[ [], str ] | None = None,
       prompt_saver: Callable[ [ str ], bool ] | None = None,
       model_provider: Callable[ [], str ] | None = None,
+      role_change: Callable[ [], None ] | None = None,
+      on_track_changed: Callable[ [ int | None ], None ] | None = None
   ) -> None:
     self.appState = appState
     self.tab = tab
@@ -56,6 +72,8 @@ class Tracks:
     self.promptProvider = prompt_provider
     self.promptSaver = prompt_saver
     self.modelProvider = model_provider
+    self.on_role_change = role_change
+    self.on_track_changed = on_track_changed
 
   def setup( self ) -> None:
     colNames = [ "Track ID", "Num Frames", "Person", "Role" ]
@@ -85,11 +103,11 @@ class Tracks:
     self.cropProgress.place( x=8, y=30 )
     self.cropProgress.place_forget()
     self.cropWorker: CropExtractionWorker | None = None
-    self.vlmWorker: CropInferenceWorker | None = None
-    self.vlmModel: AbstractInferenceModel = MoondreamVLM()
-    self.clipModel: AbstractInferenceModel = ClipRoleClassifier()
-    self.vlmResults: queue.Queue[ CropInferenceJobMessage ] = queue.Queue()
-    self.vlmGeneration = 0
+    self.cropInferenceWorker: CropInferenceWorker | None = None
+    self.inferenceModelVLM: AbstractInferenceModel = MoondreamVLM()
+    self.inferenceModelClip: AbstractInferenceModel = ClipRoleClassifier()
+    self.inferenceResults: queue.Queue[ CropInferenceJobMessage ] = queue.Queue()
+    self.inferenceGeneration = 0
     self.vlmButton: tk.Button | None = None
     self.cropsButtonEnabled = False
     self.refresh()
@@ -153,7 +171,9 @@ class Tracks:
     self.refreshing = True
     self.tblTrackData.delete( *self.tblTrackData.get_children() )
 
-    for i, ( key, track ) in enumerate( self.appState.tracks.items() ):
+    trackData = sorted( self.appState.tracks.items(), key=lambda frame: ( frame[0] ) )
+
+    for i, ( key, track ) in enumerate( trackData ):
       tag = "evenrow" if i % 2 == 0 else "oddrow"
       self.tblTrackData.insert(
           "",
@@ -225,6 +245,8 @@ class Tracks:
       self.refresh()
       self.tblTrackData.selection_set( str( track.id ) )
       self.renderSelectedCrops( track )
+      if self.on_role_change is not None:
+        self.on_role_change()
 
     self.editor.bind( "<<ComboboxSelected>>", apply_selection )
     self.editor.bind( "<FocusOut>", lambda _event: self.closeEditor() )
@@ -270,6 +292,8 @@ class Tracks:
     self.selTrackID = track_id
     self.updateVLMButtonState()
     self.renderSelectedCrops( track )
+    if self.on_track_changed is not None:
+      self.on_track_changed( track_id )
 
   def renderSelectedCrops( self, track: Track | None ) -> None:
     self.clearCropImages()
@@ -342,7 +366,7 @@ class Tracks:
     if crops_enabled is not None:
       self.cropsButtonEnabled = crops_enabled
     has_crops = ( self.selTrackID is not None and self.cropCacheClipID == self.appState.curClipID and bool( self.cropCache.get( self.selTrackID, [] ) ) )
-    enabled = self.cropsButtonEnabled and has_crops and self.vlmWorker is None
+    enabled = self.cropsButtonEnabled and has_crops and self.cropInferenceWorker is None
     if self.vlmButton is not None:
       self.vlmButton.config( state=tk.NORMAL if enabled else tk.DISABLED )
 
@@ -366,7 +390,7 @@ class Tracks:
     model_name = self.modelProvider() if self.modelProvider is not None else "VLM"
     if model_name == "Clip":
       prompt = ""
-      model = self.clipModel
+      model = self.inferenceModelClip
     elif model_name == "VLM":
       prompt = self.promptProvider() if self.promptProvider is not None else DEFAULT_IDENTIFICATION_PROMPT
       if not prompt:
@@ -374,25 +398,25 @@ class Tracks:
         return
       if self.promptSaver is not None and not self.promptSaver( prompt ):
         return
-      model = self.vlmModel
+      model = self.inferenceModelVLM
     else:
       messagebox.showerror( "Identification model unavailable", f"Unsupported identification model: {model_name}", parent=self.tab )
       return
 
-    self.vlmGeneration += 1
-    self.vlmWorker = CropInferenceWorker(
-        self.vlmGeneration,
+    self.inferenceGeneration += 1
+    self.cropInferenceWorker = CropInferenceWorker(
+        self.inferenceGeneration,
         self.appState.curClipID,
         self.selTrackID,
         list( crops ),
         prompt,
         model,
-        self.vlmResults,
+        self.inferenceResults,
     )
     self.activeIdentifier = model_name
     self.cropStatus.config( text=f"Analyzing Track {self.selTrackID} crops with {model_name}..." )
     self.updateVLMButtonState()
-    self.vlmWorker.start()
+    self.cropInferenceWorker.start()
 
   def onClipLoaded( self ) -> None:
     self.cancelCropJob()
@@ -414,10 +438,10 @@ class Tracks:
     self.cropGeneration += 1
 
   def cancelVLMJob( self ) -> None:
-    if self.vlmWorker is not None:
-      self.vlmWorker.cancel()
-      self.vlmWorker = None
-    self.vlmGeneration += 1
+    if self.cropInferenceWorker is not None:
+      self.cropInferenceWorker.cancel()
+      self.cropInferenceWorker = None
+    self.inferenceGeneration += 1
     self.updateVLMButtonState()
 
   def pollCropResults( self ) -> None:
@@ -460,10 +484,10 @@ class Tracks:
       return
     while True:
       try:
-        message = self.vlmResults.get_nowait()
+        message = self.inferenceResults.get_nowait()
       except queue.Empty:
         break
-      if message.generation != self.vlmGeneration or message.clip_id != self.appState.curClipID:
+      if message.generation != self.inferenceGeneration or message.clip_id != self.appState.curClipID:
         continue
       if message.kind == "progress":
         self.cropStatus.config( text=f"Analyzing Track {message.track_id} with {self.activeIdentifier}: "
@@ -473,14 +497,14 @@ class Tracks:
         self.cropStatus.config( text=f"Track {message.track_id}, frame {message.image_result.frame_number}: "
                                 f"{self.formatIdentificationGuess( message.image_result )}" )
       elif message.kind == "error":
-        self.vlmWorker = None
+        self.cropInferenceWorker = None
         self.updateVLMButtonState()
         self.cropStatus.config( text=f"{self.activeIdentifier} role analysis failed." )
         if message.error is not None:
           logger.error( f"{self.activeIdentifier} role analysis failed: {message.error}" )
           messagebox.showerror( f"{self.activeIdentifier} role analysis failed", str( message.error ), parent=self.tab )
       elif message.kind == "done":
-        self.vlmWorker = None
+        self.cropInferenceWorker = None
         self.updateVLMButtonState()
         answers = message.answers or []
         vote_counts = message.vote_counts or roleVoteCounts( answers )
