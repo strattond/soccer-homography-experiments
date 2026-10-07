@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from soccer_homography.dataTypes import ParticipationRole, roles
+from soccer_homography.data import ParticipationRole, roles
 from soccer_homography.inference.abstractions import (
     AbstractInferenceModel,
     IdentificationImageResult,

@@ -3,7 +3,7 @@ import tkinter as tk
 from PIL import Image, ImageGrab, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import ParticipationRole, Point2D, Track
+from soccer_homography.data import ParticipationRole, Point2D, Track
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.pitch import SoccerPitchImage
 

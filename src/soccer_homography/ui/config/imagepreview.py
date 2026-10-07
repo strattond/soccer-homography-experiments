@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from soccer_homography.dataTypes import ViewTransform
+from soccer_homography.data import ViewTransform
 
 
 class ImagePreview:

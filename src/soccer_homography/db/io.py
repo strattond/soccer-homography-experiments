@@ -3,7 +3,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from soccer_homography.dataTypes import BoundingBox, Track
+from soccer_homography.data import BoundingBox, Track
 from soccer_homography.log import logger
 
 BBOX_SCHEMA = pa.schema( [

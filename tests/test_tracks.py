@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from soccer_homography import App
-from soccer_homography.dataTypes import BoundingBox, Homography, Person, Track
+from soccer_homography.data import BoundingBox, Homography, Person, Track
 from soccer_homography.inference.abstractions import selectModelDevice
 from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ClipImageResult, ClipResponse, ClipRoleClassifier
 from soccer_homography.inference.crop_inference import (

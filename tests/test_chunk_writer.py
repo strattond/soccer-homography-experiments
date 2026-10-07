@@ -6,7 +6,7 @@ from typing import TypeVar
 import pyarrow.parquet as pq
 import pytest
 
-from soccer_homography.dataTypes import BoundingBox, Track
+from soccer_homography.data import BoundingBox, Track
 from soccer_homography.db import (
     AsyncChunkWriter,
     readDetectionChunks,

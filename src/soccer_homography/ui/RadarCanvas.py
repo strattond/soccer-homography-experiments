@@ -2,7 +2,7 @@ import tkinter as tk
 
 from supervision import Color
 
-from soccer_homography.dataTypes import Point2D, SelectionPoint
+from soccer_homography.data import Point2D, SelectionPoint
 from soccer_homography.pitch import SoccerPitchConfiguration, SoccerPitchImage
 
 

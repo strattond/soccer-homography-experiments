@@ -12,7 +12,7 @@ from boxmot.trackers.bbox import ByteTrack, OccluBoost
 from ultralytics import YOLO
 
 from soccer_homography.appState import ModelOptions
-from soccer_homography.dataTypes import BoundingBox, Homography, TrackData
+from soccer_homography.data import BoundingBox, Homography, TrackData
 from soccer_homography.detectionadapter import DetectionAdapter
 from soccer_homography.log import logger
 

@@ -9,49 +9,49 @@ import pyarrow as pa
 from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.constants import CHUNK_SIZE
-from soccer_homography.dataTypes import (
-    BoundingBox,
-    Homography,
-    SelectionPoint,
-    Track,
-    TrackData,
-    VideoData,
+from soccer_homography.data import (
+  CHUNK_SIZE,
+  BoundingBox,
+  Homography,
+  SelectionPoint,
+  Track,
+  TrackData,
+  VideoData,
 )
 from soccer_homography.db import (
-    getCameraByID,
-    getClipHomography,
-    getMatchByID,
-    getVideoByID,
-    initDB,
-    listClips,
-    readDetectionChunks,
-    readTrackingChunks,
-    saveClipHomography,
-    writeBatchDetections,
-    writeBatchTracking,
+  getCameraByID,
+  getClipHomography,
+  getMatchByID,
+  getVideoByID,
+  initDB,
+  listClips,
+  readDetectionChunks,
+  readTrackingChunks,
+  saveClipHomography,
+  writeBatchDetections,
+  writeBatchTracking,
 )
 from soccer_homography.db.chunk_writer import AsyncChunkWriter
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import (
-    Command,
-    CommandType,
-    Output,
-    OutputType,
-    SportsTracker,
+  Command,
+  CommandType,
+  Output,
+  OutputType,
+  SportsTracker,
 )
 from soccer_homography.ui import (
-    Configuration,
-    DataMaintenance,
-    FrameMinimap,
-    HomographyUI,
-    LabelledSpinBox,
-    LivePreview,
-    MainCanvasController,
-    ProgressBarETA,
-    RadarCanvas,
-    Slider,
+  Configuration,
+  DataMaintenance,
+  FrameMinimap,
+  HomographyUI,
+  LabelledSpinBox,
+  LivePreview,
+  MainCanvasController,
+  ProgressBarETA,
+  RadarCanvas,
+  Slider,
 )
 from soccer_homography.ui.frameminimap import TrackingType
 
@@ -179,6 +179,8 @@ class App:
     self.btnCrops.place( x=left + 162, y=top, width=52, height=28 )
     self.btnVLM = tk.Button( self.root, text="VLM", font=( "Arial", 10 ), command=self.tabData.tabTracks.runVLM, state=tk.DISABLED )
     self.btnVLM.place( x=left + 214, y=top, width=52, height=28 )
+    self.btnHeatmap = tk.Button( self.root, text="Heatmap", font=( "Arial", 10 ), command=self.runHeatmap, state=tk.DISABLED )
+    self.btnHeatmap.place( x=left + 266, y=top, width=52, height=28 )
     self.tabData.tabTracks.setVLMButton( self.btnVLM )
 
   def createWidgetsSource( self, left: int, top: int ):
@@ -568,6 +570,10 @@ class App:
 
   def cmdTrackRange( self ):
     self.runTracking( self.minFrame.get(), self.maxFrame.get() )
+
+  def runHeatmap( self ):
+    pass
+    #self.runTracking( self.minFrame.get(), self.maxFrame.get() )
 
   def chunkDetections( self ):
     for chunk_id in sorted( self.pendingDetectionChunks ):

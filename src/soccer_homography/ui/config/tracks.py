@@ -7,8 +7,8 @@ import duckdb
 from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import ParticipationRole, Track, roles
-from soccer_homography.dataTypes import Person as TrackPerson
+from soccer_homography.data import ParticipationRole, Track, roles
+from soccer_homography.data import Person as TrackPerson
 from soccer_homography.db import (
     ClipTrackDB,
     PersonParticipation,
@@ -171,6 +171,7 @@ class Tracks:
     self.refreshing = True
     self.tblTrackData.delete( *self.tblTrackData.get_children() )
 
+    # Ensure we sort it by Track ID rather than order of creation
     trackData = sorted( self.appState.tracks.items(), key=lambda frame: ( frame[0] ) )
 
     for i, ( key, track ) in enumerate( trackData ):
@@ -232,7 +233,9 @@ class Tracks:
           db_person = participant.person_id
           person = TrackPerson( id=db_person.id, name=f"{db_person.first_name} {db_person.last_name}" )
           person_id = db_person.id
-          role = participant.role
+          # Use person's role if available, but if it's unknown, use the track role.  This happens after
+          # a quick VLM look and assignment, followed by allocating a person
+          role = participant.role if  participant.role != "unknown" else track.role
       else:
         role = next( role for role in roles if role.replace( "_", " " ) == selection )
         person_id = track.numId()

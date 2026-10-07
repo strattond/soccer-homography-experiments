@@ -59,6 +59,7 @@ class ClipParticipants:
     ):
       self.participantTree.heading( column, text=heading )
       self.participantTree.column( column, width=width, anchor="w" )
+
     self.participantTree.place( x=0, y=24, width=600, height=160 )
     scrollbar = ttk.Scrollbar( self.tab, orient="vertical", command=self.participantTree.yview )
     scrollbar.place( x=600, y=24, height=160 )

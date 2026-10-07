@@ -6,7 +6,7 @@ from PIL import Image, ImageTk
 from supervision import Color
 
 from soccer_homography.appState import AppState
-from soccer_homography.dataTypes import (
+from soccer_homography.data import (
   BoundingBox,
   Point2D,
   SelectionPoint,

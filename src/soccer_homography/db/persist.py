@@ -11,7 +11,7 @@ from typing import Any, cast
 import duckdb
 from squadi_data.fixed import DivisionData
 
-from soccer_homography.dataTypes import ParticipationRole
+from soccer_homography.data import ParticipationRole
 
 fixedTZ = datetime.now().astimezone().tzinfo
 

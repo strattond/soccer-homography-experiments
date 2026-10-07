@@ -9,8 +9,8 @@ from cv2.typing import MatLike
 
 @dataclass( slots=True )
 class Point2D:
-  x: int = 0
-  y: int = 0
+  x: float = 0.0
+  y: float = 0.0
 
   def __add__( self, other ):
     if not isinstance( other, Point2D ):
@@ -27,7 +27,7 @@ class Point2D:
     yield self.y
 
   def to_numpy( self ) -> np.ndarray:
-    return np.array( [ int( self.x ), int( self.y ) ], dtype=np.float32 )
+    return np.array( [ self.x, self.y ], dtype=np.float32 )
 
 
 @dataclass( slots=True )

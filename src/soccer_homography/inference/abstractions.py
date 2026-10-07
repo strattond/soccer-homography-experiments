@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from soccer_homography.dataTypes import ParticipationRole
+from soccer_homography.data import ParticipationRole
 
 
 @dataclass

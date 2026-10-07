@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from soccer_homography.dataTypes import BoundingBox
+from soccer_homography.data import BoundingBox
 from soccer_homography.log import logger
 
 CropSet = list[ tuple[ int, np.ndarray ] ]

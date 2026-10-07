@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from soccer_homography.dataTypes import ParticipationRole
+from soccer_homography.data import ParticipationRole
 from soccer_homography.inference.abstractions import (
   AbstractInferenceModel,
   IdentificationImageResult,

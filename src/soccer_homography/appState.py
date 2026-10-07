@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import cv2
 import duckdb
 
-from soccer_homography.dataTypes import BoundingBox, Homography, SelectionPoint, Track
+from soccer_homography.data import BoundingBox, Homography, SelectionPoint, Track
 from soccer_homography.pitch import (
   SoccerPitchColors,
   SoccerPitchConfiguration,
