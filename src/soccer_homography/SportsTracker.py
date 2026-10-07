@@ -36,6 +36,7 @@ class OutputType( Enum ):
   TRACK = auto()
   NEW_FRAME = auto()
   COMPLETED = auto()
+  STOP = auto()
 
 
 @dataclass

@@ -1,9 +1,10 @@
 import tkinter as tk
+from tkinter import ttk
 
 from PIL import Image, ImageGrab, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.data import ParticipationRole, Point2D, Track
+from soccer_homography.data import ParticipationRole, Point2D, Track, roles
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.pitch import SoccerPitchImage
 
@@ -22,18 +23,39 @@ role_colors: dict[ ParticipationRole, str ] = {
 
 class LivePreview:
   # yapf: disable
+  root:        tk.Tk
   canvas:      tk.Canvas
   pitch_photo: ImageTk.PhotoImage
   state:       AppState
   pitch:       SoccerPitchImage
   preserved:   list[ Image.Image ]
+  heatmaps:    dict[ParticipationRole, ImageTk.PhotoImage | None] = {}
   preserve:    bool                = False
   # yapf: enable
 
-  def __init__( self, canvas: tk.Canvas, pitch_photo: ImageTk.PhotoImage, state: AppState, bumpFunc ):
+  def __init__( self, root: tk.Tk, coords: tuple[int,int], pitch_photo: ImageTk.PhotoImage, state: AppState, bumpFunc ):
+
+    self.root = root
+    # livePreview
+    # 1460,400
+    self.canvas = tk.Canvas( self.root, bg="#bfbfbf", highlightthickness=1, highlightbackground="#d1d5db" )
+    self.canvas.place( x=coords[0], y=coords[1], width=420 + 20, height=272 + 20 )
+
+    # lblLivePreview
+    self.lblLivePreview = tk.Label( self.root, text="Live Preview", fg="#000000", font=( "Arial", 12 ), anchor="center" )
+    self.lblLivePreview.place( x=coords[0], y=coords[1] - 50, width=100, height=24 )
+
+    self.heatmapSelection = ttk.Combobox(
+        self.root,
+        state="readonly",
+        values=[ f"{role.replace( "_", " " )}" for role in roles ],
+        width=42,
+    )
+    self.heatmapSelection.place( x=coords[0] + 100, y=coords[1] - 50, width=320, height=24 )
+    for role in roles:
+      self.heatmaps[role] = None
 
     self.preserved = []
-    self.canvas = canvas
     self.pitch_photo = pitch_photo
     self.state = state
     self.pitch = state.pitch
@@ -42,6 +64,7 @@ class LivePreview:
     # Build layers
     self.createLayers()
     self.drawPitch()
+    self.heatmapSelection.bind( "<<ComboboxSelected>>", lambda _event: self.refreshHeatmap() )
 
   def drawPitch( self ):
     self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
@@ -104,3 +127,10 @@ class LivePreview:
     w = x + canvas.winfo_width()
     h = y + canvas.winfo_height()
     return ImageGrab.grab( bbox=( x, y, w, h ) )
+
+  def refreshHeatmap( self ):
+    role = self.selected_role()
+    pass
+
+  def selected_role(self) -> ParticipationRole:
+    return roles[self.heatmapSelection.current()]

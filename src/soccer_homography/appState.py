@@ -4,11 +4,11 @@ from dataclasses import asdict, dataclass, field
 import cv2
 import duckdb
 
-from soccer_homography.data import BoundingBox, Homography, SelectionPoint, Track
+from soccer_homography.data import BoundingBox, Homography, ParticipationRole, SelectionPoint, Track, heatmap, roles
 from soccer_homography.pitch import (
-  SoccerPitchColors,
-  SoccerPitchConfiguration,
-  SoccerPitchImage,
+    SoccerPitchColors,
+    SoccerPitchConfiguration,
+    SoccerPitchImage,
 )
 
 
@@ -46,11 +46,14 @@ class ModelOptions:
 @dataclass
 class AppState:
   # yapf: disable
+  
   # Point tracking
   last_image_click: SelectionPoint | None            = None
   sel_world_point:  SelectionPoint | None            = None
+  
   # Current homography
   data:             Homography                       = field( default_factory=Homography )
+  
   # Soccer pitch controls
   cfg:              SoccerPitchConfiguration         = field( default_factory=SoccerPitchConfiguration )
   colors:           SoccerPitchColors                = field( default_factory=SoccerPitchColors )
@@ -70,11 +73,17 @@ class AppState:
   framesProcessed:  int                              = 0
   detectChunk:      int                              = 0
   trackChunk:       int                              = 0
+  frameRate:        int                              = 50
 
   # Current info being processed
   curClipID:        int                              = -1
   curHomographyID:  int | None                       = None
   db:               duckdb.DuckDBPyConnection | None = None
 
+  # Heatmap data
+  heatmaps: dict[ParticipationRole, heatmap]         = field( default_factory=dict )
+
   def __post_init__( self ):
     self.pitch = SoccerPitchImage( cfg=self.cfg, colors=self.colors )
+    for role in roles:
+      self.heatmaps[role] = heatmap( 1.0, int(self.pitch.cfg.STD_PITCH_WIDTH), int(self.pitch.cfg.STD_PITCH_LENGTH) )

@@ -10,48 +10,48 @@ from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
 from soccer_homography.data import (
-  CHUNK_SIZE,
-  BoundingBox,
-  Homography,
-  SelectionPoint,
-  Track,
-  TrackData,
-  VideoData,
+    CHUNK_SIZE,
+    BoundingBox,
+    Homography,
+    SelectionPoint,
+    Track,
+    TrackData,
+    VideoData,
 )
 from soccer_homography.db import (
-  getCameraByID,
-  getClipHomography,
-  getMatchByID,
-  getVideoByID,
-  initDB,
-  listClips,
-  readDetectionChunks,
-  readTrackingChunks,
-  saveClipHomography,
-  writeBatchDetections,
-  writeBatchTracking,
+    getCameraByID,
+    getClipHomography,
+    getMatchByID,
+    getVideoByID,
+    initDB,
+    listClips,
+    readDetectionChunks,
+    readTrackingChunks,
+    saveClipHomography,
+    writeBatchDetections,
+    writeBatchTracking,
 )
 from soccer_homography.db.chunk_writer import AsyncChunkWriter
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import (
-  Command,
-  CommandType,
-  Output,
-  OutputType,
-  SportsTracker,
+    Command,
+    CommandType,
+    Output,
+    OutputType,
+    SportsTracker,
 )
 from soccer_homography.ui import (
-  Configuration,
-  DataMaintenance,
-  FrameMinimap,
-  HomographyUI,
-  LabelledSpinBox,
-  LivePreview,
-  MainCanvasController,
-  ProgressBarETA,
-  RadarCanvas,
-  Slider,
+    Configuration,
+    DataMaintenance,
+    FrameMinimap,
+    HomographyUI,
+    LabelledSpinBox,
+    LivePreview,
+    MainCanvasController,
+    ProgressBarETA,
+    RadarCanvas,
+    Slider,
 )
 from soccer_homography.ui.frameminimap import TrackingType
 
@@ -66,6 +66,7 @@ class App:
     self.appState: AppState = appState
     self.appState.db = initDB()
     self.tracking: SportsTracker | None = None
+    self.ui_queue = queue.Queue()
     self.detection_writer = AsyncChunkWriter(
         "detection",
         writeBatchDetections,
@@ -129,17 +130,9 @@ class App:
     self.radarMap = tk.Canvas( self.root, bg="#dfdfdf", highlightthickness=1, highlightbackground="#d1d5db" )
     self.radarMap.place( x=1460, y=50, width=420 + 20, height=272 + 20 )
 
-    # livePreview
-    self.livePreview = tk.Canvas( self.root, bg="#bfbfbf", highlightthickness=1, highlightbackground="#d1d5db" )
-    self.livePreview.place( x=1460, y=400, width=420 + 20, height=272 + 20 )
-
     # lblRadar
     self.lblRadar = tk.Label( self.root, text="Bird's eye view (point matcher)", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblRadar.place( x=1460, y=20, width=250, height=24 )
-
-    # lblLivePreview
-    self.lblLivePreview = tk.Label( self.root, text="Live Preview", fg="#000000", font=( "Arial", 12 ), anchor="center" )
-    self.lblLivePreview.place( x=1460, y=350, width=100, height=24 )
 
     self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace, self.saveClipHomography, self.loadHomographyFromDisk )
 
@@ -233,7 +226,7 @@ class App:
         self.on_main_selection_move,
     )
     self.root.bind( "<Escape>", self.clearPendingMapping )
-    self.livePreviewController = LivePreview( self.livePreview, ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
+    self.livePreviewController = LivePreview( self.root, ( 1460, 400 ), ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
 
     self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=20, width=24, height=720 )
     self.prgHomography = ProgressBarETA( root=self.root, x=left - 100, y=20, width=24, height=720 )
@@ -326,6 +319,7 @@ class App:
     had_loaded_clip = self.appState.curClipID > 0
     if self.appState.cap is not None:
       self.appState.cap.release()
+    vidData = VideoData( capture )
     self.appState.videoFile = filename
     self.appState.cap = capture
     self.appState.curClipID = clip_id
@@ -335,6 +329,7 @@ class App:
     self.appState.framesProcessed = 0
     self.appState.detectChunk = 0
     self.appState.trackChunk = 0
+    self.appState.frameRate = int( vidData.fps )
     self.pendingDetectionChunks.clear()
     self.pendingTrackingChunks.clear()
     if had_loaded_clip:
@@ -410,6 +405,7 @@ class App:
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnTrackRange.config( state=tk.NORMAL if trackable else tk.DISABLED )
     self.btnCrops.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
+    self.btnHeatmap.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
     self.tabData.tabTracks.updateVLMButtonState( bool( self.appState.tracks ) )
     self.uiHomography.setEnableStatus( self.hasHomography(), homoable, self.appState.curClipID > 0 )
     self.sldVideoFrame.setEnabled( cappable )
@@ -513,6 +509,8 @@ class App:
     try:
       if self.tracking is not None:
         data = self.tracking.out_queue.get_nowait()
+      else:
+        data = self.ui_queue.get_nowait()
     except queue.Empty:
       data = None
 
@@ -562,6 +560,9 @@ class App:
         self.tabData.tabTracks.refresh()
         self.minimap.redraw()
         return
+      elif data.type == OutputType.STOP:
+        self.prgDetection.stop()
+        return
 
     self.root.after( pollDelay, self.pollForUI )
 
@@ -572,8 +573,26 @@ class App:
     self.runTracking( self.minFrame.get(), self.maxFrame.get() )
 
   def runHeatmap( self ):
-    pass
-    #self.runTracking( self.minFrame.get(), self.maxFrame.get() )
+    # Reset the heat maps
+    for h in self.appState.heatmaps.values():
+      h.reset()
+    # Now accumulate based on the track data
+    frameRate = 1 / self.appState.frameRate if self.appState.frameRate > 0 else 0.2
+    self.prgDetection.setRange( 0, len( self.appState.tracks ) )
+    self.prgDetection.start()
+    self.root.after( 100, self.pollForUI )
+    logger.info( f"Generating heatmaps for {len(self.appState.tracks)} tracks" )
+    for track in self.appState.tracks.values():
+      for homog, box in zip( track.homog_smooth, track.boxes ):
+        if homog is not None:
+          self.appState.heatmaps[ track.role ].accumulate( int( homog.x ), int( homog.y ), frameRate )
+      self.prgDetection.tick()
+    for r, h in self.appState.heatmaps.items():
+      heatmap = h.get_display_image( label=r )
+      heatmap_image = cv2.cvtColor( heatmap, cv2.COLOR_BGRA2RGBA )
+      cv2.imwrite( f"heatmap_{r}_heatmap.png", heatmap_image )
+      self.livePreviewController.heatmaps[ r ] = ImageTk.PhotoImage( Image.fromarray( heatmap_image ) )
+    self.ui_queue.put( Output( OutputType.STOP ) )
 
   def chunkDetections( self ):
     for chunk_id in sorted( self.pendingDetectionChunks ):
