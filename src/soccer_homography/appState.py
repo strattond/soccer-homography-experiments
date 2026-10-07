@@ -5,7 +5,11 @@ import cv2
 import duckdb
 
 from soccer_homography.dataTypes import BoundingBox, Homography, SelectionPoint, Track
-from soccer_homography.pitch import SoccerPitchColors, SoccerPitchConfiguration, SoccerPitchImage
+from soccer_homography.pitch import (
+  SoccerPitchColors,
+  SoccerPitchConfiguration,
+  SoccerPitchImage,
+)
 
 
 @dataclass

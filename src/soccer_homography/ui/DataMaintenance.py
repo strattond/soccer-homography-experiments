@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import cv2
@@ -10,23 +10,23 @@ from squadi_data import data as squadi_data
 from squadi_data.fixed import DivisionData, loadDivisionData
 
 from soccer_homography.db import (
-    Camera,
-    ClipDB,
-    Match,
-    Video,
-    deleteVideo,
-    importSquadiDivision,
-    listCameras,
-    listClips,
-    listMatches,
-    listPersons,
-    listVideos,
-    parseMatchDate,
-    reorderClips,
-    upsertCamera,
-    upsertClip,
-    upsertMatch,
-    upsertVideo,
+  Camera,
+  ClipDB,
+  Match,
+  Video,
+  deleteVideo,
+  importSquadiDivision,
+  listCameras,
+  listClips,
+  listMatches,
+  listPersons,
+  listVideos,
+  parseMatchDate,
+  reorderClips,
+  upsertCamera,
+  upsertClip,
+  upsertMatch,
+  upsertVideo,
 )
 
 

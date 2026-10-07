@@ -315,8 +315,8 @@ class MainCanvasController:
         # Now we need to scale the box coordinates to our image
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
+        # Put in a slightly smaller bounding box so we can see it compared to the track box
         self.canvas.create_rectangle( tlx + 2, tly + 2, brx - 2, bry - 2, outline='yellow', tags=( "boxes",) )
-        #self.canvas.create_text( tlx, tly, text=str( i ), tags=( "boxes",), fill='white', font=( 'Arial', 18 ) )
 
   def updateTracks( self, tracks: dict[ int, Track ], index: int ):
     self.canvas.delete( "tracking" )
