@@ -3,6 +3,7 @@ import threading
 from bisect import bisect_left, insort
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -102,7 +103,7 @@ def planCropFrames(
           frame,
       ),
   )
-  orderedFrames = selFrames # + fallbackFrames
+  orderedFrames = selFrames + fallbackFrames
   return [ PlannedCropFrame( frame, tuple( boxesByFrame[ frame ].items() ) ) for frame in orderedFrames ]
 
 
@@ -114,11 +115,14 @@ class CropExtractionWorker( threading.Thread ):
       video_file: str,
       tracks: list[ TrackBoxes ],
       results: queue.Queue[ CropJobMessage ],
+      *,
+      clip_id: int,
   ) -> None:
     super().__init__( daemon=True, name=f"clip-crops-{generation}" )
     self.generation = generation
     self.video_file = video_file
     self.tracks = tracks
+    self.clip_id = clip_id
     self.cancel_event = threading.Event()
     self.results = results
 
@@ -134,41 +138,35 @@ class CropExtractionWorker( threading.Thread ):
       if self.cancel_event.is_set():
         return
       logger.info( f"Planned {len( plan )} crop frames for generation {self.generation}" )
-      capture = cv2.VideoCapture( self.video_file )
-      if not capture.isOpened():
-        raise RuntimeError( f"Could not open video: {self.video_file}" )
 
       cache: CropCache = { track[ 0 ]: [] for track in self.tracks }
+      crop_directory = Path( "crops" ) / str( self.clip_id )
       pendingByTrack = Counter( assignment[ 0 ] for plannedFrame in plan for assignment in plannedFrame.trackBoxes )
       self.results.put( CropJobMessage( self.generation, "progress", 0, len( plan ), stage="planned frames" ) )
       completed = 0
-      sorted_plan = sorted( plan, key=lambda pf: pf.frameNumber )
-      # Seeking is dog slow (2+ seconds per seek) on some videos, so we process frames in order and only grab when necessary.
-      curFrame: int = 0
-      print(capture.getBackendName())
-      for plannedFrame in sorted_plan:
+      for plannedFrame in plan:
         if self.cancel_event.is_set():
           return
 
-        delta: int = plannedFrame.frameNumber - curFrame
-        while delta > 0:
-          capture.grab()
-          delta -= 1
-          curFrame += 1
-
         tracksNeedingCrops = [ assignment for assignment in plannedFrame.trackBoxes if len( cache[ assignment[ 0 ] ] ) < 6 ]
-        logger.info( f"Processing frame {plannedFrame.frameNumber} with {len( tracksNeedingCrops )} tracks needing crops." )
-        if tracksNeedingCrops:
-          #logger.info( f"Seeking to frame {plannedFrame.frameNumber} for crop extraction." )
-          #capture.set( cv2.CAP_PROP_POS_FRAMES, plannedFrame.frameNumber )
-          logger.info( f"Reading frame {plannedFrame.frameNumber} for crop extraction." )
-          success, frame = capture.retrieve() # read() - We've already grabbed, just get the details now
+        # Get the crops from disk if they exist, otherwise extract them from the video frame
+        uncachedTracks = self.getUncachedTracksFromDisk( cache, crop_directory, plannedFrame, tracksNeedingCrops )
+        # Now filter out any tracks that have already reached the max number of crops (6) in case they were loaded from disk
+        uncachedTracks = [ assignment for assignment in uncachedTracks if len( cache[ assignment[ 0 ] ] ) < 6 ]
+        if uncachedTracks:
+          # Load it if we haven't yet
+          if capture is None:
+            capture = cv2.VideoCapture( self.video_file )
+            if not capture.isOpened():
+              raise RuntimeError( f"Could not open video: {self.video_file}" )
+          # Move to the right frame
+          capture.set( cv2.CAP_PROP_POS_FRAMES, plannedFrame.frameNumber )
+          success, frame = capture.read()
           if success:
-            logger.info( f"Extracting {len(tracksNeedingCrops)} crops for frame {plannedFrame.frameNumber}." )
-            for track_id, box in tracksNeedingCrops:
+            logger.info( f"Extracting {len(uncachedTracks)} crops for frame {plannedFrame.frameNumber}." )
+            for track_id, box in uncachedTracks:
               crop = cropFromFrame( frame, box )
-              if crop is not None and len( cache[ track_id ] ) < 6:
-                cache[ track_id ].append( ( plannedFrame.frameNumber, crop ) )
+              self.persistCrop( cache, crop_directory, plannedFrame, track_id, crop )
           else:
             logger.warning( f"Could not read crop frame {plannedFrame.frameNumber}." )
 
@@ -180,11 +178,8 @@ class CropExtractionWorker( threading.Thread ):
           break
 
       if not self.cancel_event.is_set():
-        logger.info( f"Crop extraction worker for generation {self.generation} completed successfully." )
-        logger.info( f"Sorting crops for each track in generation {self.generation}." )
         for crops in cache.values():
           crops.sort( key=lambda crop: crop[ 0 ] )
-        logger.info( f"Finished sorting crops for each track in generation {self.generation}." )
         self.results.put( CropJobMessage( self.generation, "done", completed, len( plan ), cache ) )
     except Exception as error:
       if not self.cancel_event.is_set():
@@ -192,6 +187,32 @@ class CropExtractionWorker( threading.Thread ):
     finally:
       if capture is not None:
         capture.release()
+
+  def persistCrop( self, cache, crop_directory, plannedFrame, track_id, crop ):
+    if crop is not None and len( cache[ track_id ] ) < 6:
+      crop_directory.mkdir( parents=True, exist_ok=True )
+      crop_path = crop_directory / f"{plannedFrame.frameNumber}_{track_id}.png"
+      saved = cv2.imwrite(
+          str( crop_path ),
+          cv2.cvtColor( crop, cv2.COLOR_RGB2BGR ),
+      )
+      if not saved:
+        raise RuntimeError( f"Could not save crop image: {crop_path}" )
+      cache[ track_id ].append( ( plannedFrame.frameNumber, crop ) )
+
+  def getUncachedTracksFromDisk( self, cache, crop_directory, plannedFrame, tracksNeedingCrops ):
+    uncachedTracks = []
+    for track_id, box in tracksNeedingCrops:
+      crop_path = crop_directory / f"{plannedFrame.frameNumber}_{track_id}.png"
+      if crop_path.is_file():
+        crop = cv2.imread( str( crop_path ), cv2.IMREAD_COLOR )
+        if crop is not None:
+          crop = cv2.cvtColor( crop, cv2.COLOR_BGR2RGB )
+          cache[ track_id ].append( ( plannedFrame.frameNumber, crop ) )
+          continue
+        logger.warning( f"Could not load cached crop {crop_path}; re-extracting it." )
+      uncachedTracks.append( ( track_id, box ) )
+    return uncachedTracks
 
 
 def cropFromFrame( frame: np.ndarray, box: BoundingBox ) -> np.ndarray | None:

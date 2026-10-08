@@ -206,7 +206,8 @@ def test_crop_frame_plan_spreads_samples_across_track_timeline():
   assert max( sampled_frames ) == 100
 
 
-def test_crop_worker_plans_first_and_reads_each_selected_frame_once(monkeypatch):
+def test_crop_worker_plans_first_and_reads_each_selected_frame_once(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
   operations: list[ str ] = []
 
   class SourceCapture:
@@ -253,7 +254,7 @@ def test_crop_worker_plans_first_and_reads_each_selected_frame_once(monkeypatch)
       ( 4, [ box( frame ) for frame in range( 1, 9 ) ] ),
   ]
 
-  worker = CropExtractionWorker( 7, "video.mp4", unknown_tracks, results )
+  worker = CropExtractionWorker( 7, "video.mp4", unknown_tracks, results, clip_id=12 )
   worker.run()
 
   messages = []
@@ -270,7 +271,9 @@ def test_crop_worker_plans_first_and_reads_each_selected_frame_once(monkeypatch)
   assert len( result.crops[ 4 ] ) == 6
 
 
-def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatch):
+def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
+
   class SourceCapture:
     def __init__( self ):
       self.frame_number = 0
@@ -296,7 +299,7 @@ def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatc
   monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", Mock( return_value=capture ) )
   results = queue.Queue()
   box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
-  worker = CropExtractionWorker( 8, "video.mp4", [ ( 1, [ box( frame ) for frame in range( 8 ) ] ) ], results )
+  worker = CropExtractionWorker( 8, "video.mp4", [ ( 1, [ box( frame ) for frame in range( 8 ) ] ) ], results, clip_id=12 )
 
   worker.run()
 
@@ -308,19 +311,110 @@ def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatc
   assert len( result.crops[ 1 ] ) == 6
 
 
-def test_crop_worker_cancellation_prevents_video_io(monkeypatch):
+def test_crop_worker_cancellation_prevents_video_io(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
+
   def unexpected_video_open( _video_file ):
     raise AssertionError( "Cancelled crop work must not open the video." )
 
   monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", unexpected_video_open )
   box = BoundingBox( 2, 2, 12, 12, 0.9, 0, 0 )
   results = queue.Queue()
-  worker = CropExtractionWorker( 9, "video.mp4", [ ( 1, [ box ] ) ], results )
+  worker = CropExtractionWorker( 9, "video.mp4", [ ( 1, [ box ] ) ], results, clip_id=12 )
   worker.cancel()
 
   worker.run()
 
   assert results.empty()
+
+
+def test_crop_worker_uses_cached_png_without_opening_video(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
+  box = BoundingBox( 2, 2, 12, 12, 0.9, 0, 5 )
+  cached_crop = np.full( ( 10, 10, 3 ), ( 11, 29, 47 ), dtype=np.uint8 )
+  crop_directory = tmp_path / "crops" / "12"
+  crop_directory.mkdir( parents=True )
+  assert cv2.imwrite(
+      str( crop_directory / "5_1.png" ),
+      cv2.cvtColor( cached_crop, cv2.COLOR_RGB2BGR ),
+  )
+
+  def unexpected_video_open( _video_file ):
+    raise AssertionError( "A fully cached crop must not open the video." )
+
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", unexpected_video_open )
+  results = queue.Queue()
+  worker = CropExtractionWorker( 10, "video.mp4", [ ( 1, [ box ] ) ], results, clip_id=12 )
+
+  worker.run()
+
+  messages = []
+  while not results.empty():
+    messages.append( results.get_nowait() )
+  result = next( message for message in messages if message.kind == "done" )
+  assert len( result.crops[ 1 ] ) == 1
+  assert result.crops[ 1 ][ 0 ][ 0 ] == 5
+  assert np.array_equal( result.crops[ 1 ][ 0 ][ 1 ], cached_crop )
+
+
+def test_crop_worker_seeks_for_only_tracks_missing_from_disk_cache(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
+  cached_crop = np.full( ( 10, 10, 3 ), ( 11, 29, 47 ), dtype=np.uint8 )
+  crop_directory = tmp_path / "crops" / "12"
+  crop_directory.mkdir( parents=True )
+  assert cv2.imwrite(
+      str( crop_directory / "5_1.png" ),
+      cv2.cvtColor( cached_crop, cv2.COLOR_RGB2BGR ),
+  )
+
+  class SourceCapture:
+    def __init__( self ):
+      self.seeks: list[ int ] = []
+      self.frame = np.zeros( ( 20, 20, 3 ), dtype=np.uint8 )
+      self.frame[ 2:12, 2:12 ] = ( 0, 0, 255 )
+
+    def isOpened( self ):
+      return True
+
+    def set( self, _property_id, frame_number ):
+      self.seeks.append( frame_number )
+
+    def read( self ):
+      return True, self.frame
+
+    def release( self ):
+      pass
+
+  capture = SourceCapture()
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", Mock( return_value=capture ) )
+  extracted_tracks = []
+  original_crop_from_frame = cropFromFrame
+
+  def record_extracted_crop( frame, box ):
+    extracted_tracks.append( box.frame )
+    return original_crop_from_frame( frame, box )
+
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cropFromFrame", record_extracted_crop )
+  results = queue.Queue()
+  boxes = [
+      BoundingBox( 2, 2, 12, 12, 0.9, 0, 5 ),
+      BoundingBox( 2, 2, 12, 12, 0.9, 0, 5 ),
+  ]
+  worker = CropExtractionWorker( 11, "video.mp4", [ ( 1, [ boxes[ 0 ] ] ), ( 2, [ boxes[ 1 ] ] ) ], results, clip_id=12 )
+
+  worker.run()
+
+  messages = []
+  while not results.empty():
+    messages.append( results.get_nowait() )
+  result = next( message for message in messages if message.kind == "done" )
+  assert capture.seeks == [ 5 ]
+  assert extracted_tracks == [ 5 ]
+  assert np.array_equal( result.crops[ 1 ][ 0 ][ 1 ], cached_crop )
+  assert np.array_equal( result.crops[ 2 ][ 0 ][ 1 ], np.full( ( 10, 10, 3 ), ( 255, 0, 0 ), dtype=np.uint8 ) )
+  saved_crop = cv2.imread( str( crop_directory / "5_2.png" ), cv2.IMREAD_COLOR )
+  assert saved_crop is not None
+  assert np.array_equal( cv2.cvtColor( saved_crop, cv2.COLOR_BGR2RGB ), result.crops[ 2 ][ 0 ][ 1 ] )
 
 
 def test_slider_set_value_updates_position_and_runs_frame_callback():

@@ -368,6 +368,7 @@ class Tracks:
         self.appState.videoFile,
         unknown_tracks,
         self.cropResults,
+        clip_id=self.appState.curClipID,
     )
     self.cropWorker.start()
 
