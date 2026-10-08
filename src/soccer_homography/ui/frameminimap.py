@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from enum import Enum, auto
 
 import numpy as np
@@ -97,6 +98,7 @@ class FrameMinimap( tk.Canvas ):
       colorTrack="#404040",
       colorProcessed="#4CAF50",
       colorFrameCurrent="#FFD54F",
+      on_frame_select: Callable[ [ int ], None ] | None = None,
       **kwargs,
   ):
     super().__init__( master, width=width, height=height, bg=colorBG, highlightthickness=0, **kwargs )
@@ -111,10 +113,12 @@ class FrameMinimap( tk.Canvas ):
 
     self.colorTrack = colorTrack
     self.colorCurrentFrame = colorFrameCurrent
+    self.on_frame_select = on_frame_select
 
     self.currentFrame = None
 
     self.bind( "<Configure>", lambda _: self.redraw() )
+    self.bind( "<Button-1>", self.onClick )
 
   # ------------------------------------------------------------------
   # Public API
@@ -154,6 +158,17 @@ class FrameMinimap( tk.Canvas ):
       return float( height )
     frame_idx = min( max( frame_idx, 0 ), self.totalFrames - 1 )
     return height * ( 1 - frame_idx / ( self.totalFrames - 1 ) )
+
+  def getFrameForY( self, y: int ) -> int:
+    height = self.winfo_height()
+    if self.totalFrames <= 1 or height <= 1:
+      return 0
+    y = min( max( y, 0 ), height - 1 )
+    return round( ( height - 1 - y ) * ( self.totalFrames - 1 ) / ( height - 1 ) )
+
+  def onClick( self, event ) -> None:
+    if self.on_frame_select is not None and self.totalFrames > 0:
+      self.on_frame_select( self.getFrameForY( event.y ) )
 
   def redraw( self ):
     self.delete( "all" )

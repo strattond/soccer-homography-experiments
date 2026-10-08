@@ -1,4 +1,5 @@
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
 
 import cv2
@@ -64,20 +65,35 @@ class LivePreview:
     self.state = state
     self.pitch = state.pitch
     self.bump = bumpFunc
+    self.on_track_select: Callable[ [ int ], None ] | None = None
+    self.hoveredTrackID: int | None = None
+    self.pointerPosition: tuple[ int, int ] | None = None
 
     # Build layers
     self.createLayers()
     self.drawPitch()
     self.heatmapSelection.bind( "<<ComboboxSelected>>", lambda _event: self.refreshHeatmap() )
+    self.canvas.bind( "<Motion>", self.onCanvasMotion )
+    self.canvas.bind( "<Leave>", self.onCanvasLeave )
+    self.canvas.bind( "<Button-1>", self.onCanvasClick )
 
   def drawPitch( self ):
     self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
 
-  def draw( self, homography: Point2D, color: str, scaleW, scaleL ):
+  def draw( self, homography: Point2D, color: str, scaleW, scaleL, track_id: int ):
     mx = int( homography.x * scaleW + self.pitch.padding )
     my = int( homography.y * scaleL + self.pitch.padding )
     radius = 6
-    self.canvas.create_oval( mx - radius, my - radius, mx + radius, my + radius, fill=color, outline="black", width=1, tags=( "mapping" ) )
+    self.canvas.create_oval(
+        mx - radius,
+        my - radius,
+        mx + radius,
+        my + radius,
+        fill=color,
+        outline="black",
+        width=1,
+        tags=( "mapping", "homography_marker", f"track:{track_id}" ),
+    )
 
   # -------------------------------------------------------------
   # Layer setup
@@ -90,13 +106,60 @@ class LivePreview:
 
   def updateMappings( self, tracks: dict[ int, Track ], frame_index: int ):
     self.canvas.delete( "mapping" )
+    self.hoveredTrackID = None
     scaleW, scaleL = self.pitch.get_pitch_scale
     for track in tracks.values():
       lkpIndex = track.getListIndex( frame_index )
       if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_smooth ):
         color = self.role_color( track.role )
-        self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL )
-        self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL )
+        self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL, track.id )
+        self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL, track.id )
+    if self.pointerPosition is not None:
+      self.updateHoveredTrack( *self.pointerPosition )
+
+  def setTrackSelectCallback( self, callback: Callable[ [ int ], None ] ) -> None:
+    self.on_track_select = callback
+
+  def markerTrackAt( self, x: int, y: int ) -> int | None:
+    markers = self.canvas.find_overlapping( x - 8, y - 8, x + 8, y + 8 )
+    closest_marker: int | None = None
+    closest_distance = 8**2
+    for marker in markers:
+      tags = self.canvas.gettags( marker )
+      track_tag = next( ( tag for tag in tags if tag.startswith( "track:" ) ), None )
+      if track_tag is None or "homography_marker" not in tags:
+        continue
+      left, top, right, bottom = self.canvas.coords( marker )
+      distance = ( ( left + right ) / 2 - x ) ** 2 + ( ( top + bottom ) / 2 - y ) ** 2
+      if distance <= closest_distance:
+        closest_distance = distance
+        closest_marker = int( track_tag.split( ":", 1 )[ 1 ] )
+    return closest_marker
+
+  def updateHoveredTrack( self, x: int, y: int ) -> None:
+    self.pointerPosition = ( x, y )
+    track_id = self.markerTrackAt( x, y )
+    if track_id == self.hoveredTrackID:
+      return
+    if self.hoveredTrackID is not None:
+      self.canvas.itemconfigure( f"track:{self.hoveredTrackID}", outline="black", width=1 )
+    self.hoveredTrackID = track_id
+    if track_id is not None:
+      self.canvas.itemconfigure( f"track:{track_id}", outline="#ffff00", width=3 )
+
+  def onCanvasMotion( self, event ) -> None:
+    self.updateHoveredTrack( event.x, event.y )
+
+  def onCanvasLeave( self, _event=None ) -> None:
+    if self.hoveredTrackID is not None:
+      self.canvas.itemconfigure( f"track:{self.hoveredTrackID}", outline="black", width=1 )
+      self.hoveredTrackID = None
+    self.pointerPosition = None
+
+  def onCanvasClick( self, event ) -> None:
+    track_id = self.markerTrackAt( event.x, event.y )
+    if track_id is not None and self.on_track_select is not None:
+      self.on_track_select( track_id )
 
   def role_color( self, role: ParticipationRole ) -> str:
     return role_colors.get( role, "#000000" )

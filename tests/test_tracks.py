@@ -25,6 +25,7 @@ from soccer_homography.SportsTracker import SportsTracker
 from soccer_homography.ui.components import Slider
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
+from soccer_homography.ui.frameminimap import FrameMinimap
 from soccer_homography.ui.LivePreview import LivePreview
 
 
@@ -69,6 +70,7 @@ def test_live_preview_skips_tracks_without_mapped_points():
   preview.canvas = Mock()
   preview.pitch = Mock( spec=SoccerPitchImage )
   preview.pitch.get_pitch_scale = ( 1.0, 1.0 )
+  preview.pointerPosition = None
   track = Track(
       clip=1,
       id=8,
@@ -78,6 +80,126 @@ def test_live_preview_skips_tracks_without_mapped_points():
   preview.updateMappings( { track.id: track }, 0 )
 
   preview.canvas.delete.assert_called_once_with( "mapping" )
+
+
+def test_live_preview_hit_test_returns_nearest_marker_and_ignores_distant_markers():
+  class MarkerCanvas:
+    def find_overlapping( self, *_bounds ):
+      return ( 1, 2 )
+
+    def gettags( self, item_id ):
+      return {
+          1: ( "mapping", "homography_marker", "track:11" ),
+          2: ( "mapping", "homography_marker", "track:12" ),
+      }[ item_id ]
+
+    def coords( self, item_id ):
+      return {
+          1: ( 8, 8, 20, 20 ),
+          2: ( 18, 8, 30, 20 ),
+      }[ item_id ]
+
+  preview = LivePreview.__new__( LivePreview )
+  preview.canvas = cast( Any, MarkerCanvas() )
+
+  assert preview.markerTrackAt( 20, 14 ) == 12
+  assert preview.markerTrackAt( 40, 40 ) is None
+
+
+def test_live_preview_hover_highlights_marker_and_clears_when_pointer_moves_off():
+  preview = LivePreview.__new__( LivePreview )
+  preview.canvas = Mock()
+  preview.hoveredTrackID = None
+  preview.markerTrackAt = Mock( side_effect=( 11, None ) )
+
+  preview.updateHoveredTrack( 12, 24 )
+  preview.updateHoveredTrack( 40, 40 )
+
+  assert preview.canvas.itemconfigure.call_args_list == [
+      ( ( "track:11", ), { "outline": "#ffff00", "width": 3 } ),
+      ( ( "track:11", ), { "outline": "black", "width": 1 } ),
+  ]
+  assert preview.hoveredTrackID is None
+  preview.hoveredTrackID = 11
+
+  preview.onCanvasLeave()
+
+  assert preview.canvas.itemconfigure.call_args_list[ -1 ] == (
+      ( "track:11", ),
+      { "outline": "black", "width": 1 },
+  )
+  assert preview.pointerPosition is None
+
+
+def test_live_preview_marker_click_selects_associated_track():
+  preview = LivePreview.__new__( LivePreview )
+  preview.markerTrackAt = Mock( return_value=11 )
+  preview.on_track_select = Mock()
+
+  preview.onCanvasClick( SimpleNamespace( x=12, y=24 ) )
+
+  preview.on_track_select.assert_called_once_with( 11 )
+
+
+def test_minimap_click_maps_vertical_position_to_nearest_frame():
+  minimap = FrameMinimap.__new__( FrameMinimap )
+  minimap.totalFrames = 101
+  minimap.winfo_height = Mock( return_value=201 )
+  minimap.on_frame_select = Mock()
+
+  assert minimap.getFrameForY( 0 ) == 100
+  assert minimap.getFrameForY( 100 ) == 50
+  assert minimap.getFrameForY( 200 ) == 0
+  assert minimap.getFrameForY( -5 ) == 100
+  assert minimap.getFrameForY( 205 ) == 0
+  minimap.onClick( SimpleNamespace( y=100 ) )
+  minimap.on_frame_select.assert_called_once_with( 50 )
+
+
+def test_tracks_role_filter_limits_rows_to_selected_role():
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = cast( Any, SimpleNamespace(
+      tracks={
+          1: Track( clip=1, id=1, boxes=[], role="unknown" ),
+          2: Track( clip=1, id=2, boxes=[], role="home_player" ),
+      }
+  ) )
+  tracks.refreshPeople = Mock()
+  tracks.loadClipTrackAssignments = Mock()
+  tracks.trackRoleFilter = Mock()
+  tracks.trackRoleFilter.get.return_value = "unknown"
+  tracks.tblTrackData = Mock()
+  tracks.tblTrackData.get_children.return_value = ()
+  tracks.tblTrackData.selection.return_value = ()
+  tracks.peopleByLabel = {}
+  tracks.personLabels = {}
+  tracks.refreshing = False
+  tracks.selectionChanged = Mock()
+
+  tracks.refresh()
+
+  assert [ call.kwargs[ "iid" ] for call in tracks.tblTrackData.insert.call_args_list ] == [ "1" ]
+
+
+def test_selecting_preview_track_clears_filter_if_track_is_hidden():
+  tracks = Tracks.__new__( Tracks )
+  track = Track( clip=1, id=11, boxes=[], role="home_player" )
+  tracks.appState = cast( Any, SimpleNamespace( tracks={ 11: track } ) )
+  tracks.roleFilter = Mock()
+  tracks.trackRoleFilter = Mock()
+  tracks.tblTrackData = Mock()
+  tracks.tblTrackData.exists.side_effect = ( False, True )
+  tracks.refresh = Mock()
+  tracks.selectionChanged = Mock()
+
+  tracks.selectTrack( 11 )
+
+  tracks.trackRoleFilter.set.assert_called_once_with( "All roles" )
+  tracks.refresh.assert_called_once_with()
+  tracks.tblTrackData.selection_set.assert_called_once_with( "11" )
+  tracks.tblTrackData.focus.assert_called_once_with( "11" )
+  tracks.tblTrackData.see.assert_called_once_with( "11" )
+  tracks.selectionChanged.assert_called_once_with( track )
 
 
 def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):

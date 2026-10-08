@@ -59,6 +59,7 @@ class Tracks:
     self.personLabels: dict[ int, str ] = {}
     self.person_options: tuple[ str, ...] = ( "<Unknown>",)
     self.editor: ttk.Combobox | None = None
+    self.trackRoleFilter = tk.StringVar( value="All roles" )
     self.cropPreviewImage: ImageTk.PhotoImage | None = None
     self.cropIdentificationResults: dict[ int, dict[ int, IdentificationImageResult ] ] = {}
     self.cropResults: queue.Queue[ CropJobMessage ] = queue.Queue()
@@ -75,6 +76,15 @@ class Tracks:
     self.on_track_changed = on_track_changed
 
   def setup( self ) -> None:
+    ttk.Label( self.tab, text="Role filter:" ).place( x=0, y=2, width=65, height=22 )
+    self.roleFilter = ttk.Combobox(
+        self.tab,
+        textvariable=self.trackRoleFilter,
+        state="readonly",
+        values=( "All roles", *( role.replace( "_", " " ) for role in roles ) ),
+    )
+    self.roleFilter.place( x=68, y=0, width=180, height=24 )
+    self.roleFilter.bind( "<<ComboboxSelected>>", self.onRoleFilterChanged )
     colNames = [ "Track ID", "Num Frames", "Person", "Role" ]
     colWidths = [ 90, 110, 260, 120 ]
     self.tblTrackData = ttk.Treeview(
@@ -82,9 +92,9 @@ class Tracks:
         columns=colNames,
         show="headings",
     )
-    self.tblTrackData.place( x=0, y=24, width=580, height=160 )
+    self.tblTrackData.place( x=0, y=28, width=580, height=156 )
     scrollbar = ttk.Scrollbar( self.tab, orient="vertical", command=self.tblTrackData.yview )
-    scrollbar.place( x=580, y=24, height=160 )
+    scrollbar.place( x=580, y=28, height=156 )
     self.tblTrackData.configure( yscrollcommand=scrollbar.set )
 
     for i, ( col, width ) in enumerate( zip( colNames, colWidths ) ):
@@ -193,6 +203,9 @@ class Tracks:
     trackData = sorted( self.appState.tracks.items(), key=lambda frame: ( frame[ 0 ] ) )
 
     for i, ( key, track ) in enumerate( trackData ):
+      selected_role = self.trackRoleFilter.get()
+      if selected_role != "All roles" and track.role != selected_role.replace( " ", "_" ):
+        continue
       tag = "evenrow" if i % 2 == 0 else "oddrow"
       self.tblTrackData.insert(
           "",
@@ -207,6 +220,23 @@ class Tracks:
     self.refreshing = False
     if selected_id is None or not self.tblTrackData.exists( selected_id ):
       self.selectionChanged( None )
+
+  def onRoleFilterChanged( self, _event=None ) -> None:
+    self.refresh()
+
+  def selectTrack( self, track_id: int ) -> None:
+    track = self.appState.tracks.get( track_id )
+    if track is None:
+      return
+    item_id = str( track_id )
+    if not self.tblTrackData.exists( item_id ):
+      self.trackRoleFilter.set( "All roles" )
+      self.refresh()
+    if self.tblTrackData.exists( item_id ):
+      self.tblTrackData.selection_set( item_id )
+      self.tblTrackData.focus( item_id )
+      self.tblTrackData.see( item_id )
+      self.selectionChanged( track )
 
   def editCell( self, event ):
     row_id = self.tblTrackData.identify_row( event.y )

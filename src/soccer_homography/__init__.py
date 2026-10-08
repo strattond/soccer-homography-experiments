@@ -188,7 +188,7 @@ class App:
 
   def createWidgetsFrameControl( self, left: int, top: int ):
 
-    self.minimap = FrameMinimap( master=self.root, totalFrames=0 )
+    self.minimap = FrameMinimap( master=self.root, totalFrames=0, on_frame_select=self.onFrameSelect )
     self.minimap.place( x=1390, y=20, width=30, height=720 )
     # sliderVideoFrame
     self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 110, y=top, width=300, height=24 )
@@ -227,6 +227,7 @@ class App:
     )
     self.root.bind( "<Escape>", self.clearPendingMapping )
     self.livePreviewController = LivePreview( self.root, ( 1460, 400 ), ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
+    self.livePreviewController.setTrackSelectCallback( self.tabData.tabTracks.selectTrack )
 
     self.prgDetection = ProgressBarETA( root=self.root, x=left - 125, y=20, width=24, height=720 )
     self.prgHomography = ProgressBarETA( root=self.root, x=left - 100, y=20, width=24, height=720 )
