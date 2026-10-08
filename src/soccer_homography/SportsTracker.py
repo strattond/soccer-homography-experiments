@@ -9,6 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 from boxmot.trackers.bbox import ByteTrack, OccluBoost
+from supervision import tracker
 from ultralytics import YOLO
 
 from soccer_homography.appState import ModelOptions
@@ -232,8 +233,14 @@ class SportsTracker:
     self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
 
     # If we're in the tracks list, then we're active to some degree.  But we could still be predicted.
+    print( self.index )
+    print(type(self.tracker))
+    print(vars(self.tracker).keys())
     for track in tracks:
       x1, y1, x2, y2, track_id, score, cls, _ = track
+
+      if track.id in (4, 6, 40, 51):
+        print( vars( track ) )
 
       bbox = BoundingBox( int( x1 ), int( y1 ), int( x2 ), int( y2 ), float( score ), int( cls ), self.index )
       self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( self.curClipID, tid=int( track_id ), data=bbox ) ) )

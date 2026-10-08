@@ -10,31 +10,33 @@ from soccer_homography.appState import AppState
 from soccer_homography.data import ParticipationRole, Track, roles
 from soccer_homography.data import Person as TrackPerson
 from soccer_homography.db import (
-    ClipTrackDB,
-    PersonParticipation,
-    listClipParticipants,
-    listClipTracks,
-    upsertClipTrack,
+  ClipTrackDB,
+  PersonParticipation,
+  PersonParticipationDB,
+  listClipParticipants,
+  listClipTracks,
+  upsertClipTrack,
+  upsertPersonParticipation,
 )
 from soccer_homography.inference.abstractions import (
-    AbstractInferenceModel,
-    IdentificationImageResult,
+  AbstractInferenceModel,
+  IdentificationImageResult,
 )
 from soccer_homography.inference.clip_model import ClipImageResult, ClipRoleClassifier
 from soccer_homography.inference.crop_inference import (
-    DEFAULT_IDENTIFICATION_PROMPT,
-    CropInferenceJobMessage,
-    CropInferenceWorker,
-    mostLikelyRole,
-    roleVoteCounts,
+  DEFAULT_IDENTIFICATION_PROMPT,
+  CropInferenceJobMessage,
+  CropInferenceWorker,
+  mostLikelyRole,
+  roleVoteCounts,
 )
 from soccer_homography.inference.vlm_model import MoondreamVLM
 from soccer_homography.log import logger
 from soccer_homography.ui.config.crop_worker import (
-    CropCache,
-    CropExtractionWorker,
-    CropJobMessage,
-    CropSet,
+  CropCache,
+  CropExtractionWorker,
+  CropJobMessage,
+  CropSet,
 )
 
 
@@ -291,6 +293,8 @@ class Tracks:
       if not self.persistAssignment( track.id, person_id, role ):
         self.refresh()
         return
+      if column == "#4" and person_id is not None:
+        self.updateUnknownParticipantRole( person_id, role )
       track.person = person
       track.role = role
       self.refresh()
@@ -303,6 +307,32 @@ class Tracks:
     self.editor.bind( "<FocusOut>", lambda _event: self.closeEditor() )
     self.editor.focus_set()
     return "break"
+
+  def updateUnknownParticipantRole( self, person_id: int, role: ParticipationRole ) -> None:
+    participant = next(
+        ( item for item in self.peopleByLabel.values() if item.person_id.id == person_id and item.role == "unknown" ),
+        None,
+    )
+    if participant is None:
+      return
+    if self.appState.db is None:
+      messagebox.showerror( "Track update failed", "The database connection is unavailable.", parent=self.tab )
+      return
+    try:
+      upsertPersonParticipation(
+          self.appState.db,
+          PersonParticipationDB(
+              match_id=participant.match_id.id,
+              person_id=person_id,
+              shirt_number=participant.shirt_number,
+              role=role,
+          ),
+      )
+    except ( duckdb.Error, RuntimeError, ValueError ) as error:
+      messagebox.showerror( "Track update failed", f"Could not update role for person {person_id}: {error}", parent=self.tab )
+      logger.error( f"Could not update participation role for person {person_id}: {error}" )
+      return
+    participant.role = role
 
   def persistAssignment( self, track_id: int, person_id: int | None, role: ParticipationRole ) -> bool:
     if self.appState.db is None or self.appState.curClipID <= 0:

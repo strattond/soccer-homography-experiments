@@ -86,6 +86,13 @@ def getChunkFiles( clip_id: int, data_type: str ) -> list[ Path ]:
   return sorted( Path( "tracking" ).glob( f"chunk_{data_type}_{clip_id}_*.parquet" ) )
 
 
+def deleteTrackingChunks( clip_id: int ) -> int:
+  chunk_files = getChunkFiles( clip_id, "tracking" )
+  for path in chunk_files:
+    path.unlink()
+  return len( chunk_files )
+
+
 def getBoundingBoxFromRow( row: dict ) -> BoundingBox:
   return BoundingBox(
       x1=int( row[ "x1" ] ),

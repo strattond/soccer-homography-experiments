@@ -1,6 +1,6 @@
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import TypeVar
 
 from soccer_homography.log import logger
@@ -62,6 +62,15 @@ class AsyncChunkWriter[T]:
         self.on_error( chunk_id, error )
 
     self.schedulePoll()
+
+  def waitForPending( self ) -> None:
+    if self.poll_id is not None:
+      self.cancel( self.poll_id )
+      self.poll_id = None
+    pending = tuple( self.futures )
+    if pending:
+      wait( pending )
+      self.poll()
 
   def shutdown( self ) -> None:
     self.closed = True

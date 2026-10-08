@@ -9,6 +9,7 @@ import pytest
 from soccer_homography.data import BoundingBox, Track
 from soccer_homography.db import (
     AsyncChunkWriter,
+    deleteTrackingChunks,
     readDetectionChunks,
     readTrackingChunks,
     writeBatchDetections,
@@ -120,3 +121,45 @@ def test_detection_and_tracking_writers_write_separate_parquet_chunks( tmp_path,
   finally:
     detection_writer.shutdown()
     tracking_writer.shutdown()
+
+
+def test_wait_for_pending_flushes_tracking_writes() -> None:
+  scheduler = ManualScheduler()
+  written: list[ tuple[ int, int, list[ int ] ] ] = []
+  writer = AsyncChunkWriter(
+      "test",
+      lambda clip_id, chunk_id, records: written.append( ( clip_id, chunk_id, records ) ),
+      scheduler.after,
+      scheduler.after_cancel,
+      lambda _chunk_id, error: pytest.fail( f"Unexpected chunk write failure: {error}" ),
+      len,
+  )
+  try:
+    writer.submit( 7, 2, [ 20, 21 ] )
+
+    writer.waitForPending()
+
+    assert written == [ ( 7, 2, [ 20, 21 ] ) ]
+    assert writer.futures == {}
+  finally:
+    writer.shutdown()
+
+
+def test_delete_tracking_chunks_only_removes_tracking_files_for_requested_clip( tmp_path, monkeypatch ) -> None:
+  monkeypatch.chdir( tmp_path )
+  tracking = Path( "tracking" )
+  tracking.mkdir()
+  target_chunk = tracking / "chunk_tracking_4_0.parquet"
+  other_target_chunk = tracking / "chunk_tracking_4_2.parquet"
+  other_clip_chunk = tracking / "chunk_tracking_5_0.parquet"
+  detection_chunk = tracking / "chunk_detections_4_0.parquet"
+  for path in ( target_chunk, other_target_chunk, other_clip_chunk, detection_chunk ):
+    path.touch()
+
+  deleted_count = deleteTrackingChunks( 4 )
+
+  assert deleted_count == 2
+  assert not target_chunk.exists()
+  assert not other_target_chunk.exists()
+  assert other_clip_chunk.exists()
+  assert detection_chunk.exists()

@@ -414,6 +414,10 @@ def listClipTracks( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> dict[ int
   }
 
 
+def deleteClipTracks( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> None:
+  conn.execute( "DELETE FROM ClipTrack WHERE clip_id = ?", [ clip_id ] )
+
+
 def upsertClipTrack( conn: duckdb.DuckDBPyConnection, clip_track: ClipTrackDB ) -> ClipTrackDB:
   row = conn.execute(
       """

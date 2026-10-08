@@ -290,6 +290,21 @@ class TestClipTrack:
     assert tracks[ 3 ] == assigned
     assert len( tracks ) == 1
 
+  @pytest.mark.usefixtures( "clear_test_database" )
+  def test_delete_clip_tracks_preserves_assignments_for_other_clips( self, conn ):
+    video = persist.upsertVideo( conn, persist.Video( id=0, file="track-delete.mp4" ) )
+    match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
+    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="track-delete-camera" ) )
+    first_clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
+    second_clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=2 ) )
+    persist.upsertClipTrack( conn, persist.ClipTrackDB( first_clip.id, 3, None, "unknown" ) )
+    persist.upsertClipTrack( conn, persist.ClipTrackDB( second_clip.id, 3, None, "unknown" ) )
+
+    persist.deleteClipTracks( conn, first_clip.id )
+
+    assert persist.listClipTracks( conn, first_clip.id ) == {}
+    assert list( persist.listClipTracks( conn, second_clip.id ) ) == [ 3 ]
+
 
 class TestClipHomography:
 

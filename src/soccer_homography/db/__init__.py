@@ -1,5 +1,6 @@
 from .chunk_writer import AsyncChunkWriter
 from .io import (
+  deleteTrackingChunks,
   readDetectionChunks,
   readTrackingChunks,
   writeBatchDetections,
@@ -17,6 +18,7 @@ from .persist import (
   PersonParticipationDB,
   Video,
   deleteVideo,
+  deleteClipTracks,
   getCameraByID,
   getClip,
   getClipByID,
@@ -58,6 +60,8 @@ __all__ = [
   "PersonParticipationDB",
   "Video",
   "deleteVideo",
+  "deleteClipTracks",
+  "deleteTrackingChunks",
   "getCameraByID",
   "getClip",
   "getClipByID",

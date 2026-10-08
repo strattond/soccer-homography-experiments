@@ -202,6 +202,49 @@ def test_selecting_preview_track_clears_filter_if_track_is_hidden():
   tracks.selectionChanged.assert_called_once_with( track )
 
 
+def test_role_assignment_updates_attached_unknown_participation_role(monkeypatch):
+  participant = SimpleNamespace(
+      person_id=SimpleNamespace( id=17 ),
+      match_id=SimpleNamespace( id=23 ),
+      shirt_number=8,
+      role="unknown",
+  )
+  tracks = Tracks.__new__( Tracks )
+  tracks.peopleByLabel = cast( Any, { "Player": participant } )
+  tracks.appState = cast( Any, SimpleNamespace( db=Mock() ) )
+  tracks.tab = Mock()
+  upsert = Mock()
+  monkeypatch.setattr( "soccer_homography.ui.config.tracks.upsertPersonParticipation", upsert )
+
+  tracks.updateUnknownParticipantRole( 17, "home_player" )
+
+  upsert.assert_called_once()
+  participation = upsert.call_args.args[ 1 ]
+  assert participation.match_id == 23
+  assert participation.person_id == 17
+  assert participation.shirt_number == 8
+  assert participation.role == "home_player"
+  assert participant.role == "home_player"
+
+
+def test_role_assignment_does_not_overwrite_known_participation_role(monkeypatch):
+  participant = SimpleNamespace(
+      person_id=SimpleNamespace( id=17 ),
+      match_id=SimpleNamespace( id=23 ),
+      shirt_number=8,
+      role="away_player",
+  )
+  tracks = Tracks.__new__( Tracks )
+  tracks.peopleByLabel = cast( Any, { "Player": participant } )
+  upsert = Mock()
+  monkeypatch.setattr( "soccer_homography.ui.config.tracks.upsertPersonParticipation", upsert )
+
+  tracks.updateUnknownParticipantRole( 17, "home_player" )
+
+  upsert.assert_not_called()
+  assert participant.role == "away_player"
+
+
 def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
   class FakeCapture:
     def isOpened( self ):

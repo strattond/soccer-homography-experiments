@@ -19,6 +19,8 @@ from soccer_homography.data import (
     VideoData,
 )
 from soccer_homography.db import (
+    deleteClipTracks,
+    deleteTrackingChunks,
     getCameraByID,
     getClipHomography,
     getMatchByID,
@@ -174,6 +176,8 @@ class App:
     self.btnVLM.place( x=left + 214, y=top, width=52, height=28 )
     self.btnHeatmap = tk.Button( self.root, text="Heatmap", font=( "Arial", 10 ), command=self.runHeatmap, state=tk.DISABLED )
     self.btnHeatmap.place( x=left + 266, y=top, width=78, height=28 )
+    self.btnDeleteTracks = tk.Button( self.root, text="Delete", font=( "Arial", 10 ), command=self.deleteTracksForCurrentClip, state=tk.DISABLED )
+    self.btnDeleteTracks.place( x=left + 344, y=top, width=60, height=28 )
     self.tabData.tabTracks.setVLMButton( self.btnVLM )
 
   def createWidgetsSource( self, left: int, top: int ):
@@ -405,6 +409,7 @@ class App:
     self.btnYoloOneFrame.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnYoloRange.config( state=tk.NORMAL if cappable else tk.DISABLED )
     self.btnTrackRange.config( state=tk.NORMAL if trackable else tk.DISABLED )
+    self.btnDeleteTracks.config( state=tk.NORMAL if self.appState.curClipID > 0 else tk.DISABLED )
     self.btnCrops.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
     self.btnHeatmap.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
     self.tabData.tabTracks.updateVLMButtonState( bool( self.appState.tracks ) )
@@ -592,6 +597,48 @@ class App:
       heatmap = h.get_display_image( label=r )
       self.livePreviewController.updateHeatmap( r, heatmap )
     self.ui_queue.put( Output( OutputType.STOP ) )
+
+  def deleteTracksForCurrentClip( self ) -> None:
+    clip_id = self.appState.curClipID
+    if clip_id <= 0 or self.appState.db is None:
+      messagebox.showerror( "Delete tracks", "Load a registered clip before deleting its tracks.", parent=self.root )
+      return
+    tracker = self.tracking
+    if tracker is not None and tracker.thread is not None:
+      tracking_active = (
+          tracker.thread.is_alive()
+          and not tracker.stopped
+          and tracker.curMode in ( CommandType.RUN_TRACK, CommandType.RUN_BBOX )
+      )
+      if tracking_active or not tracker.out_queue.empty():
+        messagebox.showwarning( "Delete tracks", "Wait for tracking to finish before deleting tracks.", parent=self.root )
+        return
+    if not messagebox.askyesno(
+        "Delete tracks",
+        f"Delete all tracks for clip {clip_id} from memory, DuckDB, and tracking parquet chunks?",
+        parent=self.root,
+    ):
+      return
+
+    try:
+      self.tracking_writer.waitForPending()
+      deleted_chunks = deleteTrackingChunks( clip_id )
+      deleteClipTracks( self.appState.db, clip_id )
+    except ( duckdb.Error, OSError, RuntimeError, ValueError ) as error:
+      logger.exception( f"Could not delete tracks for clip {clip_id}." )
+      messagebox.showerror( "Delete tracks failed", str( error ), parent=self.root )
+      return
+
+    self.appState.tracks.clear()
+    self.pendingTrackingChunks.clear()
+    self.appState.trackChunk = 0
+    self.tabData.tabTracks.refresh()
+    frame = self.mainImageController.frame_num
+    self.mainImageController.updateTracks( self.appState.tracks, frame )
+    self.livePreviewController.updateMappings( self.appState.tracks, frame )
+    self.minimap.clear( TrackingType.CUR_TRACK )
+    self.checkButtonState()
+    logger.info( f"Deleted tracking data for clip {clip_id} and {deleted_chunks} parquet chunks." )
 
   def chunkDetections( self ):
     for chunk_id in sorted( self.pendingDetectionChunks ):

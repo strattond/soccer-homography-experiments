@@ -13,7 +13,7 @@ from soccer_homography.inference.crop_inference import (
 @dataclass
 class ModelOptionsState:
   # yapf: disable
-  identificationModel: StringVar = field( default_factory=lambda: tk.StringVar( value="VLM" ) )
+  identificationModel: StringVar = field( default_factory=lambda: tk.StringVar( value="Clip" ) )
   identificationPrompt: StringVar = field( default_factory=lambda: tk.StringVar( value=DEFAULT_IDENTIFICATION_PROMPT ) )
   # yapf: enable
 
@@ -32,7 +32,7 @@ class ModelOptions:
     self.optIdentificationModel = ttk.Combobox(
         optionsFrame,
         textvariable=self.modelOpts.identificationModel,
-        values=( "VLM", "Clip" ),
+        values=( "Clip", "VLM" ),
         state="readonly",
     )
 
