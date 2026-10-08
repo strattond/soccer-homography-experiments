@@ -21,7 +21,6 @@ class heatmap:
     self.data = np.zeros( ( self.height, self.width ), dtype=np.float32 )
 
   def accumulate( self, x: int, y: int, value: float = 1.0 ):
-    #print( f"Accumulating heatmap at ({x}, {y}) with value {value}" )
     cx = int( x / self.cellSize )
     cy = int( y / self.cellSize )
     if 0 <= cx < self.width and 0 <= cy < self.height:
@@ -40,9 +39,9 @@ class heatmap:
     cutoff = np.percentile( alpha[ alpha > 0 ], 10 )
     alpha = np.maximum( alpha - cutoff, 0 )
     alpha /= alpha.max() + 1e-5
-    alpha = ( normalized_data * 180 ).astype( np.uint8 )
+    alpha = ( alpha * 180 ).astype( np.uint8 )
     heatmap_image = ( normalized_data * 255 ).astype( np.uint8 )
     heatmap_image = cv2.applyColorMap( heatmap_image, cv2.COLORMAP_TURBO )
     rgba = cv2.cvtColor( heatmap_image, cv2.COLOR_BGR2RGBA )
     rgba[ :, :, 3 ] = alpha
-    return heatmap_image
+    return rgba

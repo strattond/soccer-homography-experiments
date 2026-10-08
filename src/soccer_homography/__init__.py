@@ -173,7 +173,7 @@ class App:
     self.btnVLM = tk.Button( self.root, text="VLM", font=( "Arial", 10 ), command=self.tabData.tabTracks.runVLM, state=tk.DISABLED )
     self.btnVLM.place( x=left + 214, y=top, width=52, height=28 )
     self.btnHeatmap = tk.Button( self.root, text="Heatmap", font=( "Arial", 10 ), command=self.runHeatmap, state=tk.DISABLED )
-    self.btnHeatmap.place( x=left + 266, y=top, width=52, height=28 )
+    self.btnHeatmap.place( x=left + 266, y=top, width=78, height=28 )
     self.tabData.tabTracks.setVLMButton( self.btnVLM )
 
   def createWidgetsSource( self, left: int, top: int ):
@@ -589,9 +589,8 @@ class App:
       self.prgDetection.tick()
     for r, h in self.appState.heatmaps.items():
       heatmap = h.get_display_image( label=r )
-      heatmap_image = cv2.cvtColor( heatmap, cv2.COLOR_BGRA2RGBA )
-      cv2.imwrite( f"heatmap_{r}_heatmap.png", heatmap_image )
-      self.livePreviewController.heatmaps[ r ] = ImageTk.PhotoImage( Image.fromarray( heatmap_image ) )
+      cv2.imwrite( f"heatmap_{r}_heatmap.png", heatmap )
+      self.livePreviewController.updateHeatmap( r, heatmap )
     self.ui_queue.put( Output( OutputType.STOP ) )
 
   def chunkDetections( self ):

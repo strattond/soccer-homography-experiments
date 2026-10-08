@@ -287,9 +287,6 @@ class Track:
 
         self.homog_smooth.append( Point2D( xs, ys ) )
 
-    if len( self.boxes ) != len( self.homog ):
-      print( f"Track {self.id} - {len(self.boxes)} vs {len(self.homog)}" )
-
   def smooth( self, x, y ):
     alpha = 0.2
     dead_zone = 0.15

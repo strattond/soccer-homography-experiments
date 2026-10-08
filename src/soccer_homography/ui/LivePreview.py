@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+import cv2
+import numpy as np
 from PIL import Image, ImageGrab, ImageTk
 
 from soccer_homography.appState import AppState
@@ -29,6 +31,8 @@ class LivePreview:
   state:       AppState
   pitch:       SoccerPitchImage
   preserved:   list[ Image.Image ]
+  dimensions:  Point2D = Point2D( 420, 272 )
+  offsets:     Point2D = Point2D( 20, 20 )
   heatmaps:    dict[ParticipationRole, ImageTk.PhotoImage | None] = {}
   preserve:    bool                = False
   # yapf: enable
@@ -39,7 +43,7 @@ class LivePreview:
     # livePreview
     # 1460,400
     self.canvas = tk.Canvas( self.root, bg="#bfbfbf", highlightthickness=1, highlightbackground="#d1d5db" )
-    self.canvas.place( x=coords[0], y=coords[1], width=420 + 20, height=272 + 20 )
+    self.canvas.place( x=coords[0], y=coords[1], width=self.dimensions.x + self.offsets.x, height=self.dimensions.y + self.offsets.y )
 
     # lblLivePreview
     self.lblLivePreview = tk.Label( self.root, text="Live Preview", fg="#000000", font=( "Arial", 12 ), anchor="center" )
@@ -82,6 +86,7 @@ class LivePreview:
     # These tags define your layer stack
     self.canvas.addtag_withtag( "pitch", "pitch" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
+    self.canvas.addtag_withtag( "heatmap", "heatmap" )
 
   def updateMappings( self, tracks: dict[ int, Track ], frame_index: int ):
     self.canvas.delete( "mapping" )
@@ -129,8 +134,16 @@ class LivePreview:
     return ImageGrab.grab( bbox=( x, y, w, h ) )
 
   def refreshHeatmap( self ):
+    self.canvas.delete( "heatmap" )
     role = self.selected_role()
-    pass
+    if self.heatmaps[role] is not None:
+      self.canvas.create_image( self.offsets.x / 2, self.offsets.y / 2, anchor="nw", image=self.heatmaps[role], tags=( "heatmap",) )
 
   def selected_role(self) -> ParticipationRole:
     return roles[self.heatmapSelection.current()]
+
+  def updateHeatmap( self, role: ParticipationRole, heatmap_image: np.ndarray ):
+    # Before we turn it into a photoimage ... let's resize it first
+    new_image = cv2.resize( heatmap_image, ( int(self.dimensions.x), int(self.dimensions.y) ), interpolation=cv2.INTER_CUBIC )
+    self.heatmaps[role] = ImageTk.PhotoImage( Image.fromarray( new_image ) )
+    self.refreshHeatmap()

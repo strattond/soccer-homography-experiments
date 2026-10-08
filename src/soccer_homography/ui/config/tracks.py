@@ -59,9 +59,8 @@ class Tracks:
     self.personLabels: dict[ int, str ] = {}
     self.person_options: tuple[ str, ...] = ( "<Unknown>",)
     self.editor: ttk.Combobox | None = None
-    self.cropImages: list[ ImageTk.PhotoImage ] = []
-    self.cropLabels: list[ ttk.Label ] = []
-    self.cropResultLabels: dict[ int, ttk.Label ] = {}
+    self.cropPreviewImage: ImageTk.PhotoImage | None = None
+    self.cropIdentificationResults: dict[ int, dict[ int, IdentificationImageResult ] ] = {}
     self.cropResults: queue.Queue[ CropJobMessage ] = queue.Queue()
     self.cropGeneration = 0
     self.selTrackID: int | None = None
@@ -102,6 +101,25 @@ class Tracks:
     self.cropProgress = ttk.Progressbar( self.cropsFrame, mode="determinate", length=180 )
     self.cropProgress.place( x=8, y=30 )
     self.cropProgress.place_forget()
+    self.cropTable = ttk.Treeview(
+        self.cropsFrame,
+        columns=( "frame", "guess" ),
+        show="headings",
+        selectmode="browse",
+    )
+    self.cropTable.heading( "frame", text="Frame" )
+    self.cropTable.heading( "guess", text="Identified guess" )
+    self.cropTable.column( "frame", width=75, anchor="w" )
+    self.cropTable.column( "guess", width=245, anchor="w" )
+    self.cropTable.place( x=8, y=54, width=330, height=158 )
+    cropScrollbar = ttk.Scrollbar( self.cropsFrame, orient="vertical", command=self.cropTable.yview )
+    cropScrollbar.place( x=338, y=54, height=158 )
+    self.cropTable.configure( yscrollcommand=cropScrollbar.set )
+    self.cropTable.bind( "<<TreeviewSelect>>", self.onCropSelected )
+    self.cropPreview = ttk.Label( self.cropsFrame, text="Select a crop", anchor="center", relief="sunken" )
+    self.cropPreview.place( x=350, y=54, width=286, height=158 )
+    self.cropPreviewCaption = ttk.Label( self.cropsFrame, text="", anchor="center" )
+    self.cropPreviewCaption.place( x=350, y=214, width=286, height=20 )
     self.cropWorker: CropExtractionWorker | None = None
     self.cropInferenceWorker: CropInferenceWorker | None = None
     self.inferenceModelVLM: AbstractInferenceModel = MoondreamVLM()
@@ -300,25 +318,33 @@ class Tracks:
 
   def renderSelectedCrops( self, track: Track | None ) -> None:
     self.clearCropImages()
-    if track is None or self.hasKnownPerson( track ):
+    if track is None:
       if self.cropWorker is None:
-        self.cropStatus.config( text="" if track is None else "Person assigned; crops remain cached." )
+        self.cropStatus.config( text="" )
       return
     if self.cropCacheClipID != self.appState.curClipID:
       if self.cropWorker is None:
-        self.cropStatus.config( text="Press Crops to collect samples for unknown tracks." )
+        self.cropStatus.config(
+            text="Person assigned; crops are not cached for this track."
+            if self.hasKnownPerson( track )
+            else "Press Crops to collect samples for unknown tracks."
+        )
       return
     crops = self.cropCache.get( track.id )
     if crops is None:
       if self.cropWorker is None:
-        self.cropStatus.config( text="Press Crops to collect samples for unknown tracks." )
+        self.cropStatus.config(
+            text="Person assigned; crops are not cached for this track."
+            if self.hasKnownPerson( track )
+            else "Press Crops to collect samples for unknown tracks."
+        )
       return
     if not crops:
       self.cropStatus.config( text="No valid crops found for this track." )
       return
     self.cropStatus.config( text=f"Track {track.id}: {len(crops)} cached crops" )
     self.updateVLMButtonState()
-    self.displayCrops( crops )
+    self.displayCrops( track.id, crops )
 
   def collectCrops( self ) -> None:
     if self.appState.curClipID <= 0 or not self.appState.videoFile:
@@ -331,6 +357,7 @@ class Tracks:
       self.cancelCropJob()
       self.cancelVLMJob()
       self.cropCache.clear()
+      self.cropIdentificationResults.clear()
       self.updateVLMButtonState()
       self.renderSelectedCrops( None )
       self.cropStatus.config( text="No unknown tracks with bounding boxes." )
@@ -339,6 +366,7 @@ class Tracks:
     self.cancelCropJob()
     self.cancelVLMJob()
     self.cropCache.clear()
+    self.cropIdentificationResults.clear()
     self.updateVLMButtonState()
     self.clearCropImages()
     self.cropCacheClipID = self.appState.curClipID
@@ -426,6 +454,7 @@ class Tracks:
     self.cancelVLMJob()
     self.cropGeneration += 1
     self.cropCache.clear()
+    self.cropIdentificationResults.clear()
     self.cropCacheClipID = self.appState.curClipID if self.appState.curClipID > 0 else None
     self.selTrackID = None
     self.cropProgress.stop()
@@ -496,7 +525,7 @@ class Tracks:
         self.cropStatus.config( text=f"Analyzing Track {message.track_id} with {self.activeIdentifier}: "
                                 f"crop {message.completed} / {message.total}" )
       elif message.kind == "answer" and message.image_result is not None:
-        self.updateCropResultLabel( message.image_result )
+        self.updateCropResultLabel( message.track_id, message.image_result )
         self.cropStatus.config( text=f"Track {message.track_id}, frame {message.image_result.frame_number}: "
                                 f"{self.formatIdentificationGuess( message.image_result )}" )
       elif message.kind == "error":
@@ -570,33 +599,59 @@ class Tracks:
     crop_results = "\n".join( f"Frame {answer.frame_number}: {Tracks.formatIdentificationGuess( answer )}" for answer in answers )
     return f"{result}\n\nVotes:\n{votes}\n\nCrop results:\n{crop_results}"
 
-  def updateCropResultLabel( self, result: IdentificationImageResult ) -> None:
-    label = self.cropResultLabels.get( result.frame_number )
-    if label is not None and label.winfo_exists():
-      label.config( text=self.formatIdentificationGuess( result ) )
+  def updateCropResultLabel( self, track_id: int, result: IdentificationImageResult ) -> None:
+    self.cropIdentificationResults.setdefault( track_id, {} )[ result.frame_number ] = result
+    if track_id != self.selTrackID or not self.cropTable.exists( str( result.frame_number ) ):
+      return
+    self.cropTable.item(
+        str( result.frame_number ),
+        values=( result.frame_number, self.formatIdentificationGuess( result ) ),
+    )
+    if self.cropTable.selection() == ( str( result.frame_number ), ):
+      self.cropPreviewCaption.config(
+          text=f"Frame {result.frame_number} - {self.formatIdentificationGuess( result )}"
+      )
 
-  def displayCrops( self, crops: CropSet ) -> None:
-    for slot, ( frame_number, crop ) in enumerate( crops ):
-      photo = ImageTk.PhotoImage( Image.fromarray( crop ) )
-      self.cropImages.append( photo )
-      label = ttk.Label( self.cropsFrame, image=photo, text=f"Frame {frame_number}", compound="top" )
-      label.bind( "<Button-1>", lambda _event, frame=frame_number: self.selectCropFrame( frame ) )
-      label.grid( row=0, column=slot, padx=2, pady=( 58, 0 ), sticky="n" )
-      self.cropLabels.append( label )
-      result_label = ttk.Label( self.cropsFrame, text="Role: not analyzed", wraplength=105, justify="center" )
-      result_label.grid( row=1, column=slot, padx=2, pady=( 2, 0 ), sticky="n" )
-      result_label.bind( "<Button-1>", lambda _event, frame=frame_number: self.selectCropFrame( frame ) )
-      self.cropResultLabels[ frame_number ] = result_label
+  def displayCrops( self, track_id: int, crops: CropSet ) -> None:
+    results = self.cropIdentificationResults.get( track_id, {} )
+    for frame_number, _ in crops:
+      result = results.get( frame_number )
+      guess = self.formatIdentificationGuess( result ) if result is not None else "Not analyzed"
+      self.cropTable.insert(
+          "",
+          tk.END,
+          iid=str( frame_number ),
+          values=( frame_number, guess ),
+      )
+
+  def onCropSelected( self, _event=None ) -> None:
+    selected = self.cropTable.selection()
+    if not selected or self.selTrackID is None:
+      return
+    frame_number = int( selected[ 0 ] )
+    crop = next(
+        (
+            image
+            for frame, image in self.cropCache.get( self.selTrackID, [] )
+            if frame == frame_number
+        ),
+        None,
+    )
+    if crop is None:
+      return
+    self.cropPreviewImage = ImageTk.PhotoImage( Image.fromarray( crop ) )
+    self.cropPreview.config( image=self.cropPreviewImage, text="" )
+    result = self.cropIdentificationResults.get( self.selTrackID, {} ).get( frame_number )
+    guess = self.formatIdentificationGuess( result ) if result is not None else "Not analyzed"
+    self.cropPreviewCaption.config( text=f"Frame {frame_number} - {guess}" )
+    self.selectCropFrame( frame_number )
 
   def selectCropFrame( self, frame_number: int ) -> None:
     if self.frameSelectCallback is not None:
       self.frameSelectCallback( frame_number )
 
   def clearCropImages( self ) -> None:
-    for label in self.cropLabels:
-      label.destroy()
-    for label in self.cropResultLabels.values():
-      label.destroy()
-    self.cropLabels.clear()
-    self.cropResultLabels.clear()
-    self.cropImages.clear()
+    self.cropTable.delete( *self.cropTable.get_children() )
+    self.cropPreviewImage = None
+    self.cropPreview.config( image="", text="Select a crop" )
+    self.cropPreviewCaption.config( text="" )

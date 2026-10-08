@@ -11,6 +11,7 @@ from soccer_homography.ui.config import (
     Tracks,
     homographyData,
 )
+from soccer_homography.ui.config.modeloptions import ModelOptions
 
 
 class TkinterLogHandler( logging.Handler ):
@@ -119,16 +120,17 @@ class Configuration:
 
     self.nbControl = ttk.Notebook( self.root, width=600, height=190 )
     self.tabImagePreview = ImagePreview( self.createTab( "Image Preview" ) )
-    self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
-    self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
     self.tabLog = Log( self.createTab( "Log" ) )
+    self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
+    self.tabModelOptions = ModelOptions( self.appState, self.createTab( "Model Options" ) )
+    self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
     self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
     self.tabTracks = Tracks(
-        self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select, self.tabImageOptions.getIdentificationPrompt, self.tabImageOptions.savePrompt,
-        self.tabImageOptions.getIdentificationModel, on_role_changed, on_track_changed
+        self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select, self.tabModelOptions.getIdentificationPrompt, self.tabModelOptions.savePrompt,
+        self.tabModelOptions.getIdentificationModel, on_role_changed, on_track_changed
     )
     self.nbControl.pack( expand=1, fill='both' )
-    self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks ]
+    self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks, self.tabModelOptions ]
     self.nbControl.bind( "<<NotebookTabChanged>>", self.onTabChanged )
 
     for tab in self.allTabs:

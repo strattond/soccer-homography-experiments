@@ -9,7 +9,7 @@ import numpy as np
 
 from soccer_homography import App
 from soccer_homography.data import BoundingBox, Homography, Person, Track
-from soccer_homography.inference.abstractions import selectModelDevice
+from soccer_homography.inference.abstractions import IdentificationImageResult, selectModelDevice
 from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ClipImageResult, ClipResponse, ClipRoleClassifier
 from soccer_homography.inference.crop_inference import (
   DEFAULT_IDENTIFICATION_PROMPT,
@@ -352,6 +352,50 @@ def test_clicking_crop_sends_its_frame_to_the_main_slider_callback():
 
   tracks.selectCropFrame( 73 )
 
+  tracks.frameSelectCallback.assert_called_once_with( 73 )
+
+
+def test_crop_table_lists_each_frame_and_known_identification_guess():
+  tracks = Tracks.__new__( Tracks )
+  tracks.cropIdentificationResults = {
+      9: { 73: IdentificationImageResult( frame_number=73, role="home_player" ) }
+  }
+  tracks.cropTable = Mock()
+  crops = [
+      ( 73, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ),
+      ( 81, np.ones( ( 8, 8, 3 ), dtype=np.uint8 ) ),
+  ]
+
+  tracks.displayCrops( 9, crops )
+
+  assert [ call.kwargs[ "iid" ] for call in tracks.cropTable.insert.call_args_list ] == [ "73", "81" ]
+  assert [ call.kwargs[ "values" ] for call in tracks.cropTable.insert.call_args_list ] == [
+      ( 73, "home player" ),
+      ( 81, "Not analyzed" ),
+  ]
+
+
+def test_selecting_crop_displays_its_image_and_identification_guess( monkeypatch ):
+  tracks = Tracks.__new__( Tracks )
+  tracks.selTrackID = 9
+  crop = np.full( ( 8, 8, 3 ), 17, dtype=np.uint8 )
+  tracks.cropCache = { 9: [ ( 73, crop ) ] }
+  tracks.cropIdentificationResults = {
+      9: { 73: IdentificationImageResult( frame_number=73, role="away_goalkeeper" ) }
+  }
+  tracks.cropTable = Mock()
+  tracks.cropTable.selection.return_value = ( "73", )
+  tracks.cropPreview = Mock()
+  tracks.cropPreviewCaption = Mock()
+  tracks.frameSelectCallback = Mock()
+  photo_image = Mock( return_value="photo" )
+  monkeypatch.setattr( "soccer_homography.ui.config.tracks.ImageTk.PhotoImage", photo_image )
+
+  tracks.onCropSelected()
+
+  assert np.array_equal( np.asarray( photo_image.call_args.args[ 0 ] ), crop )
+  tracks.cropPreview.config.assert_called_once_with( image="photo", text="" )
+  tracks.cropPreviewCaption.config.assert_called_once_with( text="Frame 73 - away goalkeeper" )
   tracks.frameSelectCallback.assert_called_once_with( 73 )
 
 
