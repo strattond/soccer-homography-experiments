@@ -102,7 +102,7 @@ def planCropFrames(
           frame,
       ),
   )
-  orderedFrames = selFrames + fallbackFrames
+  orderedFrames = selFrames # + fallbackFrames
   return [ PlannedCropFrame( frame, tuple( boxesByFrame[ frame ].items() ) ) for frame in orderedFrames ]
 
 
@@ -126,11 +126,14 @@ class CropExtractionWorker( threading.Thread ):
     self.cancel_event.set()
 
   def run( self ) -> None:
+    logger.info( f"Starting crop extraction worker for generation {self.generation}" )
     capture: cv2.VideoCapture | None = None
     try:
+      logger.info( f"Planning crop frames for generation {self.generation}" )
       plan = planCropFrames( self.tracks, cancel_event=self.cancel_event )
       if self.cancel_event.is_set():
         return
+      logger.info( f"Planned {len( plan )} crop frames for generation {self.generation}" )
       capture = cv2.VideoCapture( self.video_file )
       if not capture.isOpened():
         raise RuntimeError( f"Could not open video: {self.video_file}" )
@@ -139,14 +142,29 @@ class CropExtractionWorker( threading.Thread ):
       pendingByTrack = Counter( assignment[ 0 ] for plannedFrame in plan for assignment in plannedFrame.trackBoxes )
       self.results.put( CropJobMessage( self.generation, "progress", 0, len( plan ), stage="planned frames" ) )
       completed = 0
-      for plannedFrame in plan:
+      sorted_plan = sorted( plan, key=lambda pf: pf.frameNumber )
+      # Seeking is dog slow (2+ seconds per seek) on some videos, so we process frames in order and only grab when necessary.
+      curFrame: int = 0
+      print(capture.getBackendName())
+      for plannedFrame in sorted_plan:
         if self.cancel_event.is_set():
           return
+
+        delta: int = plannedFrame.frameNumber - curFrame
+        while delta > 0:
+          capture.grab()
+          delta -= 1
+          curFrame += 1
+
         tracksNeedingCrops = [ assignment for assignment in plannedFrame.trackBoxes if len( cache[ assignment[ 0 ] ] ) < 6 ]
+        logger.info( f"Processing frame {plannedFrame.frameNumber} with {len( tracksNeedingCrops )} tracks needing crops." )
         if tracksNeedingCrops:
-          capture.set( cv2.CAP_PROP_POS_FRAMES, plannedFrame.frameNumber )
-          success, frame = capture.read()
+          #logger.info( f"Seeking to frame {plannedFrame.frameNumber} for crop extraction." )
+          #capture.set( cv2.CAP_PROP_POS_FRAMES, plannedFrame.frameNumber )
+          logger.info( f"Reading frame {plannedFrame.frameNumber} for crop extraction." )
+          success, frame = capture.retrieve() # read() - We've already grabbed, just get the details now
           if success:
+            logger.info( f"Extracting {len(tracksNeedingCrops)} crops for frame {plannedFrame.frameNumber}." )
             for track_id, box in tracksNeedingCrops:
               crop = cropFromFrame( frame, box )
               if crop is not None and len( cache[ track_id ] ) < 6:
@@ -162,8 +180,11 @@ class CropExtractionWorker( threading.Thread ):
           break
 
       if not self.cancel_event.is_set():
+        logger.info( f"Crop extraction worker for generation {self.generation} completed successfully." )
+        logger.info( f"Sorting crops for each track in generation {self.generation}." )
         for crops in cache.values():
           crops.sort( key=lambda crop: crop[ 0 ] )
+        logger.info( f"Finished sorting crops for each track in generation {self.generation}." )
         self.results.put( CropJobMessage( self.generation, "done", completed, len( plan ), cache ) )
     except Exception as error:
       if not self.cancel_event.is_set():

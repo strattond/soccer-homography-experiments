@@ -589,7 +589,6 @@ class App:
       self.prgDetection.tick()
     for r, h in self.appState.heatmaps.items():
       heatmap = h.get_display_image( label=r )
-      cv2.imwrite( f"heatmap_{r}_heatmap.png", heatmap )
       self.livePreviewController.updateHeatmap( r, heatmap )
     self.ui_queue.put( Output( OutputType.STOP ) )
 

@@ -190,7 +190,7 @@ class Tracks:
     self.tblTrackData.delete( *self.tblTrackData.get_children() )
 
     # Ensure we sort it by Track ID rather than order of creation
-    trackData = sorted( self.appState.tracks.items(), key=lambda frame: ( frame[0] ) )
+    trackData = sorted( self.appState.tracks.items(), key=lambda frame: ( frame[ 0 ] ) )
 
     for i, ( key, track ) in enumerate( trackData ):
       tag = "evenrow" if i % 2 == 0 else "oddrow"
@@ -253,7 +253,7 @@ class Tracks:
           person_id = db_person.id
           # Use person's role if available, but if it's unknown, use the track role.  This happens after
           # a quick VLM look and assignment, followed by allocating a person
-          role = participant.role if  participant.role != "unknown" else track.role
+          role = participant.role if participant.role != "unknown" else track.role
       else:
         role = next( role for role in roles if role.replace( "_", " " ) == selection )
         person_id = track.numId()
@@ -324,20 +324,12 @@ class Tracks:
       return
     if self.cropCacheClipID != self.appState.curClipID:
       if self.cropWorker is None:
-        self.cropStatus.config(
-            text="Person assigned; crops are not cached for this track."
-            if self.hasKnownPerson( track )
-            else "Press Crops to collect samples for unknown tracks."
-        )
+        self.cropStatus.config( text="Person assigned; crops are not cached for this track." if self.hasKnownPerson( track ) else "Press Crops to collect samples for unknown tracks." )
       return
     crops = self.cropCache.get( track.id )
     if crops is None:
       if self.cropWorker is None:
-        self.cropStatus.config(
-            text="Person assigned; crops are not cached for this track."
-            if self.hasKnownPerson( track )
-            else "Press Crops to collect samples for unknown tracks."
-        )
+        self.cropStatus.config( text="Person assigned; crops are not cached for this track." if self.hasKnownPerson( track ) else "Press Crops to collect samples for unknown tracks." )
       return
     if not crops:
       self.cropStatus.config( text="No valid crops found for this track." )
@@ -352,22 +344,17 @@ class Tracks:
       return
     self.refreshPeople()
     self.loadClipTrackAssignments()
-    unknown_tracks = [ ( track.id, sorted( track.boxes, key=lambda box: box.frame ) ) for track in self.appState.tracks.values() if not self.hasKnownPerson( track ) and track.boxes ]
-    if not unknown_tracks:
-      self.cancelCropJob()
-      self.cancelVLMJob()
-      self.cropCache.clear()
-      self.cropIdentificationResults.clear()
-      self.updateVLMButtonState()
-      self.renderSelectedCrops( None )
-      self.cropStatus.config( text="No unknown tracks with bounding boxes." )
-      return
-
     self.cancelCropJob()
     self.cancelVLMJob()
     self.cropCache.clear()
     self.cropIdentificationResults.clear()
     self.updateVLMButtonState()
+    unknown_tracks = [ ( track.id, sorted( track.boxes, key=lambda box: box.frame ) ) for track in self.appState.tracks.values() if not self.hasKnownPerson( track ) and track.boxes ]
+    if not unknown_tracks:
+      self.renderSelectedCrops( None )
+      self.cropStatus.config( text="No unknown tracks with bounding boxes." )
+      return
+
     self.clearCropImages()
     self.cropCacheClipID = self.appState.curClipID
     self.cropGeneration += 1
@@ -607,10 +594,8 @@ class Tracks:
         str( result.frame_number ),
         values=( result.frame_number, self.formatIdentificationGuess( result ) ),
     )
-    if self.cropTable.selection() == ( str( result.frame_number ), ):
-      self.cropPreviewCaption.config(
-          text=f"Frame {result.frame_number} - {self.formatIdentificationGuess( result )}"
-      )
+    if self.cropTable.selection() == ( str( result.frame_number ),):
+      self.cropPreviewCaption.config( text=f"Frame {result.frame_number} - {self.formatIdentificationGuess( result )}" )
 
   def displayCrops( self, track_id: int, crops: CropSet ) -> None:
     results = self.cropIdentificationResults.get( track_id, {} )
@@ -630,11 +615,7 @@ class Tracks:
       return
     frame_number = int( selected[ 0 ] )
     crop = next(
-        (
-            image
-            for frame, image in self.cropCache.get( self.selTrackID, [] )
-            if frame == frame_number
-        ),
+        ( image for frame, image in self.cropCache.get( self.selTrackID, [] ) if frame == frame_number ),
         None,
     )
     if crop is None:

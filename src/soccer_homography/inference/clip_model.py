@@ -26,11 +26,11 @@ CLIP_ROLES: tuple[ ParticipationRole, ...] = (
     "unknown",
 )
 CLIP_ROLE_LABELS: dict[ ParticipationRole, str ] = {
-    "home_player": "a soccer home-team outfield player wearing the home team's kit",
+    "home_player": "a soccer outfield player wearing the red and white striped kit",
     "home_goalkeeper": "a soccer home-team goalkeeper wearing a goalkeeper kit",
-    "away_player": "a soccer away-team outfield player wearing the away team's kit",
+    "away_player": "a soccer outfield player wearing a kit that is not red and white striped",
     "away_goalkeeper": "a soccer away-team goalkeeper wearing a goalkeeper kit",
-    "referee": "a soccer referee wearing a referee uniform",
+    "referee": "a soccer referee wearing a bright yellow shirt, or a black shirt holding a yellow flag",
     "unknown": "a person whose role in a soccer match cannot be identified",
 }
 
