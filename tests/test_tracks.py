@@ -1,3 +1,4 @@
+import importlib
 import queue
 import sys
 from types import SimpleNamespace
@@ -22,11 +23,17 @@ from soccer_homography.inference.crop_inference import (
 from soccer_homography.inference.vlm_model import MIN_VLM_GPU_MEMORY_BYTES, MoondreamVLM, VLMImageResult, VLMResponse, guessRole
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.SportsTracker import SportsTracker
+from soccer_homography.db.persist import Match as DBMatch
+from soccer_homography.db.persist import Person as DBPerson
+from soccer_homography.db.persist import PersonParticipation
 from soccer_homography.ui.components import Slider
+from soccer_homography.ui.Configuration import ClipParticipants
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
 from soccer_homography.ui.frameminimap import FrameMinimap
 from soccer_homography.ui.LivePreview import LivePreview
+
+configuration_module = importlib.import_module( "soccer_homography.ui.Configuration" )
 
 
 def test_track_export_preserves_person_and_participation_role():
@@ -156,7 +163,7 @@ def test_minimap_click_maps_vertical_position_to_nearest_frame():
   minimap.on_frame_select.assert_called_once_with( 50 )
 
 
-def test_tracks_role_filter_limits_rows_to_selected_role():
+def test_tracks_table_shows_all_tracks_without_a_role_column():
   tracks = Tracks.__new__( Tracks )
   tracks.appState = cast( Any, SimpleNamespace(
       tracks={
@@ -166,8 +173,6 @@ def test_tracks_role_filter_limits_rows_to_selected_role():
   ) )
   tracks.refreshPeople = Mock()
   tracks.loadClipTrackAssignments = Mock()
-  tracks.trackRoleFilter = Mock()
-  tracks.trackRoleFilter.get.return_value = "unknown"
   tracks.tblTrackData = Mock()
   tracks.tblTrackData.get_children.return_value = ()
   tracks.tblTrackData.selection.return_value = ()
@@ -178,15 +183,14 @@ def test_tracks_role_filter_limits_rows_to_selected_role():
 
   tracks.refresh()
 
-  assert [ call.kwargs[ "iid" ] for call in tracks.tblTrackData.insert.call_args_list ] == [ "1" ]
+  assert [ call.kwargs[ "iid" ] for call in tracks.tblTrackData.insert.call_args_list ] == [ "1", "2" ]
+  assert all( len( call.kwargs[ "values" ] ) == 3 for call in tracks.tblTrackData.insert.call_args_list )
 
 
-def test_selecting_preview_track_clears_filter_if_track_is_hidden():
+def test_selecting_preview_track_refreshes_if_track_is_not_in_table():
   tracks = Tracks.__new__( Tracks )
   track = Track( clip=1, id=11, boxes=[], role="home_player" )
   tracks.appState = cast( Any, SimpleNamespace( tracks={ 11: track } ) )
-  tracks.roleFilter = Mock()
-  tracks.trackRoleFilter = Mock()
   tracks.tblTrackData = Mock()
   tracks.tblTrackData.exists.side_effect = ( False, True )
   tracks.refresh = Mock()
@@ -194,7 +198,6 @@ def test_selecting_preview_track_clears_filter_if_track_is_hidden():
 
   tracks.selectTrack( 11 )
 
-  tracks.trackRoleFilter.set.assert_called_once_with( "All roles" )
   tracks.refresh.assert_called_once_with()
   tracks.tblTrackData.selection_set.assert_called_once_with( "11" )
   tracks.tblTrackData.focus.assert_called_once_with( "11" )
@@ -202,12 +205,76 @@ def test_selecting_preview_track_clears_filter_if_track_is_hidden():
   tracks.selectionChanged.assert_called_once_with( track )
 
 
-def test_role_assignment_updates_attached_unknown_participation_role(monkeypatch):
-  participant = SimpleNamespace(
-      person_id=SimpleNamespace( id=17 ),
-      match_id=SimpleNamespace( id=23 ),
+def test_clip_participant_role_cell_updates_participation( monkeypatch ):
+  participant = PersonParticipation(
+      person_id=DBPerson( id=17, first_name="Sam", last_name="Player" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
       shirt_number=8,
       role="unknown",
+  )
+  participants = ClipParticipants.__new__( ClipParticipants )
+  participants.state = cast( Any, SimpleNamespace( db=Mock(), curClipID=3 ) )
+  participants.tab = Mock()
+  participants.participants = { 17: participant }
+  participants.editor = None
+  participants.participantTree = Mock()
+  participants.participantTree.identify_row.return_value = "17"
+  participants.participantTree.identify_column.return_value = "#4"
+  participants.participantTree.bbox.return_value = ( 0, 0, 100, 20 )
+  participants.participantTree.winfo_x.return_value = 0
+  participants.participantTree.winfo_y.return_value = 0
+  participants.refresh = Mock()
+  participants.on_role_changed = Mock()
+
+  class FakeCombobox:
+    def __init__( self, *_args, **_kwargs ):
+      self.bindings = {}
+      self.selected = ""
+
+    def place( self, **_kwargs ):
+      pass
+
+    def set( self, value ):
+      self.selected = value
+
+    def get( self ):
+      return self.selected
+
+    def bind( self, event, callback ):
+      self.bindings[ event ] = callback
+
+    def focus_set( self ):
+      pass
+
+    def destroy( self ):
+      pass
+
+  monkeypatch.setattr( configuration_module.ttk, "Combobox", FakeCombobox )
+  upsert = Mock()
+  monkeypatch.setattr( configuration_module, "upsertPersonParticipation", upsert )
+
+  participants.editRole( SimpleNamespace( x=20, y=10 ) )
+  assert isinstance( participants.editor, FakeCombobox )
+  participants.editor.set( "referee" )
+  participants.editor.bindings[ "<<ComboboxSelected>>" ]()
+
+  upsert.assert_called_once()
+  saved = upsert.call_args.args[ 1 ]
+  assert saved.person_id == 17
+  assert saved.match_id == 23
+  assert saved.role == "referee"
+  assert participant.role == "referee"
+  participants.refresh.assert_called_once_with()
+  participants.on_role_changed.assert_called_once_with()
+
+
+def test_role_assignment_updates_participation_role(monkeypatch):
+  participant = PersonParticipation(
+      person_id=DBPerson( id=17, first_name="Unknown", last_name="Player 17" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
+      shirt_number=8,
+      role="unknown",
+      is_placeholder=True,
   )
   tracks = Tracks.__new__( Tracks )
   tracks.peopleByLabel = cast( Any, { "Player": participant } )
@@ -216,7 +283,7 @@ def test_role_assignment_updates_attached_unknown_participation_role(monkeypatch
   upsert = Mock()
   monkeypatch.setattr( "soccer_homography.ui.config.tracks.upsertPersonParticipation", upsert )
 
-  tracks.updateUnknownParticipantRole( 17, "home_player" )
+  assert tracks.updateParticipantRole( participant, "home_player" )
 
   upsert.assert_called_once()
   participation = upsert.call_args.args[ 1 ]
@@ -224,25 +291,29 @@ def test_role_assignment_updates_attached_unknown_participation_role(monkeypatch
   assert participation.person_id == 17
   assert participation.shirt_number == 8
   assert participation.role == "home_player"
+  assert participation.is_placeholder is True
   assert participant.role == "home_player"
 
 
-def test_role_assignment_does_not_overwrite_known_participation_role(monkeypatch):
-  participant = SimpleNamespace(
-      person_id=SimpleNamespace( id=17 ),
-      match_id=SimpleNamespace( id=23 ),
+def test_role_assignment_updates_known_participation_role(monkeypatch):
+  participant = PersonParticipation(
+      person_id=DBPerson( id=17, first_name="Sam", last_name="Player" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
       shirt_number=8,
       role="away_player",
+      is_placeholder=False,
   )
   tracks = Tracks.__new__( Tracks )
   tracks.peopleByLabel = cast( Any, { "Player": participant } )
+  tracks.appState = cast( Any, SimpleNamespace( db=Mock() ) )
+  tracks.tab = Mock()
   upsert = Mock()
   monkeypatch.setattr( "soccer_homography.ui.config.tracks.upsertPersonParticipation", upsert )
 
-  tracks.updateUnknownParticipantRole( 17, "home_player" )
+  assert tracks.updateParticipantRole( participant, "home_player" )
 
-  upsert.assert_not_called()
-  assert participant.role == "away_player"
+  upsert.assert_called_once()
+  assert participant.role == "home_player"
 
 
 def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):

@@ -20,6 +20,7 @@ from soccer_homography.data import (
 )
 from soccer_homography.db import (
     deleteClipTracks,
+    deleteTrackSegments,
     deleteTrackingChunks,
     getCameraByID,
     getClipHomography,
@@ -55,6 +56,7 @@ from soccer_homography.ui import (
     RadarCanvas,
     Slider,
 )
+from soccer_homography.ui.config.crop_worker import deleteTrackCrops
 from soccer_homography.ui.frameminimap import TrackingType
 
 
@@ -389,6 +391,8 @@ class App:
     self.sldVideoFrame.setValue( frame )
 
   def onRoleChanged( self ) -> None:
+    self.tabData.tabTracks.refreshPeople()
+    self.tabData.tabTracks.loadClipTrackAssignments()
     self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
 
   def onTrackChanged( self, trackID: int | None ) -> None:
@@ -615,7 +619,8 @@ class App:
         return
     if not messagebox.askyesno(
         "Delete tracks",
-        f"Delete all tracks for clip {clip_id} from memory, DuckDB, and tracking parquet chunks?",
+        f"Delete all tracks for clip {clip_id} from memory, DuckDB, tracking parquet chunks, "
+        "track segments, and cached crops?",
         parent=self.root,
     ):
       return
@@ -623,7 +628,9 @@ class App:
     try:
       self.tracking_writer.waitForPending()
       deleted_chunks = deleteTrackingChunks( clip_id )
+      deleted_crops = deleteTrackCrops( clip_id )
       deleteClipTracks( self.appState.db, clip_id )
+      deleteTrackSegments( self.appState.db, clip_id )
     except ( duckdb.Error, OSError, RuntimeError, ValueError ) as error:
       logger.exception( f"Could not delete tracks for clip {clip_id}." )
       messagebox.showerror( "Delete tracks failed", str( error ), parent=self.root )
@@ -638,7 +645,10 @@ class App:
     self.livePreviewController.updateMappings( self.appState.tracks, frame )
     self.minimap.clear( TrackingType.CUR_TRACK )
     self.checkButtonState()
-    logger.info( f"Deleted tracking data for clip {clip_id} and {deleted_chunks} parquet chunks." )
+    logger.info(
+        f"Deleted tracking data for clip {clip_id}, {deleted_chunks} parquet chunks, "
+        f"and {deleted_crops} cached crops."
+    )
 
   def chunkDetections( self ):
     for chunk_id in sorted( self.pendingDetectionChunks ):

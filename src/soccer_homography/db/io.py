@@ -25,6 +25,8 @@ TRACK_SCHEMA = pa.schema( [
     ( "y1", pa.float32() ),
     ( "x2", pa.float32() ),
     ( "y2", pa.float32() ),
+    ( "centroid_x", pa.float32() ),
+    ( "centroid_y", pa.float32() ),
     ( "cls", pa.int32() ),
     ( "confidence", pa.float32() ),
 ] )
@@ -47,11 +49,13 @@ def boxToRow( clip_id: int, box: BoundingBox, track_id: int | None = None ) -> d
 
 
 def tracksToArrow( records: list[ Track ] ) -> pa.Table:
-  flat = [
-      boxToRow( track.clip, box, track.id )
-      for track in records
-      for box in track.boxes
-  ]
+  flat = []
+  for track in records:
+    for box in track.boxes:
+      row = boxToRow( track.clip, box, track.id )
+      row[ "centroid_x" ] = ( box.x1 + box.x2 ) / 2
+      row[ "centroid_y" ] = ( box.y1 + box.y2 ) / 2
+      flat.append( row )
   return pa.Table.from_pylist( flat, schema=TRACK_SCHEMA )
 
 

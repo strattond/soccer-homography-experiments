@@ -1,9 +1,17 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
+import duckdb
+
 from soccer_homography.appState import AppState
-from soccer_homography.db import listClipParticipants
+from soccer_homography.data import ParticipationRole, roles
+from soccer_homography.db import (
+    PersonParticipation,
+    PersonParticipationDB,
+    listClipParticipants,
+    upsertPersonParticipation,
+)
 from soccer_homography.log import logging
 from soccer_homography.ui.config import (
     ImageOptionsUI,
@@ -42,9 +50,12 @@ class Log:
 
 class ClipParticipants:
 
-  def __init__( self, state: AppState, tab: ttk.Frame ) -> None:
+  def __init__( self, state: AppState, tab: ttk.Frame, on_role_changed=None ) -> None:
     self.state = state
     self.tab = tab
+    self.on_role_changed = on_role_changed
+    self.participants: dict[ int, PersonParticipation ] = {}
+    self.editor: ttk.Combobox | None = None
 
   def setup( self ):
     self.participantTree = ttk.Treeview(
@@ -65,14 +76,17 @@ class ClipParticipants:
     scrollbar = ttk.Scrollbar( self.tab, orient="vertical", command=self.participantTree.yview )
     scrollbar.place( x=600, y=24, height=160 )
     self.participantTree.configure( yscrollcommand=scrollbar.set )
+    self.participantTree.bind( "<Double-1>", self.editRole )
     self.refresh()
 
   def refresh( self ):
     self.participantTree.delete( *self.participantTree.get_children() )
+    self.participants.clear()
     if self.state.db is None or self.state.curClipID <= 0:
       return
 
     for participant in listClipParticipants( self.state.db, self.state.curClipID ):
+      self.participants[ participant.person_id.id ] = participant
       self.participantTree.insert(
           "",
           "end",
@@ -84,6 +98,79 @@ class ClipParticipants:
               participant.role.replace( "_", " " ),
           ),
       )
+
+  def editRole( self, event ):
+    row_id = self.participantTree.identify_row( event.y )
+    column = self.participantTree.identify_column( event.x )
+    if not row_id or column != "#4":
+      return None
+    bounds = self.participantTree.bbox( row_id, column )
+    if not bounds:
+      return "break"
+    participant = self.participants.get( int( row_id ) )
+    if participant is None:
+      return "break"
+
+    if self.editor is not None:
+      self.editor.destroy()
+    self.editor = ttk.Combobox(
+        self.tab,
+        state="readonly",
+        values=tuple( role.replace( "_", " " ) for role in roles ),
+    )
+    x, y, width, height = bounds
+    self.editor.place(
+        x=self.participantTree.winfo_x() + x,
+        y=self.participantTree.winfo_y() + y,
+        width=width,
+        height=height,
+    )
+    self.editor.set( participant.role.replace( "_", " " ) )
+
+    def save_role( _event=None ) -> None:
+      if self.editor is None:
+        return
+      selected_role = self.editor.get()
+      self.editor.destroy()
+      self.editor = None
+      role: ParticipationRole = next(
+          role for role in roles if role.replace( "_", " " ) == selected_role
+      )
+      if self.state.db is None:
+        messagebox.showerror( "Participant update failed", "The database connection is unavailable.", parent=self.tab )
+        return
+      try:
+        upsertPersonParticipation(
+            self.state.db,
+            PersonParticipationDB(
+                match_id=participant.match_id.id,
+                person_id=participant.person_id.id,
+                shirt_number=participant.shirt_number,
+                role=role,
+                is_placeholder=participant.is_placeholder,
+            ),
+        )
+      except ( duckdb.Error, RuntimeError, ValueError ) as error:
+        messagebox.showerror(
+            "Participant update failed",
+            f"Could not update role for person {participant.person_id.id}: {error}",
+            parent=self.tab,
+        )
+        return
+      participant.role = role
+      self.refresh()
+      if self.on_role_changed is not None:
+        self.on_role_changed()
+
+    self.editor.bind( "<<ComboboxSelected>>", save_role )
+    self.editor.bind( "<FocusOut>", lambda _event: self.closeEditor() )
+    self.editor.focus_set()
+    return "break"
+
+  def closeEditor( self ) -> None:
+    if self.editor is not None:
+      self.editor.destroy()
+      self.editor = None
 
 
 class Configuration:
@@ -124,7 +211,11 @@ class Configuration:
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
     self.tabModelOptions = ModelOptions( self.appState, self.createTab( "Model Options" ) )
     self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
-    self.tabClipParticipants = ClipParticipants( self.appState, self.createTab( "Clip Participants" ) )
+    self.tabClipParticipants = ClipParticipants(
+        self.appState,
+        self.createTab( "Clip Participants" ),
+        on_role_changed,
+    )
     self.tabTracks = Tracks(
         self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select, self.tabModelOptions.getIdentificationPrompt, self.tabModelOptions.savePrompt,
         self.tabModelOptions.getIdentificationModel, on_role_changed, on_track_changed

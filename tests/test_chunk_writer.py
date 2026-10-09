@@ -111,8 +111,13 @@ def test_detection_and_tracking_writers_write_separate_parquet_chunks( tmp_path,
     flush_writer( detection_writer, scheduler )
     flush_writer( tracking_writer, scheduler )
 
-    assert pq.read_table( "tracking/chunk_detections_4_0.parquet" ).num_rows == 1
-    assert pq.read_table( "tracking/chunk_tracking_4_0.parquet" ).num_rows == 1
+    detection_table = pq.read_table( "tracking/chunk_detections_4_0.parquet" )
+    tracking_table = pq.read_table( "tracking/chunk_tracking_4_0.parquet" )
+    assert detection_table.num_rows == 1
+    assert "centroid_x" not in detection_table.column_names
+    assert tracking_table.num_rows == 1
+    assert tracking_table.column( "centroid_x" ).to_pylist() == [ 6.0 ]
+    assert tracking_table.column( "centroid_y" ).to_pylist() == [ 7.0 ]
     loaded_detections = readDetectionChunks( 4 )
     loaded_tracks = readTrackingChunks( 4 )
     assert loaded_detections[ 4 ][ 0 ].conf == pytest.approx( detections[ 4 ][ 0 ].conf )

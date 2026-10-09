@@ -44,8 +44,25 @@ In the app, open **Data Maintenance**, select the **Matches** tab, and choose **
 
 To load a registered database clip, choose **Clip** in the main window and select a clip from the list. The **Clip Participants** tab shows the people associated with that clip's match.
 
-When a clip is loaded, existing detection and tracking Parquet chunks in `tracking/` are restored into the canvases and Tracks table. Detection and tracking boxes are stored in source-frame coordinates; **Crops** uses those coordinates directly against the decoded source frame for full-resolution crops. The box overlays are redrawn when the canvas is panned or zoomed.
+When a clip is loaded, existing detection and tracking Parquet chunks in `tracking/` are restored into the canvases and Tracks table. Detection and tracking boxes are stored in source-frame coordinates; tracked rows also include the bounding-box centroid. **Crops** uses those coordinates directly against the decoded source frame for full-resolution crops. The box overlays are redrawn when the canvas is panned or zoomed.
 
-After tracks are available, assign a participant or role from the Tracks table; assignments are saved to DuckDB for the selected clip. Click **Crops** to collect up to six cached samples for each track without an assigned participant. Crop collection samples shared video frames first to serve multiple tracks per decoded frame, then falls back to per-track sampling only for tracks missed by those shared frames. Homographies can be saved to the database explicitly with **Save Homography**; the initial save uses a locked-off camera range.
+Tracker IDs are short-term motion tracks, not stable player identities. `ClipTrack` stores the current whole-clip participant assignment without a role; roles are stored on `PersonParticipation`. Track history is kept unchanged in Parquet, while `TrackSegment` records offline identity assignments for inclusive frame ranges. A segment identifies a person within the match for its clip, so the same tracker ID can map to different participants in separate non-overlapping segments.
 
-The **VLM** button analyzes the selected track's cached crops with the model selected in **Image Options**. **VLM** (the default) uses Moondream and its editable multi-line identification prompt, saved to `identificationPrompt.txt` in the repository root. **Clip** uses zero-shot CLIP classification over the six participation roles and reports its per-crop confidence. Both modes show each crop's role and a tally for every role; the most-voted role can be saved to the track, while a tie is reported without assigning a role.
+The database API can create a placeholder participation for an unidentified opposition player and associate it with part of a tracker history:
+
+```python
+from soccer_homography.db import (
+    TrackSegmentDB,
+    createPlaceholderParticipation,
+    listTrackSegments,
+    upsertTrackSegment,
+)
+
+placeholder = createPlaceholderParticipation(conn, match_id)
+upsertTrackSegment(conn, TrackSegmentDB(clip_id, track_id, placeholder.person_id, 0, 149))
+segments = listTrackSegments(conn, clip_id)
+```
+
+After tracks are available, assign a participant from the Tracks table; the participant's role is edited on the associated `PersonParticipation`. Click **Crops** to collect up to six cached samples for each track without an assigned participant. Crop collection samples shared video frames first to serve multiple tracks per decoded frame, then falls back to per-track sampling only for tracks missed by those shared frames. Homographies can be saved to the database explicitly with **Save Homography**; the initial save uses a locked-off camera range.
+
+The **VLM** button analyzes the selected track's cached crops with the model selected in **Image Options**. **VLM** (the default) uses Moondream and its editable multi-line identification prompt, saved to `identificationPrompt.txt` in the repository root. **Clip** uses zero-shot CLIP classification over the six participation roles and reports its per-crop confidence. Both modes show each crop's role and a tally for every role; the most-voted role can be saved to the assigned participant's `PersonParticipation`, while a tie is reported without assigning a role.

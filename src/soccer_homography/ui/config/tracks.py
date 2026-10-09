@@ -61,7 +61,6 @@ class Tracks:
     self.personLabels: dict[ int, str ] = {}
     self.person_options: tuple[ str, ...] = ( "<Unknown>",)
     self.editor: ttk.Combobox | None = None
-    self.trackRoleFilter = tk.StringVar( value="All roles" )
     self.cropPreviewImage: ImageTk.PhotoImage | None = None
     self.cropIdentificationResults: dict[ int, dict[ int, IdentificationImageResult ] ] = {}
     self.cropResults: queue.Queue[ CropJobMessage ] = queue.Queue()
@@ -78,25 +77,16 @@ class Tracks:
     self.on_track_changed = on_track_changed
 
   def setup( self ) -> None:
-    ttk.Label( self.tab, text="Role filter:" ).place( x=0, y=2, width=65, height=22 )
-    self.roleFilter = ttk.Combobox(
-        self.tab,
-        textvariable=self.trackRoleFilter,
-        state="readonly",
-        values=( "All roles", *( role.replace( "_", " " ) for role in roles ) ),
-    )
-    self.roleFilter.place( x=68, y=0, width=180, height=24 )
-    self.roleFilter.bind( "<<ComboboxSelected>>", self.onRoleFilterChanged )
-    colNames = [ "Track ID", "Num Frames", "Person", "Role" ]
-    colWidths = [ 90, 110, 260, 120 ]
+    colNames = [ "Track ID", "Num Frames", "Person" ]
+    colWidths = [ 90, 110, 380 ]
     self.tblTrackData = ttk.Treeview(
         self.tab,
         columns=colNames,
         show="headings",
     )
-    self.tblTrackData.place( x=0, y=28, width=580, height=156 )
+    self.tblTrackData.place( x=0, y=0, width=600, height=184 )
     scrollbar = ttk.Scrollbar( self.tab, orient="vertical", command=self.tblTrackData.yview )
-    scrollbar.place( x=580, y=28, height=156 )
+    scrollbar.place( x=600, y=0, height=184 )
     self.tblTrackData.configure( yscrollcommand=scrollbar.set )
 
     for i, ( col, width ) in enumerate( zip( colNames, colWidths ) ):
@@ -153,7 +143,9 @@ class Tracks:
 
     for participant in listClipParticipants( self.appState.db, self.appState.curClipID ):
       person = participant.person_id
-      label = f"{person.first_name} {person.last_name} (#{participant.shirt_number})"
+      label = f"{person.first_name} {person.last_name}".strip()
+      if participant.shirt_number is not None:
+        label += f" (#{participant.shirt_number})"
       self.peopleByLabel[ label ] = participant
       self.personLabels[ person.id ] = label
     self.person_options = ( "<Unknown>", *self.peopleByLabel.keys() )
@@ -166,9 +158,9 @@ class Tracks:
       association = associations.get( track_id )
       if association is None:
         continue
-      track.role = association.role
       if association.person_id is None:
         track.person = None
+        track.role = "unknown"
       else:
         participant = next(
             ( item for item in self.peopleByLabel.values() if item.person_id.id == association.person_id ),
@@ -176,9 +168,11 @@ class Tracks:
         )
         if participant is None:
           track.person = association.person_id
+          track.role = "unknown"
         else:
           person = participant.person_id
           track.person = TrackPerson( id=person.id, name=f"{person.first_name} {person.last_name}" )
+          track.role = participant.role
 
   def personLabel( self, track: Track ) -> str:
     person = track.person
@@ -205,15 +199,12 @@ class Tracks:
     trackData = sorted( self.appState.tracks.items(), key=lambda frame: ( frame[ 0 ] ) )
 
     for i, ( key, track ) in enumerate( trackData ):
-      selected_role = self.trackRoleFilter.get()
-      if selected_role != "All roles" and track.role != selected_role.replace( " ", "_" ):
-        continue
       tag = "evenrow" if i % 2 == 0 else "oddrow"
       self.tblTrackData.insert(
           "",
           tk.END,
           iid=str( key ),
-          values=( str( key ), str( len( track.boxes ) ), self.personLabel( track ), track.role.replace( "_", " " ) ),
+          values=( str( key ), str( len( track.boxes ) ), self.personLabel( track ) ),
           tags=( tag,),
       )
     if selected_id is not None and self.tblTrackData.exists( selected_id ):
@@ -223,16 +214,12 @@ class Tracks:
     if selected_id is None or not self.tblTrackData.exists( selected_id ):
       self.selectionChanged( None )
 
-  def onRoleFilterChanged( self, _event=None ) -> None:
-    self.refresh()
-
   def selectTrack( self, track_id: int ) -> None:
     track = self.appState.tracks.get( track_id )
     if track is None:
       return
     item_id = str( track_id )
     if not self.tblTrackData.exists( item_id ):
-      self.trackRoleFilter.set( "All roles" )
       self.refresh()
     if self.tblTrackData.exists( item_id ):
       self.tblTrackData.selection_set( item_id )
@@ -243,7 +230,7 @@ class Tracks:
   def editCell( self, event ):
     row_id = self.tblTrackData.identify_row( event.y )
     column = self.tblTrackData.identify_column( event.x )
-    if not row_id or column not in ( "#3", "#4" ):
+    if not row_id or column != "#3":
       return None
     bbox = self.tblTrackData.bbox( row_id, column )
     if not bbox:
@@ -258,11 +245,11 @@ class Tracks:
     if self.editor is not None:
       self.editor.destroy()
 
-    options = self.person_options if column == "#3" else tuple( role.replace( "_", " " ) for role in roles )
+    options = self.person_options
     self.editor = ttk.Combobox( self.tab, state="readonly", values=options )
     x, y, width, height = bbox
     self.editor.place( x=self.tblTrackData.winfo_x() + x, y=self.tblTrackData.winfo_y() + y, width=width, height=height )
-    current = self.personLabel( track ) if column == "#3" else track.role.replace( "_", " " )
+    current = self.personLabel( track )
     self.editor.set( current if current in options else options[ 0 ] )
 
     def apply_selection( _event=None ) -> None:
@@ -271,32 +258,20 @@ class Tracks:
       selection = self.editor.get()
       self.editor.destroy()
       self.editor = None
-      person_id: int | None
-      role: ParticipationRole = track.role
-      person: TrackPerson | int | None = track.person
-      if column == "#3":
-        participant = self.peopleByLabel.get( selection )
-        if participant is None:
-          person = None
-          person_id = None
-        else:
-          db_person = participant.person_id
-          person = TrackPerson( id=db_person.id, name=f"{db_person.first_name} {db_person.last_name}" )
-          person_id = db_person.id
-          # Use person's role if available, but if it's unknown, use the track role.  This happens after
-          # a quick VLM look and assignment, followed by allocating a person
-          role = participant.role if participant.role != "unknown" else track.role
+      participant = self.peopleByLabel.get( selection )
+      if participant is None:
+        person = None
+        person_id = None
       else:
-        role = next( role for role in roles if role.replace( "_", " " ) == selection )
-        person_id = track.numId()
-
-      if not self.persistAssignment( track.id, person_id, role ):
+        db_person = participant.person_id
+        person = TrackPerson( id=db_person.id, name=f"{db_person.first_name} {db_person.last_name}" )
+        person_id = db_person.id
+      if not self.persistAssignment( track.id, person_id ):
         self.refresh()
         return
-      if column == "#4" and person_id is not None:
-        self.updateUnknownParticipantRole( person_id, role )
       track.person = person
-      track.role = role
+      track.role = participant.role if participant is not None else "unknown"
+
       self.refresh()
       self.tblTrackData.selection_set( str( track.id ) )
       self.renderSelectedCrops( track )
@@ -308,16 +283,11 @@ class Tracks:
     self.editor.focus_set()
     return "break"
 
-  def updateUnknownParticipantRole( self, person_id: int, role: ParticipationRole ) -> None:
-    participant = next(
-        ( item for item in self.peopleByLabel.values() if item.person_id.id == person_id and item.role == "unknown" ),
-        None,
-    )
-    if participant is None:
-      return
+  def updateParticipantRole( self, participant: PersonParticipation, role: ParticipationRole ) -> bool:
+    person_id = participant.person_id.id
     if self.appState.db is None:
       messagebox.showerror( "Track update failed", "The database connection is unavailable.", parent=self.tab )
-      return
+      return False
     try:
       upsertPersonParticipation(
           self.appState.db,
@@ -326,15 +296,17 @@ class Tracks:
               person_id=person_id,
               shirt_number=participant.shirt_number,
               role=role,
+              is_placeholder=participant.is_placeholder,
           ),
       )
     except ( duckdb.Error, RuntimeError, ValueError ) as error:
       messagebox.showerror( "Track update failed", f"Could not update role for person {person_id}: {error}", parent=self.tab )
       logger.error( f"Could not update participation role for person {person_id}: {error}" )
-      return
+      return False
     participant.role = role
+    return True
 
-  def persistAssignment( self, track_id: int, person_id: int | None, role: ParticipationRole ) -> bool:
+  def persistAssignment( self, track_id: int, person_id: int | None ) -> bool:
     if self.appState.db is None or self.appState.curClipID <= 0:
       messagebox.showerror( "Track update failed", "Load a registered clip before assigning its tracks.", parent=self.tab )
       return False
@@ -345,7 +317,6 @@ class Tracks:
               clip_id=self.appState.curClipID,
               track_id=track_id,
               person_id=person_id,
-              role=role,
           ),
       )
     except ( duckdb.Error, RuntimeError, ValueError ) as error:
@@ -607,7 +578,19 @@ class Tracks:
             track = self.appState.tracks.get( message.track_id )
             if track is None:
               continue
-            if self.persistAssignment( track.id, track.numId(), role ):
+            person_id = track.numId()
+            participant = next(
+                ( item for item in self.peopleByLabel.values() if item.person_id.id == person_id ),
+                None,
+            )
+            if participant is None:
+              messagebox.showinfo(
+                  "Participant required",
+                  "Assign a match participant or placeholder before saving a role.",
+                  parent=self.tab,
+              )
+              continue
+            if self.updateParticipantRole( participant, role ):
               track.role = role
               self.refresh()
               if self.tblTrackData.exists( str( track.id ) ):

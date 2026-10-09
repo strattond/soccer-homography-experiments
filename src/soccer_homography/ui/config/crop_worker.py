@@ -16,6 +16,23 @@ CropCache = dict[ int, CropSet ]
 TrackBoxes = tuple[ int, list[ BoundingBox ] ]
 
 
+def deleteTrackCrops( clip_id: int, track_ids: set[ int ] | None = None ) -> int:
+  crop_directory = Path( "crops" ) / str( clip_id )
+  if not crop_directory.is_dir():
+    return 0
+
+  deleted = 0
+  for crop_path in crop_directory.glob( "*.png" ):
+    frame_text, separator, track_text = crop_path.stem.partition( "_" )
+    if not separator or not frame_text.isdecimal() or not track_text.isdecimal():
+      continue
+    if track_ids is not None and int( track_text ) not in track_ids:
+      continue
+    crop_path.unlink()
+    deleted += 1
+  return deleted
+
+
 @dataclass( slots=True )
 class CropJobMessage:
   generation: int

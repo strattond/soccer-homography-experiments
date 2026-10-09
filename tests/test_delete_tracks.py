@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from soccer_homography import App
 from soccer_homography.data import Track
@@ -29,17 +29,35 @@ def make_app() -> App:
   return app
 
 
+def test_role_change_refreshes_participation_roles_before_track_mappings():
+  app = make_app()
+
+  app.onRoleChanged()
+
+  app.tabData.tabTracks.assert_has_calls( [
+      call.refreshPeople(),
+      call.loadClipTrackAssignments(),
+  ] )
+  app.livePreviewController.updateMappings.assert_called_once_with(
+      app.appState.tracks,
+      42,
+  )
+
+
 def test_delete_tracks_requires_confirmation( monkeypatch ):
   app = make_app()
   delete_chunks = Mock()
+  delete_crops = Mock()
   delete_clip_tracks = Mock()
   monkeypatch.setattr( "soccer_homography.messagebox.askyesno", Mock( return_value=False ) )
   monkeypatch.setattr( "soccer_homography.deleteTrackingChunks", delete_chunks )
+  monkeypatch.setattr( "soccer_homography.deleteTrackCrops", delete_crops )
   monkeypatch.setattr( "soccer_homography.deleteClipTracks", delete_clip_tracks )
 
   app.deleteTracksForCurrentClip()
 
   delete_chunks.assert_not_called()
+  delete_crops.assert_not_called()
   delete_clip_tracks.assert_not_called()
   app.tracking_writer.waitForPending.assert_not_called()
   assert app.appState.tracks
@@ -49,16 +67,22 @@ def test_delete_tracks_requires_confirmation( monkeypatch ):
 def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   app = make_app()
   delete_chunks = Mock( return_value=2 )
+  delete_crops = Mock( return_value=3 )
   delete_clip_tracks = Mock()
+  delete_track_segments = Mock()
   monkeypatch.setattr( "soccer_homography.messagebox.askyesno", Mock( return_value=True ) )
   monkeypatch.setattr( "soccer_homography.deleteTrackingChunks", delete_chunks )
+  monkeypatch.setattr( "soccer_homography.deleteTrackCrops", delete_crops )
   monkeypatch.setattr( "soccer_homography.deleteClipTracks", delete_clip_tracks )
+  monkeypatch.setattr( "soccer_homography.deleteTrackSegments", delete_track_segments )
 
   app.deleteTracksForCurrentClip()
 
   app.tracking_writer.waitForPending.assert_called_once_with()
   delete_chunks.assert_called_once_with( 6 )
+  delete_crops.assert_called_once_with( 6 )
   delete_clip_tracks.assert_called_once_with( app.appState.db, 6 )
+  delete_track_segments.assert_called_once_with( app.appState.db, 6 )
   assert app.appState.tracks == {}
   assert app.appState.trackChunk == 0
   assert app.pendingTrackingChunks == set()
@@ -67,6 +91,26 @@ def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   app.livePreviewController.updateMappings.assert_called_once_with( {}, 42 )
   app.minimap.clear.assert_called_once_with( TrackingType.CUR_TRACK )
   app.checkButtonState.assert_called_once_with()
+
+
+def test_delete_track_crops_removes_only_valid_clip_crop_files( tmp_path, monkeypatch ):
+  monkeypatch.chdir( tmp_path )
+  crop_directory = tmp_path / "crops" / "12"
+  crop_directory.mkdir( parents=True )
+  ( crop_directory / "8_4.png" ).write_bytes( b"crop" )
+  ( crop_directory / "9_5.png" ).write_bytes( b"crop" )
+  ( crop_directory / "invalid.png" ).write_bytes( b"crop" )
+  other_clip = tmp_path / "crops" / "13"
+  other_clip.mkdir()
+  ( other_clip / "8_4.png" ).write_bytes( b"crop" )
+
+  from soccer_homography.ui.config.crop_worker import deleteTrackCrops
+
+  assert deleteTrackCrops( 12, { 4 } ) == 1
+  assert not ( crop_directory / "8_4.png" ).exists()
+  assert ( crop_directory / "9_5.png" ).exists()
+  assert ( crop_directory / "invalid.png" ).exists()
+  assert ( other_clip / "8_4.png" ).exists()
 
 
 def test_delete_tracks_is_refused_while_tracking_is_active( monkeypatch ):

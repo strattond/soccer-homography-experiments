@@ -62,7 +62,15 @@ class ClipTrackDB:
   clip_id: int
   track_id: int
   person_id: int | None
-  role: ParticipationRole
+
+
+@dataclass( slots=True )
+class TrackSegmentDB:
+  clip_id: int
+  track_id: int
+  person_id: int
+  frame_start: int
+  frame_end: int
 
 
 @dataclass( slots=True )
@@ -87,6 +95,7 @@ class PersonParticipationDB:
   person_id: int
   shirt_number: int | None
   role: ParticipationRole
+  is_placeholder: bool = False
 
 
 # More business representations
@@ -105,6 +114,7 @@ class PersonParticipation:
   person_id: Person
   shirt_number: int | None
   role: ParticipationRole
+  is_placeholder: bool = False
 
 
 def getConn( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyConnection:
@@ -164,6 +174,7 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
       person_id INTEGER NOT NULL,
       shirt_number INTEGER,
       role VARCHAR NOT NULL CHECK (role IN ('home_player', 'home_goalkeeper', 'away_player', 'away_goalkeeper', 'referee', 'unknown')),
+      is_placeholder BOOLEAN NOT NULL DEFAULT FALSE,
       PRIMARY KEY( match_id, person_id ),
       FOREIGN KEY( match_id ) REFERENCES matches( id ),
       FOREIGN KEY( person_id ) REFERENCES Person( id )
@@ -173,10 +184,21 @@ def initDB( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyCon
       clip_id INTEGER NOT NULL,
       track_id INTEGER NOT NULL,
       person_id INTEGER,
-      role VARCHAR NOT NULL CHECK (role IN ('home_player', 'home_goalkeeper', 'away_player', 'away_goalkeeper', 'referee', 'unknown')),
       PRIMARY KEY (clip_id, track_id),
       FOREIGN KEY (clip_id) REFERENCES clips( id ),
       FOREIGN KEY (person_id) REFERENCES Person( id )
+    );
+
+    CREATE TABLE IF NOT EXISTS TrackSegment (
+      clip_id INTEGER NOT NULL,
+      track_id INTEGER NOT NULL,
+      person_id INTEGER NOT NULL,
+      frame_start INTEGER NOT NULL,
+      frame_end INTEGER NOT NULL,
+      PRIMARY KEY (clip_id, track_id, frame_start),
+      FOREIGN KEY (clip_id) REFERENCES clips( id ),
+      FOREIGN KEY (person_id) REFERENCES Person( id ),
+      CHECK (frame_start <= frame_end)
     );
 
     CREATE TABLE IF NOT EXISTS Homographies (
@@ -367,7 +389,7 @@ def listClipParticipants( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> lis
       SELECT
         m.id, m.date, m.home, m.away, m.division, m.squadi_id,
         p.id, p.first_name, p.last_name,
-        pp.shirt_number, pp.role
+        pp.shirt_number, pp.role, pp.is_placeholder
       FROM clips AS c
       JOIN matches AS m ON m.id = c.match_id
       JOIN PersonParticipation AS pp ON pp.match_id = m.id
@@ -394,13 +416,14 @@ def listClipParticipants( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> lis
           ),
           shirt_number=int( row[ 9 ] ) if row[ 9 ] is not None else None,
           role=cast( ParticipationRole, str( row[ 10 ] ) ),
+          is_placeholder=bool( row[ 11 ] ),
       ) for row in rows
   ]
 
 
 def listClipTracks( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> dict[ int, ClipTrackDB ]:
   rows = conn.execute(
-      "SELECT clip_id, track_id, person_id, role FROM ClipTrack WHERE clip_id = ? ORDER BY track_id",
+      "SELECT clip_id, track_id, person_id FROM ClipTrack WHERE clip_id = ? ORDER BY track_id",
       [ clip_id ],
   ).fetchall()
   return {
@@ -408,7 +431,6 @@ def listClipTracks( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> dict[ int
           clip_id=int( row[ 0 ] ),
           track_id=int( row[ 1 ] ),
           person_id=int( row[ 2 ] ) if row[ 2 ] is not None else None,
-          role=cast( ParticipationRole, str( row[ 3 ] ) ),
       )
       for row in rows
   }
@@ -421,13 +443,13 @@ def deleteClipTracks( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> None:
 def upsertClipTrack( conn: duckdb.DuckDBPyConnection, clip_track: ClipTrackDB ) -> ClipTrackDB:
   row = conn.execute(
       """
-      INSERT INTO ClipTrack(clip_id, track_id, person_id, role)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO ClipTrack(clip_id, track_id, person_id)
+      VALUES (?, ?, ?)
       ON CONFLICT (clip_id, track_id) DO UPDATE
-      SET person_id = excluded.person_id, role = excluded.role
-      RETURNING clip_id, track_id, person_id, role
+      SET person_id = excluded.person_id
+      RETURNING clip_id, track_id, person_id
       """,
-      [ clip_track.clip_id, clip_track.track_id, clip_track.person_id, clip_track.role ],
+      [ clip_track.clip_id, clip_track.track_id, clip_track.person_id ],
   ).fetchone()
   if row is None:
     raise RuntimeError( f"Could not save track {clip_track.track_id} for clip {clip_track.clip_id}." )
@@ -435,8 +457,91 @@ def upsertClipTrack( conn: duckdb.DuckDBPyConnection, clip_track: ClipTrackDB ) 
       clip_id=int( row[ 0 ] ),
       track_id=int( row[ 1 ] ),
       person_id=int( row[ 2 ] ) if row[ 2 ] is not None else None,
-      role=cast( ParticipationRole, str( row[ 3 ] ) ),
   )
+
+
+def listTrackSegments( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> list[ TrackSegmentDB ]:
+  rows = conn.execute(
+      """
+      SELECT clip_id, track_id, person_id, frame_start, frame_end
+      FROM TrackSegment
+      WHERE clip_id = ?
+      ORDER BY frame_start, track_id
+      """,
+      [ clip_id ],
+  ).fetchall()
+  return [
+      TrackSegmentDB(
+          clip_id=int( row[ 0 ] ),
+          track_id=int( row[ 1 ] ),
+          person_id=int( row[ 2 ] ),
+          frame_start=int( row[ 3 ] ),
+          frame_end=int( row[ 4 ] ),
+      )
+      for row in rows
+  ]
+
+
+def upsertTrackSegment( conn: duckdb.DuckDBPyConnection, segment: TrackSegmentDB ) -> TrackSegmentDB:
+  if segment.frame_start < 0 or segment.frame_end < 0:
+    raise ValueError( "Track segment frames must be non-negative." )
+  if segment.frame_start > segment.frame_end:
+    raise ValueError( "Track segment start frame must not exceed its end frame." )
+
+  participant = conn.execute(
+      """
+      SELECT 1
+      FROM clips AS c
+      JOIN PersonParticipation AS pp ON pp.match_id = c.match_id
+      WHERE c.id = ? AND pp.person_id = ?
+      """,
+      [ segment.clip_id, segment.person_id ],
+  ).fetchone()
+  if participant is None:
+    raise ValueError( f"Person {segment.person_id} is not a participant in the match for clip {segment.clip_id}." )
+
+  overlap = conn.execute(
+      """
+      SELECT 1
+      FROM TrackSegment
+      WHERE clip_id = ?
+        AND track_id = ?
+        AND frame_start <> ?
+        AND frame_start <= ?
+        AND frame_end >= ?
+      LIMIT 1
+      """,
+      [ segment.clip_id, segment.track_id, segment.frame_start, segment.frame_end, segment.frame_start ],
+  ).fetchone()
+  if overlap is not None:
+    raise ValueError(
+        f"Track {segment.track_id} already has a segment overlapping frames "
+        f"{segment.frame_start}-{segment.frame_end} in clip {segment.clip_id}."
+    )
+
+  row = conn.execute(
+      """
+      INSERT INTO TrackSegment(clip_id, track_id, person_id, frame_start, frame_end)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (clip_id, track_id, frame_start) DO UPDATE
+      SET person_id = excluded.person_id, frame_end = excluded.frame_end
+      RETURNING clip_id, track_id, person_id, frame_start, frame_end
+      """,
+      [ segment.clip_id, segment.track_id, segment.person_id, segment.frame_start, segment.frame_end ],
+  ).fetchone()
+  if row is None:
+    raise RuntimeError( f"Could not save segment for track {segment.track_id} in clip {segment.clip_id}." )
+  return TrackSegmentDB(
+      clip_id=int( row[ 0 ] ),
+      track_id=int( row[ 1 ] ),
+      person_id=int( row[ 2 ] ),
+      frame_start=int( row[ 3 ] ),
+      frame_end=int( row[ 4 ] ),
+  )
+
+
+def deleteTrackSegments( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> None:
+  conn.execute( "DELETE FROM TrackSegment WHERE clip_id = ?", [ clip_id ] )
 
 
 def getClipHomography( conn: duckdb.DuckDBPyConnection, clip_id: int ) -> ClipHomographyDB | None:
@@ -573,13 +678,13 @@ def upsertPerson( conn: duckdb.DuckDBPyConnection, person: Person ) -> Person:
 def upsertPersonParticipation( conn: duckdb.DuckDBPyConnection, participation: PersonParticipationDB ) -> PersonParticipationDB:
   result = conn.execute(
       """
-      INSERT INTO PersonParticipation(match_id, person_id, shirt_number, role)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO PersonParticipation(match_id, person_id, shirt_number, role, is_placeholder)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (match_id, person_id) DO UPDATE
-      SET shirt_number = excluded.shirt_number, role = excluded.role
-      RETURNING match_id, person_id, shirt_number, role
+      SET shirt_number = excluded.shirt_number, role = excluded.role, is_placeholder = excluded.is_placeholder
+      RETURNING match_id, person_id, shirt_number, role, is_placeholder
       """,
-      [ participation.match_id, participation.person_id, participation.shirt_number, participation.role ],
+      [ participation.match_id, participation.person_id, participation.shirt_number, participation.role, participation.is_placeholder ],
   ).fetchone()
   if result is None:
     raise RuntimeError( f"Could not save participation for match {participation.match_id} and person {participation.person_id}." )
@@ -588,7 +693,36 @@ def upsertPersonParticipation( conn: duckdb.DuckDBPyConnection, participation: P
       person_id=int( result[ 1 ] ),
       shirt_number=int( result[ 2 ] ) if result[ 2 ] is not None else None,
       role=participation.role,
+      is_placeholder=bool( result[ 4 ] ),
   )
+
+
+def createPlaceholderParticipation(
+    conn: duckdb.DuckDBPyConnection,
+    match_id: int,
+    role: ParticipationRole = "unknown",
+) -> PersonParticipationDB:
+  with transaction( conn ):
+    person_row = conn.execute(
+        "INSERT INTO Person(first_name, last_name) VALUES ('Unknown opponent', '') RETURNING id"
+    ).fetchone()
+    if person_row is None:
+      raise RuntimeError( "Could not create placeholder person." )
+    person_id = int( person_row[ 0 ] )
+    conn.execute(
+        "UPDATE Person SET last_name = ? WHERE id = ?",
+        [ f"Player {person_id}", person_id ],
+    )
+    return upsertPersonParticipation(
+        conn,
+        PersonParticipationDB(
+            match_id=match_id,
+            person_id=person_id,
+            shirt_number=None,
+            role=role,
+            is_placeholder=True,
+        ),
+    )
 
 
 def importSquadiDivision(

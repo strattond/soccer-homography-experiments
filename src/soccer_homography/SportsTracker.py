@@ -8,8 +8,9 @@ from typing import Any
 
 import cv2
 import numpy as np
-from boxmot.trackers.bbox import ByteTrack, OccluBoost
-from supervision import tracker
+from boxmot import OccluBoost
+from boxmot.trackers import Tracker, create_tracker
+from boxmot.trackers.specs import TrackerSpec
 from ultralytics import YOLO
 
 from soccer_homography.appState import ModelOptions
@@ -65,7 +66,7 @@ class SportsTracker:
   range:            tuple[int, int]              = field( default_factory=tuple[int, int] )
   index:            int                          = 0
   model:            YOLO | None                  = field( init=False, default=None )
-  tracker:          ByteTrack | OccluBoost | None = field( init=False, default=None )
+  tracker:          Tracker | None                = field( init=False, default=None )
   data:             Homography                   = field( init=False )
   cap:              cv2.VideoCapture             = field( init=False )
 
@@ -140,8 +141,9 @@ class SportsTracker:
             cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
           self.range = ( cmd.start, cmd.end )
           self.index = cmd.start
-          #self.tracker = ByteTrack( frame_rate=int( self.cap.get( cv2.CAP_PROP_FPS ) ) )
-          self.tracker = OccluBoost( frame_rate=int( self.cap.get( cv2.CAP_PROP_FPS ) ) )
+          #self.tracker = create_tracker( "occluboost", reid=None )
+          self.tracker = OccluBoost( use_embeddings=False, reid_model=None )
+          print( vars( self.tracker ) )
           self.curMode = CommandType.RUN_TRACK
           self.setImagePos( cmd.start )
 
@@ -229,18 +231,58 @@ class SportsTracker:
       dets = np.array( [ d.to_boxmot() for d in currDets ] )
     else:
       dets = np.empty( ( 0, 6 ) )
-    tracks = self.tracker.update( dets, img=frame )
+    tracks = self.tracker.update( dets, frame )
     self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
 
     # If we're in the tracks list, then we're active to some degree.  But we could still be predicted.
-    print( self.index )
-    print(type(self.tracker))
-    print(vars(self.tracker).keys())
+    #print( self.index )
+    #print(type(self.tracker))
+    #print(vars(self.tracker).keys())
+    #
+    #if 915 <= self.index <= 965:
+    #  ids = [ 11, 15, 16, 24 ]
+    #  active = []
+    #  atrack = []
+    #  for t in self.tracker.trackers:
+    #    if hasattr( t, "id" ) and t.id in ids:  # t.xywha[ 0 ] < 1920:
+    #      atrack.append( t.id )
+    #
+    #  #print( self.index, ids )
+    #  for t in self.tracker.active_tracks:
+    #    if t.id in ids:
+    #      active.append( t.id )
+    #      #dtls.append( f"id={t.id:3d} streak={t.hit_streak:3d} age={t.age:3d} conf={t.conf:.2f}" )
+    #      #print( f"id={t.id:3d} "
+    #      #       f"tsu={t.time_since_update:2d} "
+    #      #       f"hits={t.hits:3d} "
+    #      #       f"streak={t.hit_streak:3d} "
+    #      #       f"age={t.age:3d} "
+    #      #       f"conf={t.conf:.2f} "
+    #      #       f"active={t.is_activated}" )
+    #
+    #  print( self.index, "Investigating", ids, "All Tracks", atrack, "Active", active )
+    #  if 920 <= self.index <= 930:
+    #    for t in self.tracker.trackers:
+    #      if t.id in ids:
+    #        print( self.index, t.id, t.time_since_update, t.kf.x.flatten()[ :4 ] )
+    #        if self.index == 925:
+    #          print( type( t.emb ) )
+    #          print( t.emb is None )
+    #        if self.index == 927 and t.id == 11:
+    #          #print( self.index, len( t.history_observations ), t.history_observations[ -10: ] )
+    #          print( type( t.history_observations ) )
+    #          print( t.history_observations )
+    #
+    #  #t = self.tracker.active_tracks[0]
+    #  #print(type(t))
+    #  #print(vars(t).keys())
+    #  #print(self.tracker.active_tracks)
+
     for track in tracks:
       x1, y1, x2, y2, track_id, score, cls, _ = track
 
-      if track.id in (4, 6, 40, 51):
-        print( vars( track ) )
+      #if track.id in (4, 6, 40, 51):
+      #  print( vars( track ) )
 
       bbox = BoundingBox( int( x1 ), int( y1 ), int( x2 ), int( y2 ), float( score ), int( cls ), self.index )
       self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( self.curClipID, tid=int( track_id ), data=bbox ) ) )
