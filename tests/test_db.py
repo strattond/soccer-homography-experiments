@@ -271,45 +271,6 @@ class TestClipParticipants:
     assert persist.listClipParticipants( conn, second_clip.id )[ 0 ].person_id.id == other_match_person.id
 
 
-class TestClipTrack:
-
-  @pytest.mark.usefixtures( "clear_test_database" )
-  def test_clip_track_upsert_stores_person_without_a_role( self, conn ):
-    video = persist.upsertVideo( conn, persist.Video( id=0, file="track.mp4" ) )
-    match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
-    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="track-camera" ) )
-    clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
-    person = persist.upsertPerson( conn, persist.Person( id=0, first_name="Sam", last_name="Player" ) )
-
-    unknown = persist.upsertClipTrack( conn, persist.ClipTrackDB( clip.id, 3, None ) )
-    assigned = persist.upsertClipTrack( conn, persist.ClipTrackDB( clip.id, 3, person.id ) )
-    tracks = persist.listClipTracks( conn, clip.id )
-
-    assert unknown.person_id is None
-    assert assigned.person_id == person.id
-    assert tracks[ 3 ] == assigned
-    assert len( tracks ) == 1
-    columns = conn.execute(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = 'ClipTrack'"
-    ).fetchall()
-    assert "role" not in { str( column[ 0 ] ) for column in columns }
-
-  @pytest.mark.usefixtures( "clear_test_database" )
-  def test_delete_clip_tracks_preserves_assignments_for_other_clips( self, conn ):
-    video = persist.upsertVideo( conn, persist.Video( id=0, file="track-delete.mp4" ) )
-    match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
-    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="track-delete-camera" ) )
-    first_clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
-    second_clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=2 ) )
-    persist.upsertClipTrack( conn, persist.ClipTrackDB( first_clip.id, 3, None ) )
-    persist.upsertClipTrack( conn, persist.ClipTrackDB( second_clip.id, 3, None ) )
-
-    persist.deleteClipTracks( conn, first_clip.id )
-
-    assert persist.listClipTracks( conn, first_clip.id ) == {}
-    assert list( persist.listClipTracks( conn, second_clip.id ) ) == [ 3 ]
-
-
 class TestTrackSegment:
 
   @pytest.mark.usefixtures( "clear_test_database" )
@@ -320,17 +281,19 @@ class TestTrackSegment:
     clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
     first = persist.createPlaceholderParticipation( conn, match.id )
     second = persist.createPlaceholderParticipation( conn, match.id )
+    unassigned = persist.TrackSegmentDB( clip.id, 7, None, 0, 9 )
     first_segment = persist.TrackSegmentDB( clip.id, 7, first.person_id, 10, 19 )
     second_segment = persist.TrackSegmentDB( clip.id, 7, second.person_id, 20, 29 )
 
+    assert persist.upsertTrackSegment( conn, unassigned ) == unassigned
     assert persist.upsertTrackSegment( conn, first_segment ) == first_segment
     assert persist.upsertTrackSegment( conn, second_segment ) == second_segment
-    assert persist.listTrackSegments( conn, clip.id ) == [ first_segment, second_segment ]
+    assert persist.listTrackSegments( conn, clip.id ) == [ unassigned, first_segment, second_segment ]
     assert [ participant.is_placeholder for participant in persist.listClipParticipants( conn, clip.id ) ] == [ True, True ]
 
     revised = persist.TrackSegmentDB( clip.id, 7, second.person_id, 10, 18 )
     assert persist.upsertTrackSegment( conn, revised ) == revised
-    assert persist.listTrackSegments( conn, clip.id ) == [ revised, second_segment ]
+    assert persist.listTrackSegments( conn, clip.id ) == [ unassigned, revised, second_segment ]
 
     with pytest.raises( ValueError, match="overlapping" ):
       persist.upsertTrackSegment( conn, persist.TrackSegmentDB( clip.id, 7, first.person_id, 18, 21 ) )
@@ -339,6 +302,28 @@ class TestTrackSegment:
 
     persist.deleteTrackSegments( conn, clip.id )
     assert persist.listTrackSegments( conn, clip.id ) == []
+
+  @pytest.mark.usefixtures( "clear_test_database" )
+  def test_replace_track_segments_is_atomic_and_accepts_unassigned_ranges( self, conn ):
+    video = persist.upsertVideo( conn, persist.Video( id=0, file="replace-segments.mp4" ) )
+    match = persist.upsertMatch( conn, persist.Match( id=0, date=None, home="A", away="B", division="D" ) )
+    camera = persist.upsertCamera( conn, persist.Camera( id=0, name="replace-segments-camera" ) )
+    clip = persist.upsertClip( conn, persist.ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
+    participant = persist.createPlaceholderParticipation( conn, match.id )
+    original = persist.TrackSegmentDB( clip.id, 4, participant.person_id, 0, 9 )
+    persist.upsertTrackSegment( conn, original )
+
+    replacement = [
+        persist.TrackSegmentDB( clip.id, 4, participant.person_id, 0, 4 ),
+        persist.TrackSegmentDB( clip.id, 4, None, 5, 9 ),
+    ]
+    assert persist.replaceTrackSegments( conn, clip.id, 4, replacement ) == replacement
+    assert persist.listTrackSegments( conn, clip.id ) == replacement
+
+    invalid = [ persist.TrackSegmentDB( clip.id, 4, 99999, 0, 9 ) ]
+    with pytest.raises( ValueError, match="not a participant" ):
+      persist.replaceTrackSegments( conn, clip.id, 4, invalid )
+    assert persist.listTrackSegments( conn, clip.id ) == replacement
 
   @pytest.mark.usefixtures( "clear_test_database" )
   def test_track_segment_person_must_participate_in_clips_match( self, conn ):

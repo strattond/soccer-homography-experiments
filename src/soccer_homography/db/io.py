@@ -129,4 +129,5 @@ def readTrackingChunks( clip_id: int ) -> dict[ int, Track ]:
       track.boxes.append( getBoundingBoxFromRow( row ) )
   for track in tracks.values():
     track.boxes.sort( key=lambda box: box.frame )
+    track.refreshSegments()
   return tracks

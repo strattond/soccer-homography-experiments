@@ -6,6 +6,8 @@ from enum import Enum, auto
 
 import numpy as np
 
+from soccer_homography.data import TrackSegment
+
 
 class TrackingType( Enum ):
   PROCESSING = auto()
@@ -116,6 +118,7 @@ class FrameMinimap( tk.Canvas ):
     self.on_frame_select = on_frame_select
 
     self.currentFrame = None
+    self.trackSegments: list[ TrackSegment ] = []
 
     self.bind( "<Configure>", lambda _: self.redraw() )
     self.bind( "<Button-1>", self.onClick )
@@ -146,6 +149,10 @@ class FrameMinimap( tk.Canvas ):
 
   def setCurrentFrame( self, frame_idx: int ):
     self.currentFrame = frame_idx
+    self.redraw()
+
+  def setTrackSegments( self, segments: list[ TrackSegment ] ) -> None:
+    self.trackSegments = segments
     self.redraw()
 
   # ------------------------------------------------------------------
@@ -187,6 +194,18 @@ class FrameMinimap( tk.Canvas ):
 
     for v in self.tracking.values():
       v.redraw()
+
+    for segment in self.trackSegments:
+      start_y = self.getYForFrame( segment.frame_start )
+      end_y = self.getYForFrame( segment.frame_end )
+      self.create_rectangle(
+          0,
+          min( start_y, end_y ),
+          max( 1, self.winfo_width() // 2 ),
+          max( min( start_y, end_y ) + 1, max( start_y, end_y ) ),
+          fill="#0000ff" if segment.person_id is not None else "#ff0000",
+          outline="",
+      )
 
     # Current frame marker
 

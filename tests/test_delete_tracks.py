@@ -18,6 +18,7 @@ def make_app() -> App:
       tracks={ 9: Track( clip=6, id=9, boxes=[] ) },
       trackChunk=3,
   )
+  app.participationRoles = {}
   app.tracking = None
   app.tracking_writer = Mock()
   app.pendingTrackingChunks = { 2 }
@@ -30,18 +31,21 @@ def make_app() -> App:
   return app
 
 
-def test_role_change_refreshes_participation_roles_before_track_mappings():
+def test_role_change_refreshes_participation_roles_before_track_mappings( monkeypatch ):
   app = make_app()
+  participant = SimpleNamespace( person_id=SimpleNamespace( id=17 ), role="referee" )
+  monkeypatch.setattr( "soccer_homography.listClipParticipants", Mock( return_value=[ participant ] ) )
 
   app.onRoleChanged()
 
   app.tabData.tabTracks.assert_has_calls( [
       call.refreshPeople(),
-      call.loadClipTrackAssignments(),
+      call.refresh(),
   ] )
   app.livePreviewController.updateMappings.assert_called_once_with(
       app.appState.tracks,
       42,
+      { 17: "referee" },
   )
 
 
@@ -53,7 +57,6 @@ def test_delete_tracks_requires_confirmation( monkeypatch ):
   monkeypatch.setattr( "soccer_homography.messagebox.askyesno", Mock( return_value=False ) )
   monkeypatch.setattr( "soccer_homography.deleteTrackingChunks", delete_chunks )
   monkeypatch.setattr( "soccer_homography.deleteTrackCrops", delete_crops )
-  monkeypatch.setattr( "soccer_homography.deleteClipTracks", delete_clip_tracks )
 
   app.deleteTracksForCurrentClip()
 
@@ -74,7 +77,6 @@ def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   monkeypatch.setattr( "soccer_homography.messagebox.askyesno", Mock( return_value=True ) )
   monkeypatch.setattr( "soccer_homography.deleteTrackingChunks", delete_chunks )
   monkeypatch.setattr( "soccer_homography.deleteTrackCrops", delete_crops )
-  monkeypatch.setattr( "soccer_homography.deleteClipTracks", delete_clip_tracks )
   monkeypatch.setattr( "soccer_homography.deleteTrackSegments", delete_track_segments )
 
   app.deleteTracksForCurrentClip()
@@ -89,7 +91,7 @@ def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   assert app.pendingTrackingChunks == set()
   app.tabData.tabTracks.refresh.assert_called_once_with()
   app.mainImageController.updateTracks.assert_called_once_with( {}, 42, None )
-  app.livePreviewController.updateMappings.assert_called_once_with( {}, 42 )
+  app.livePreviewController.updateMappings.assert_called_once_with( {}, 42, {} )
   app.minimap.clear.assert_called_once_with( TrackingType.CUR_TRACK )
   app.checkButtonState.assert_called_once_with()
 

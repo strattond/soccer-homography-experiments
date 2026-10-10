@@ -13,14 +13,16 @@ from soccer_homography.data import (
     CHUNK_SIZE,
     BoundingBox,
     Homography,
+    ParticipationRole,
     SelectionPoint,
     Track,
     TrackData,
+    TrackSegment,
     VideoData,
 )
 from soccer_homography.db import (
+    TrackSegmentDB,
     addGenericPeopleToMatch,
-    deleteClipTracks,
     deleteTrackSegments,
     deleteTrackingChunks,
     getCameraByID,
@@ -29,9 +31,12 @@ from soccer_homography.db import (
     getMatchByID,
     getVideoByID,
     initDB,
+    listClipParticipants,
     listClips,
+    listTrackSegments,
     readDetectionChunks,
     readTrackingChunks,
+    replaceTrackSegments,
     saveClipHomography,
     writeBatchDetections,
     writeBatchTracking,
@@ -92,6 +97,7 @@ class App:
     )
     self.pendingDetectionChunks: set[ int ] = set()
     self.pendingTrackingChunks: set[ int ] = set()
+    self.participationRoles: dict[ int, ParticipationRole ] = {}
 
     # Initialize variables
 
@@ -173,6 +179,7 @@ class App:
       return
 
     self.tabData.tabClipParticipants.refresh()
+    self.onRoleChanged()
     messagebox.showinfo(
         "Generic people added",
         f"Assigned {len( participations )} generic people to the current clip.",
@@ -224,7 +231,13 @@ class App:
   def createWidgetsFrameControl( self, left: int, top: int ):
 
     self.minimap = FrameMinimap( master=self.root, totalFrames=0, on_frame_select=self.onFrameSelect )
-    self.minimap.place( x=1390, y=20, width=30, height=720 )
+    self.minimap.place( x=left - 70, y=20, width=30, height=720 )
+    self.btnNextSegment = tk.Button( self.root, text="Next", command=self.nextTrackSegment, state=tk.DISABLED )
+    self.btnNextSegment.place( x=left - 125, y=745, width=90, height=26 )
+    self.btnPreviousSegment = tk.Button( self.root, text="Previous", command=self.previousTrackSegment, state=tk.DISABLED )
+    self.btnPreviousSegment.place( x=left - 125, y=771, width=90, height=26 )
+    self.btnSplitSegment = tk.Button( self.root, text="Split", command=self.splitTrackSegment, state=tk.DISABLED )
+    self.btnSplitSegment.place( x=left - 125, y=797, width=90, height=26 )
     # sliderVideoFrame
     self.sldVideoFrame = Slider( from_=0, to=100, command=self.cmdUpdateVideoFrame, root=self.root, x=left + 110, y=top, width=300, height=24 )
 
@@ -359,12 +372,15 @@ class App:
     self.appState.videoFile = filename
     self.appState.cap = capture
     self.appState.curClipID = clip_id
+    self.curTrackID = None
+    self.minimap.setTrackSegments( [] )
     self.appState.curHomographyID = None
     self.appState.boxes.clear()
     self.appState.tracks.clear()
     self.appState.framesProcessed = 0
     self.appState.detectChunk = 0
     self.appState.trackChunk = 0
+    self.participationRoles = {}
     self.appState.frameRate = int( vidData.fps )
     self.pendingDetectionChunks.clear()
     self.pendingTrackingChunks.clear()
@@ -382,12 +398,26 @@ class App:
     try:
       self.appState.boxes.update( readDetectionChunks( clip_id ) )
       self.appState.tracks.update( readTrackingChunks( clip_id ) )
-    except ( OSError, ValueError, pa.ArrowException ) as error:
+      if self.appState.db is not None:
+        segments_by_track: dict[ int, list[ TrackSegment ] ] = {}
+        for saved in listTrackSegments( self.appState.db, clip_id ):
+          segments_by_track.setdefault( saved.track_id, [] ).append(
+              TrackSegment( saved.frame_start, saved.frame_end, saved.person_id )
+          )
+        for track_id, segments in segments_by_track.items():
+          if track_id in self.appState.tracks:
+            self.appState.tracks[ track_id ].segments = segments
+        self.participationRoles = {
+            participant.person_id.id: participant.role
+            for participant in listClipParticipants( self.appState.db, clip_id )
+        }
+    except ( duckdb.Error, OSError, ValueError, pa.ArrowException ) as error:
       logger.exception( f"Could not load tracking data for clip {clip_id}." )
       messagebox.showerror( "Load tracking data failed", str( error ), parent=self.root )
       self.appState.boxes.clear()
       self.appState.tracks.clear()
     self.tabData.tabTracks.onClipLoaded()
+    self.tabData.tabTracks.updateCurrentFrame( 0 )
     vidData = VideoData( capture )
     self.sldVideoFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.minFrame.setMax( max( 0, vidData.frames - 1 ) )
@@ -404,6 +434,7 @@ class App:
     if self.appState.tracks and self.appState.data.hom4k is not None:
       self.refreshHomographyData( 0 )
     self.tabData.tabClipParticipants.refresh()
+    self.tabData.tabTracks.refresh()
     self.checkButtonState()
     return True
 
@@ -414,28 +445,113 @@ class App:
     frame = int( value )
     self.mainImageController.setFrame( frame, self.curTrackID )
     self.minimap.setCurrentFrame( frame )
-    self.livePreviewController.updateMappings( self.appState.tracks, frame )
+    self.tabData.tabTracks.updateCurrentFrame( frame )
+    self.updateLivePreviewMappings( frame )
 
   def onFrameSelect( self, frame: int ) -> None:
     self.sldVideoFrame.setValue( frame )
 
   def onRoleChanged( self ) -> None:
     self.tabData.tabTracks.refreshPeople()
-    self.tabData.tabTracks.loadClipTrackAssignments()
-    self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
+    if self.appState.db is not None and self.appState.curClipID > 0:
+      self.participationRoles = {
+          participant.person_id.id: participant.role
+          for participant in listClipParticipants( self.appState.db, self.appState.curClipID )
+      }
+    self.tabData.tabTracks.refresh()
+    selected_track = self.appState.tracks.get( self.curTrackID ) if self.curTrackID is not None else None
+    self.minimap.setTrackSegments( selected_track.segments if selected_track is not None else [] )
+    self.updateLivePreviewMappings( self.mainImageController.frame_num )
 
   def onTrackChanged( self, trackID: int | None ) -> None:
-    if trackID is None:
-      self.minimap.clear( TrackingType.CUR_TRACK )
-    else:
-      trackData = self.appState.tracks.get( trackID, None )
-      if trackData is not None:
-        frames = [ box.frame for box in trackData.boxes ]
-        self.minimap.clearFrames( TrackingType.CUR_TRACK )
-        self.minimap.markFramesAsDone( frames, TrackingType.CUR_TRACK )
-    self.minimap.redraw()
     self.curTrackID = trackID
+    track = self.appState.tracks.get( trackID ) if trackID is not None else None
+    self.minimap.clear( TrackingType.CUR_TRACK )
+    self.minimap.setTrackSegments( track.segments if track is not None else [] )
     self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num, self.curTrackID )
+    self.updateSegmentButtonState()
+
+  def updateSegmentButtonState( self ) -> None:
+    state = tk.NORMAL if self.curTrackID in self.appState.tracks else tk.DISABLED
+    for button_name in ( "btnNextSegment", "btnPreviousSegment", "btnSplitSegment" ):
+      button = getattr( self, button_name, None )
+      if button is not None:
+        button.config( state=state )
+
+  def updateLivePreviewMappings( self, frame: int ) -> None:
+    self.livePreviewController.updateMappings( self.appState.tracks, frame, self.participationRoles )
+
+  def navigateTrackSegment( self, direction: int ) -> None:
+    track = self.appState.tracks.get( self.curTrackID ) if self.curTrackID is not None else None
+    if track is None or not track.segments:
+      return
+    frame = self.mainImageController.frame_num
+    current = track.segmentAt( frame )
+    if direction > 0:
+      if current is not None and frame < current.frame_end:
+        target = current.frame_end
+      else:
+        target = next( ( segment.frame_start for segment in track.segments if segment.frame_start > frame ), None )
+    else:
+      if current is not None and frame > current.frame_start:
+        target = current.frame_start
+      else:
+        target = next(
+            ( segment.frame_end for segment in reversed( track.segments ) if segment.frame_end < frame ),
+            None,
+        )
+    if target is not None:
+      self.sldVideoFrame.setValue( target )
+
+  def nextTrackSegment( self ) -> None:
+    self.navigateTrackSegment( 1 )
+
+  def previousTrackSegment( self ) -> None:
+    self.navigateTrackSegment( -1 )
+
+  def splitTrackSegment( self ) -> None:
+    track = self.appState.tracks.get( self.curTrackID ) if self.curTrackID is not None else None
+    if track is None:
+      return
+    frame = self.mainImageController.frame_num
+    segment = track.segmentAt( frame )
+    if segment is None or frame >= segment.frame_end:
+      return
+    revised = []
+    for item in track.segments:
+      if item is segment:
+        revised.append( TrackSegment( item.frame_start, frame, item.person_id ) )
+        revised.append( TrackSegment( frame + 1, item.frame_end, item.person_id ) )
+      else:
+        revised.append( TrackSegment( item.frame_start, item.frame_end, item.person_id ) )
+    if not self.persistTrackSegments( track.id, revised ):
+      return
+    track.segments = revised
+    self.tabData.tabTracks.refresh()
+    self.minimap.setTrackSegments( track.segments )
+    self.updateLivePreviewMappings( frame )
+
+  def persistTrackSegments( self, track_id: int, segments: list[ TrackSegment ] ) -> bool:
+    if self.appState.db is None or self.appState.curClipID <= 0:
+      messagebox.showerror( "Track update failed", "Load a registered clip before updating track segments.", parent=self.root )
+      return False
+    records = [
+        TrackSegmentDB(
+            clip_id=self.appState.curClipID,
+            track_id=track_id,
+            person_id=segment.person_id,
+            frame_start=segment.frame_start,
+            frame_end=segment.frame_end,
+        )
+        for segment in segments
+    ]
+    try:
+      replaceTrackSegments( self.appState.db, self.appState.curClipID, track_id, records )
+    except ( duckdb.Error, RuntimeError, ValueError ) as error:
+      logger.exception( f"Could not save segments for track {track_id}." )
+      messagebox.showerror( "Track update failed", f"Could not save segments for track {track_id}: {error}", parent=self.root )
+      return False
+    return True
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
@@ -448,6 +564,7 @@ class App:
     self.btnCrops.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
     self.btnHeatmap.config( state=tk.NORMAL if self.appState.tracks else tk.DISABLED )
     self.tabData.tabTracks.updateVLMButtonState( bool( self.appState.tracks ) )
+    self.updateSegmentButtonState()
     self.uiHomography.setEnableStatus( self.hasHomography(), homoable, self.appState.curClipID > 0 )
     self.sldVideoFrame.setEnabled( cappable )
 
@@ -567,7 +684,9 @@ class App:
         track = data.data
         if track.tid not in self.appState.tracks:
           self.appState.tracks[ track.tid ] = Track( track.clip, track.tid )
-        self.appState.tracks[ track.tid ].boxes.append( track.data )
+        self.appState.tracks[ track.tid ].addBox( track.data )
+        if track.tid == self.curTrackID:
+          self.minimap.setTrackSegments( self.appState.tracks[ track.tid ].segments )
         self.pendingTrackingChunks.add( track.data.frame // CHUNK_SIZE )
         pollDelay = 0
       elif data.type == OutputType.NEW_FRAME:
@@ -596,7 +715,7 @@ class App:
         self.refreshHomographyData( self.mainImageController.frame_num )
         self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
         self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num, self.curTrackID )
-        self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
+        self.updateLivePreviewMappings( self.mainImageController.frame_num )
         self.checkButtonState()
         self.tabData.tabTracks.refresh()
         self.minimap.redraw()
@@ -626,7 +745,8 @@ class App:
     for track in self.appState.tracks.values():
       for homog, box in zip( track.homog_smooth, track.boxes ):
         if homog is not None:
-          self.appState.heatmaps[ track.role ].accumulate( int( homog.x ), int( homog.y ), frameRate )
+          role = track.roleAt( box.frame, self.participationRoles )
+          self.appState.heatmaps[ role ].accumulate( int( homog.x ), int( homog.y ), frameRate )
       self.prgDetection.tick()
     for r, h in self.appState.heatmaps.items():
       heatmap = h.get_display_image( label=r )
@@ -660,7 +780,6 @@ class App:
       self.tracking_writer.waitForPending()
       deleted_chunks = deleteTrackingChunks( clip_id )
       deleted_crops = deleteTrackCrops( clip_id )
-      deleteClipTracks( self.appState.db, clip_id )
       deleteTrackSegments( self.appState.db, clip_id )
     except ( duckdb.Error, OSError, RuntimeError, ValueError ) as error:
       logger.exception( f"Could not delete tracks for clip {clip_id}." )
@@ -673,7 +792,7 @@ class App:
     self.tabData.tabTracks.refresh()
     frame = self.mainImageController.frame_num
     self.mainImageController.updateTracks( self.appState.tracks, frame, self.curTrackID )
-    self.livePreviewController.updateMappings( self.appState.tracks, frame )
+    self.updateLivePreviewMappings( frame )
     self.minimap.clear( TrackingType.CUR_TRACK )
     self.checkButtonState()
     logger.info(
@@ -787,7 +906,7 @@ class App:
     for value in self.appState.tracks.values():
       value.refreshHomography( self.appState.data )
       self.root.after( 0, self.bumpIt )
-    self.livePreviewController.updateMappings( self.appState.tracks, index )
+    self.updateLivePreviewMappings( index )
 
 
 def main() -> None:

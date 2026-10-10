@@ -7,15 +7,13 @@ import duckdb
 from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
-from soccer_homography.data import ParticipationRole, Track, roles
-from soccer_homography.data import Person as TrackPerson
+from soccer_homography.data import ParticipationRole, Track, TrackSegment, roles
 from soccer_homography.db import (
-  ClipTrackDB,
   PersonParticipation,
   PersonParticipationDB,
+  TrackSegmentDB,
   listClipParticipants,
-  listClipTracks,
-  upsertClipTrack,
+  replaceTrackSegments,
   upsertPersonParticipation,
 )
 from soccer_homography.inference.abstractions import (
@@ -60,6 +58,7 @@ class Tracks:
     self.peopleByLabel: dict[ str, PersonParticipation ] = {}
     self.personLabels: dict[ int, str ] = {}
     self.person_options: tuple[ str, ...] = ( "<Unknown>",)
+    self.current_frame = 0
     self.editor: ttk.Combobox | None = None
     self.cropPreviewImage: ImageTk.PhotoImage | None = None
     self.cropIdentificationResults: dict[ int, dict[ int, IdentificationImageResult ] ] = {}
@@ -150,46 +149,20 @@ class Tracks:
       self.personLabels[ person.id ] = label
     self.person_options = ( "<Unknown>", *self.peopleByLabel.keys() )
 
-  def loadClipTrackAssignments( self ) -> None:
-    if self.appState.db is None or self.appState.curClipID <= 0:
-      return
-    associations = listClipTracks( self.appState.db, self.appState.curClipID )
-    for track_id, track in self.appState.tracks.items():
-      association = associations.get( track_id )
-      if association is None:
-        continue
-      if association.person_id is None:
-        track.person = None
-        track.role = "unknown"
-      else:
-        participant = next(
-            ( item for item in self.peopleByLabel.values() if item.person_id.id == association.person_id ),
-            None,
-        )
-        if participant is None:
-          track.person = association.person_id
-          track.role = "unknown"
-        else:
-          person = participant.person_id
-          track.person = TrackPerson( id=person.id, name=f"{person.first_name} {person.last_name}" )
-          track.role = participant.role
+  def personLabel( self, track: Track, frame: int | None = None ) -> str:
+    segment = track.segmentAt( self.current_frame if frame is None else frame )
+    if segment is None:
+      return "<No segment>"
+    if segment.person_id is None:
+      return "<Unknown>"
+    return self.personLabels.get( segment.person_id, f"Person #{segment.person_id}" )
 
-  def personLabel( self, track: Track ) -> str:
-    person = track.person
-    if isinstance( person, TrackPerson ):
-      return self.personLabels.get( person.id, person.name )
-    if isinstance( person, int ):
-      return self.personLabels.get( person, f"Person #{person}" )
-    return "<Unknown>"
-
-  def hasKnownPerson( self, track: Track ) -> bool:
-    if isinstance( track.person, TrackPerson ):
-      return True
-    return isinstance( track.person, int ) and track.person in self.personLabels
+  def hasKnownPerson( self, track: Track, frame: int | None = None ) -> bool:
+    segment = track.segmentAt( self.current_frame if frame is None else frame )
+    return segment is not None and segment.person_id in self.personLabels
 
   def refresh( self ) -> None:
     self.refreshPeople()
-    self.loadClipTrackAssignments()
     selected = self.tblTrackData.selection()
     selected_id = selected[ 0 ] if selected else None
     self.refreshing = True
@@ -213,6 +186,19 @@ class Tracks:
     self.refreshing = False
     if selected_id is None or not self.tblTrackData.exists( selected_id ):
       self.selectionChanged( None )
+
+  def updateCurrentFrame( self, frame: int ) -> None:
+    self.current_frame = frame
+    if not hasattr( self, "tblTrackData" ):
+      return
+    for item_id in self.tblTrackData.get_children():
+      track = self.appState.tracks.get( int( item_id ) )
+      if track is None:
+        continue
+      values = list( self.tblTrackData.item( item_id, "values" ) )
+      if len( values ) == 3:
+        values[ 2 ] = self.personLabel( track )
+        self.tblTrackData.item( item_id, values=values )
 
   def selectTrack( self, track_id: int ) -> None:
     track = self.appState.tracks.get( track_id )
@@ -239,6 +225,9 @@ class Tracks:
     track = self.appState.tracks.get( int( row_id ) )
     if track is None:
       return "break"
+    segment = track.segmentAt( self.current_frame )
+    if segment is None:
+      return "break"
 
     self.tblTrackData.selection_set( row_id )
     self.tblTrackData.focus( row_id )
@@ -246,7 +235,7 @@ class Tracks:
       self.editor.destroy()
 
     options = self.person_options
-    self.editor = ttk.Combobox( self.tab, state="readonly", values=options )
+    self.editor = ttk.Combobox( self.tab, state="normal", values=options )
     x, y, width, height = bbox
     self.editor.place( x=self.tblTrackData.winfo_x() + x, y=self.tblTrackData.winfo_y() + y, width=width, height=height )
     current = self.personLabel( track )
@@ -256,21 +245,31 @@ class Tracks:
       if self.editor is None:
         return
       selection = self.editor.get()
-      self.editor.destroy()
-      self.editor = None
       participant = self.peopleByLabel.get( selection )
       if participant is None:
-        person = None
+        matches = [
+            label for label in self.peopleByLabel
+            if selection.casefold() in label.casefold()
+        ]
+        if len( matches ) == 1:
+          selection = matches[ 0 ]
+          participant = self.peopleByLabel[ selection ]
+      if participant is None and selection != "<Unknown>":
+        return
+      self.editor.destroy()
+      self.editor = None
+      if participant is None:
         person_id = None
       else:
-        db_person = participant.person_id
-        person = TrackPerson( id=db_person.id, name=f"{db_person.first_name} {db_person.last_name}" )
-        person_id = db_person.id
-      if not self.persistAssignment( track.id, person_id ):
+        person_id = participant.person_id.id
+      revised_segments = [
+          TrackSegment( item.frame_start, item.frame_end, person_id if item is segment else item.person_id )
+          for item in track.segments
+      ]
+      if not self.persistSegments( track.id, revised_segments ):
         self.refresh()
         return
-      track.person = person
-      track.role = participant.role if participant is not None else "unknown"
+      track.segments = revised_segments
 
       self.refresh()
       self.tblTrackData.selection_set( str( track.id ) )
@@ -279,9 +278,21 @@ class Tracks:
         self.on_role_change()
 
     self.editor.bind( "<<ComboboxSelected>>", apply_selection )
+    self.editor.bind( "<Return>", apply_selection )
+    self.editor.bind( "<KeyRelease>", self.filterPersonOptions )
     self.editor.bind( "<FocusOut>", lambda _event: self.closeEditor() )
     self.editor.focus_set()
     return "break"
+
+  def filterPersonOptions( self, event ) -> None:
+    if self.editor is None or event.keysym in ( "Up", "Down", "Left", "Right", "Return", "Escape" ):
+      return
+    text = self.editor.get()
+    matches = tuple(
+        label for label in self.person_options
+        if text.casefold() in label.casefold()
+    )
+    self.editor.configure( values=matches or self.person_options )
 
   def updateParticipantRole( self, participant: PersonParticipation, role: ParticipationRole ) -> bool:
     person_id = participant.person_id.id
@@ -306,22 +317,29 @@ class Tracks:
     participant.role = role
     return True
 
-  def persistAssignment( self, track_id: int, person_id: int | None ) -> bool:
+  def persistSegments( self, track_id: int, segments: list[ TrackSegment ] ) -> bool:
     if self.appState.db is None or self.appState.curClipID <= 0:
-      messagebox.showerror( "Track update failed", "Load a registered clip before assigning its tracks.", parent=self.tab )
+      messagebox.showerror( "Track update failed", "Load a registered clip before updating track segments.", parent=self.tab )
       return False
     try:
-      upsertClipTrack(
+      replaceTrackSegments(
           self.appState.db,
-          ClipTrackDB(
-              clip_id=self.appState.curClipID,
-              track_id=track_id,
-              person_id=person_id,
-          ),
+          self.appState.curClipID,
+          track_id,
+          [
+              TrackSegmentDB(
+                  clip_id=self.appState.curClipID,
+                  track_id=track_id,
+                  person_id=segment.person_id,
+                  frame_start=segment.frame_start,
+                  frame_end=segment.frame_end,
+              )
+              for segment in segments
+          ],
       )
     except ( duckdb.Error, RuntimeError, ValueError ) as error:
-      messagebox.showerror( "Track update failed", f"Could not save track {track_id}: {error}", parent=self.tab )
-      logger.error( f"Could not save track {track_id} association: {error}" )
+      messagebox.showerror( "Track update failed", f"Could not save segments for track {track_id}: {error}", parent=self.tab )
+      logger.error( f"Could not save segments for track {track_id}: {error}" )
       return False
     return True
 
@@ -374,7 +392,6 @@ class Tracks:
       messagebox.showerror( "Crops unavailable", "Load a clip before collecting crops.", parent=self.tab )
       return
     self.refreshPeople()
-    self.loadClipTrackAssignments()
     self.cancelCropJob()
     self.cancelVLMJob()
     self.cropCache.clear()
@@ -578,7 +595,8 @@ class Tracks:
             track = self.appState.tracks.get( message.track_id )
             if track is None:
               continue
-            person_id = track.numId()
+            segment = track.segmentAt( self.current_frame )
+            person_id = segment.person_id if segment is not None else None
             participant = next(
                 ( item for item in self.peopleByLabel.values() if item.person_id.id == person_id ),
                 None,
@@ -591,10 +609,11 @@ class Tracks:
               )
               continue
             if self.updateParticipantRole( participant, role ):
-              track.role = role
               self.refresh()
               if self.tblTrackData.exists( str( track.id ) ):
                 self.tblTrackData.selection_set( str( track.id ) )
+              if self.on_role_change is not None:
+                self.on_role_change()
               self.cropStatus.config( text=f"Saved {self.activeIdentifier} role {role.replace( '_', ' ' )} for Track {track.id}." )
           else:
             self.cropStatus.config( text=f"{self.activeIdentifier} most likely role: {role.replace( '_', ' ' )} "

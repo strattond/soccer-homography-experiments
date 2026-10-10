@@ -220,6 +220,13 @@ class TrackData:
 
 
 @dataclass( slots=True )
+class TrackSegment:
+  frame_start: int
+  frame_end: int
+  person_id: int | None = None
+
+
+@dataclass( slots=True )
 class Track:
   # yapf: disable
   clip:          int
@@ -230,12 +237,76 @@ class Track:
   homog:         list[Point2D]       = field( default_factory=list )
   homog_smooth:  list[Point2D]       = field( default_factory=list )
   smooth_pos:    np.ndarray | None   = None
+  segments:      list[TrackSegment]  = field( default_factory=list )
   # yapf: enable
+
+  def __post_init__( self ) -> None:
+    if not self.segments:
+      self.refreshSegments()
+
+  def refreshSegments( self ) -> None:
+    if not self.boxes:
+      self.segments = []
+      return
+
+    frames = sorted( { box.frame for box in self.boxes } )
+    segments: list[ TrackSegment ] = []
+    start = end = frames[ 0 ]
+    for frame in frames[ 1: ]:
+      if frame != end + 1:
+        segments.append( TrackSegment( start, end ) )
+        start = frame
+      end = frame
+    segments.append( TrackSegment( start, end ) )
+    self.segments = segments
+
+  def addBox( self, box: BoundingBox ) -> None:
+    self.boxes.append( box )
+    if any( segment.frame_start <= box.frame <= segment.frame_end for segment in self.segments ):
+      return
+
+    previous = next(
+        ( segment for segment in reversed( self.segments ) if segment.frame_end < box.frame ),
+        None,
+    )
+    following = next(
+        ( segment for segment in self.segments if segment.frame_start > box.frame ),
+        None,
+    )
+    if previous is not None and previous.frame_end + 1 == box.frame:
+      previous.frame_end = box.frame
+    elif following is not None and box.frame + 1 == following.frame_start:
+      following.frame_start = box.frame
+    else:
+      self.segments.append( TrackSegment( box.frame, box.frame ) )
+      self.segments.sort( key=lambda segment: segment.frame_start )
+
+  def segmentAt( self, frame: int ) -> TrackSegment | None:
+    return next(
+        ( segment for segment in self.segments if segment.frame_start <= frame <= segment.frame_end ),
+        None,
+    )
+
+  def roleAt( self, frame: int, roles_by_person: dict[ int, ParticipationRole ] ) -> ParticipationRole:
+    segment = self.segmentAt( frame )
+    if segment is None or segment.person_id is None:
+      return "unknown"
+    return roles_by_person.get( segment.person_id, "unknown" )
 
   def forExport( self, lo: int, hi: int ):
     nBoxes = [ box for box in self.boxes if box.frame >= lo and box.frame < hi ]
 
-    return Track( self.clip, self.id, self.person, nBoxes, self.role )
+    exported = Track( self.clip, self.id, self.person, nBoxes, self.role )
+    exported.segments = [
+        TrackSegment(
+            max( segment.frame_start, lo ),
+            min( segment.frame_end, hi - 1 ),
+            segment.person_id,
+        )
+        for segment in self.segments
+        if segment.frame_start < hi and segment.frame_end >= lo
+    ]
+    return exported
 
   def numId( self ) -> int | None:
     if isinstance( self.person, Person ):

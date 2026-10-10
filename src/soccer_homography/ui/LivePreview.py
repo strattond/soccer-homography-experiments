@@ -68,6 +68,7 @@ class LivePreview:
     self.on_track_select: Callable[ [ int ], None ] | None = None
     self.hoveredTrackID: int | None = None
     self.pointerPosition: tuple[ int, int ] | None = None
+    self.roles_by_person: dict[ int, ParticipationRole ] = {}
 
     # Build layers
     self.createLayers()
@@ -104,14 +105,21 @@ class LivePreview:
     self.canvas.addtag_withtag( "mapping", "mapping" )
     self.canvas.addtag_withtag( "heatmap", "heatmap" )
 
-  def updateMappings( self, tracks: dict[ int, Track ], frame_index: int ):
+  def updateMappings(
+      self,
+      tracks: dict[ int, Track ],
+      frame_index: int,
+      roles_by_person: dict[ int, ParticipationRole ] | None = None,
+  ):
+    if roles_by_person is not None:
+      self.roles_by_person = roles_by_person
     self.canvas.delete( "mapping" )
     self.hoveredTrackID = None
     scaleW, scaleL = self.pitch.get_pitch_scale
     for track in tracks.values():
       lkpIndex = track.getListIndex( frame_index )
       if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_smooth ):
-        color = self.role_color( track.role )
+        color = self.role_color( track.roleAt( frame_index, self.roles_by_person ) )
         self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL, track.id )
         self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL, track.id )
     if self.pointerPosition is not None:

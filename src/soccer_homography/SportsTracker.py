@@ -9,8 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 from boxmot import OccluBoost
-from boxmot.trackers import Tracker, create_tracker
-from boxmot.trackers.specs import TrackerSpec
+from boxmot.trackers import Tracker
 from ultralytics import YOLO
 
 from soccer_homography.appState import ModelOptions

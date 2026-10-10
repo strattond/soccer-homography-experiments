@@ -24,8 +24,14 @@ def test_add_generic_people_to_current_clip_assigns_them_to_clip_match( conn, mo
   clip = upsertClip( conn, ClipDB( id=0, video_id=video.id, match_id=match.id, camera_id=camera.id, sequence=1 ) )
   app = cast( Any, App.__new__( App ) )
   app.root = Mock()
-  app.appState = SimpleNamespace( db=conn, curClipID=clip.id )
-  app.tabData = SimpleNamespace( tabClipParticipants=Mock() )
+  app.appState = SimpleNamespace( db=conn, curClipID=clip.id, tracks={} )
+  app.curTrackID = None
+  app.participationRoles = {}
+  app.minimap = Mock()
+  app.mainImageController = Mock()
+  app.mainImageController.frame_num = 0
+  app.livePreviewController = Mock()
+  app.tabData = SimpleNamespace( tabClipParticipants=Mock(), tabTracks=Mock() )
   showinfo = Mock()
   monkeypatch.setattr( "soccer_homography.messagebox.showinfo", showinfo )
 
@@ -40,4 +46,6 @@ def test_add_generic_people_to_current_clip_assigns_them_to_clip_match( conn, mo
   }
   assert all( participant.is_placeholder for participant in participants )
   app.tabData.tabClipParticipants.refresh.assert_called_once_with()
+  app.tabData.tabTracks.refreshPeople.assert_called_once_with()
+  app.tabData.tabTracks.refresh.assert_called_once_with()
   showinfo.assert_called_once()

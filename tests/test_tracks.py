@@ -9,7 +9,10 @@ import cv2
 import numpy as np
 
 from soccer_homography import App
-from soccer_homography.data import BoundingBox, Homography, Person, Track
+from soccer_homography.data import BoundingBox, Homography, Person, Point2D, Track, TrackSegment
+from soccer_homography.db.persist import Match as DBMatch
+from soccer_homography.db.persist import Person as DBPerson
+from soccer_homography.db.persist import PersonParticipation
 from soccer_homography.inference.abstractions import IdentificationImageResult, selectModelDevice
 from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ClipImageResult, ClipResponse, ClipRoleClassifier
 from soccer_homography.inference.crop_inference import (
@@ -23,17 +26,15 @@ from soccer_homography.inference.crop_inference import (
 from soccer_homography.inference.vlm_model import MIN_VLM_GPU_MEMORY_BYTES, MoondreamVLM, VLMImageResult, VLMResponse, guessRole
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.SportsTracker import SportsTracker
-from soccer_homography.db.persist import Match as DBMatch
-from soccer_homography.db.persist import Person as DBPerson
-from soccer_homography.db.persist import PersonParticipation
 from soccer_homography.ui.components import Slider
-from soccer_homography.ui.Configuration import ClipParticipants
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
+from soccer_homography.ui.Configuration import ClipParticipants
 from soccer_homography.ui.frameminimap import FrameMinimap
 from soccer_homography.ui.LivePreview import LivePreview
 
 configuration_module = importlib.import_module( "soccer_homography.ui.Configuration" )
+tracks_module = importlib.import_module( "soccer_homography.ui.config.tracks" )
 
 
 def test_track_export_preserves_person_and_participation_role():
@@ -72,6 +73,43 @@ def test_track_without_homography_does_not_create_partial_mappings():
   assert track.homog_smooth == []
 
 
+def test_track_initial_segments_follow_consecutive_frame_runs_and_extend_live():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( 1, 2, 3, 4, 0.9, 0, frame )
+          for frame in ( 0, 1, 2, 5, 6 )
+      ],
+  )
+
+  assert [ ( segment.frame_start, segment.frame_end ) for segment in track.segments ] == [ ( 0, 2 ), ( 5, 6 ) ]
+
+  track.addBox( BoundingBox( 1, 2, 3, 4, 0.9, 0, 7 ) )
+  track.addBox( BoundingBox( 1, 2, 3, 4, 0.9, 0, 10 ) )
+
+  assert [ ( segment.frame_start, segment.frame_end ) for segment in track.segments ] == [ ( 0, 2 ), ( 5, 7 ), ( 10, 10 ) ]
+
+
+def test_track_segment_role_is_resolved_for_the_requested_frame():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( 1, 2, 3, 4, 0.9, 0, frame )
+          for frame in ( 0, 1, 4, 5 )
+      ],
+      segments=[
+          TrackSegment( 0, 1, 17 ),
+          TrackSegment( 4, 5, None ),
+      ],
+  )
+
+  assert track.roleAt( 0, { 17: "referee" } ) == "referee"
+  assert track.roleAt( 4, { 17: "referee" } ) == "unknown"
+  assert track.roleAt( 2, { 17: "referee" } ) == "unknown"
+
+
 def test_live_preview_skips_tracks_without_mapped_points():
   preview = LivePreview.__new__( LivePreview )
   preview.canvas = Mock()
@@ -87,6 +125,29 @@ def test_live_preview_skips_tracks_without_mapped_points():
   preview.updateMappings( { track.id: track }, 0 )
 
   preview.canvas.delete.assert_called_once_with( "mapping" )
+
+
+def test_live_preview_colors_marker_from_segment_participant_role():
+  preview = LivePreview.__new__( LivePreview )
+  preview.canvas = Mock()
+  preview.pitch = Mock( spec=SoccerPitchImage )
+  preview.pitch.get_pitch_scale = ( 1.0, 1.0 )
+  preview.pointerPosition = None
+  preview.hoveredTrackID = None
+  preview.draw = Mock()
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
+      segments=[ TrackSegment( 0, 0, 17 ) ],
+      homog=[ Point2D( 1, 2 ) ],
+      homog_smooth=[ Point2D( 1, 2 ) ],
+  )
+
+  preview.updateMappings( { track.id: track }, 0, { 17: "referee" } )
+
+  assert preview.draw.call_args_list[ 0 ].args[ 1 ] == "#ffffff"
+  assert preview.draw.call_args_list[ 1 ].args[ 1 ] == "#ffffff"
 
 
 def test_live_preview_hit_test_returns_nearest_marker_and_ignores_distant_markers():
@@ -163,6 +224,28 @@ def test_minimap_click_maps_vertical_position_to_nearest_frame():
   minimap.on_frame_select.assert_called_once_with( 50 )
 
 
+def test_minimap_draws_unassigned_and_assigned_track_segments_in_red_and_blue():
+  minimap = FrameMinimap.__new__( FrameMinimap )
+  minimap.trackSegments = [ TrackSegment( 0, 2 ), TrackSegment( 5, 8, 17 ) ]
+  minimap.tracking = {}
+  minimap.currentFrame = None
+  minimap.colorTrack = "#404040"
+  minimap.winfo_width = Mock( return_value=30 )
+  minimap.winfo_height = Mock( return_value=101 )
+  minimap.getYForFrame = lambda frame: 100 - frame * 10
+  minimap.delete = Mock()
+  minimap.create_rectangle = Mock()
+  minimap.create_line = Mock()
+
+  minimap.redraw()
+
+  assert [ call.kwargs[ "fill" ] for call in minimap.create_rectangle.call_args_list ] == [
+      "#404040",
+      "#ff0000",
+      "#0000ff",
+  ]
+
+
 def test_tracks_table_shows_all_tracks_without_a_role_column():
   tracks = Tracks.__new__( Tracks )
   tracks.appState = cast( Any, SimpleNamespace(
@@ -172,12 +255,12 @@ def test_tracks_table_shows_all_tracks_without_a_role_column():
       }
   ) )
   tracks.refreshPeople = Mock()
-  tracks.loadClipTrackAssignments = Mock()
   tracks.tblTrackData = Mock()
   tracks.tblTrackData.get_children.return_value = ()
   tracks.tblTrackData.selection.return_value = ()
   tracks.peopleByLabel = {}
   tracks.personLabels = {}
+  tracks.current_frame = 0
   tracks.refreshing = False
   tracks.selectionChanged = Mock()
 
@@ -185,6 +268,107 @@ def test_tracks_table_shows_all_tracks_without_a_role_column():
 
   assert [ call.kwargs[ "iid" ] for call in tracks.tblTrackData.insert.call_args_list ] == [ "1", "2" ]
   assert all( len( call.kwargs[ "values" ] ) == 3 for call in tracks.tblTrackData.insert.call_args_list )
+
+
+def test_tracks_table_shows_person_for_segment_at_current_frame():
+  track = Track(
+      clip=1,
+      id=1,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, frame ) for frame in ( 0, 1, 5, 6 ) ],
+      segments=[ TrackSegment( 0, 1, 17 ), TrackSegment( 5, 6, None ) ],
+  )
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = cast( Any, SimpleNamespace( tracks={ 1: track } ) )
+  tracks.refreshPeople = Mock()
+  tracks.tblTrackData = Mock()
+  tracks.tblTrackData.selection.return_value = ()
+  tracks.tblTrackData.get_children.return_value = ()
+  tracks.peopleByLabel = {}
+  tracks.personLabels = { 17: "Jordan Example" }
+  tracks.current_frame = 0
+  tracks.refreshing = False
+  tracks.selectionChanged = Mock()
+
+  tracks.refresh()
+  tracks.current_frame = 5
+  tracks.refresh()
+
+  assert tracks.tblTrackData.insert.call_args.kwargs[ "values" ][ 2 ] == "<Unknown>"
+
+
+def test_person_assignment_updates_only_the_current_track_segment( monkeypatch ):
+  participant = PersonParticipation(
+      person_id=DBPerson( id=17, first_name="Sam", last_name="Player" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
+      shirt_number=None,
+      role="away_player",
+  )
+  track = Track(
+      clip=1,
+      id=8,
+      segments=[ TrackSegment( 0, 3 ), TrackSegment( 5, 8 ) ],
+  )
+
+  class FakeCombobox:
+    def __init__( self, *_args, **_kwargs ):
+      self.bindings = {}
+      self.selected = ""
+
+    def place( self, **_kwargs ):
+      pass
+
+    def set( self, value ):
+      self.selected = value
+
+    def get( self ):
+      return self.selected
+
+    def bind( self, event, callback ):
+      self.bindings[ event ] = callback
+
+    def focus_set( self ):
+      pass
+
+    def destroy( self ):
+      pass
+
+  monkeypatch.setattr( tracks_module.ttk, "Combobox", FakeCombobox )
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = cast( Any, SimpleNamespace( tracks={ 8: track }, db=Mock(), curClipID=1 ) )
+  tracks.tab = Mock()
+  tracks.tblTrackData = Mock()
+  tracks.tblTrackData.identify_row.return_value = "8"
+  tracks.tblTrackData.identify_column.return_value = "#3"
+  tracks.tblTrackData.bbox.return_value = ( 0, 0, 100, 20 )
+  tracks.tblTrackData.winfo_x.return_value = 0
+  tracks.tblTrackData.winfo_y.return_value = 0
+  tracks.peopleByLabel = { "Sam Player": participant }
+  tracks.personLabels = { 17: "Sam Player" }
+  tracks.person_options = ( "<Unknown>", "Sam Player" )
+  tracks.current_frame = 6
+  tracks.editor = None
+  tracks.persistSegments = Mock( return_value=True )
+  tracks.refresh = Mock()
+  tracks.renderSelectedCrops = Mock()
+  tracks.on_role_change = None
+
+  tracks.editCell( SimpleNamespace( x=10, y=10 ) )
+  tracks.editor.set( "Sam Player" )
+  tracks.editor.bindings[ "<<ComboboxSelected>>" ]()
+
+  assert [ segment.person_id for segment in track.segments ] == [ None, 17 ]
+  tracks.persistSegments.assert_called_once_with( 8, track.segments )
+
+
+def test_tracks_person_picker_filters_options_by_typed_text():
+  tracks = Tracks.__new__( Tracks )
+  tracks.editor = Mock()
+  tracks.editor.get.return_value = "keeper"
+  tracks.person_options = ( "<Unknown>", "Main Referee", "Opposition Keeper 1", "Player 1" )
+
+  tracks.filterPersonOptions( SimpleNamespace( keysym="r" ) )
+
+  tracks.editor.configure.assert_called_once_with( values=( "Opposition Keeper 1", ) )
 
 
 def test_selecting_preview_track_refreshes_if_track_is_not_in_table():
@@ -353,12 +537,13 @@ def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
   monkeypatch.setattr( "soccer_homography.readTrackingChunks", lambda clip_id: restored_tracks if clip_id == 1 else {} )
   app = cast( Any, App.__new__( App ) )
   app.curTrackID = None
+  app.participationRoles = {}
   app.appState = state
   app.pendingDetectionChunks = set()
   app.pendingTrackingChunks = set()
   app.root = Mock()
   app.tabData = SimpleNamespace(
-      tabTracks=SimpleNamespace( onClipLoaded=Mock() ),
+      tabTracks=SimpleNamespace( onClipLoaded=Mock(), updateCurrentFrame=Mock(), refresh=Mock() ),
       tabClipParticipants=SimpleNamespace( refresh=Mock() ),
   )
   app.sldVideoFrame = Mock()
@@ -382,6 +567,63 @@ def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
   assert app.loadSourceVideo( "next.mp4", 2 )
   assert state.data is not loaded_homography
   assert state.data.hom4k is None
+
+
+def test_track_segment_navigation_moves_to_current_boundary_then_adjacent_segment():
+  track = Track(
+      clip=1,
+      id=8,
+      segments=[ TrackSegment( 0, 10 ), TrackSegment( 20, 30 ), TrackSegment( 40, 45 ) ],
+  )
+  app = cast( Any, App.__new__( App ) )
+  app.curTrackID = 8
+  app.appState = SimpleNamespace( tracks={ 8: track } )
+  app.mainImageController = SimpleNamespace( frame_num=4 )
+  app.sldVideoFrame = Mock()
+
+  app.navigateTrackSegment( 1 )
+  app.sldVideoFrame.setValue.assert_called_once_with( 10 )
+
+  app.sldVideoFrame.reset_mock()
+  app.mainImageController.frame_num = 10
+  app.navigateTrackSegment( 1 )
+  app.sldVideoFrame.setValue.assert_called_once_with( 20 )
+
+  app.sldVideoFrame.reset_mock()
+  app.mainImageController.frame_num = 15
+  app.navigateTrackSegment( -1 )
+  app.sldVideoFrame.setValue.assert_called_once_with( 10 )
+
+  app.sldVideoFrame.reset_mock()
+  app.mainImageController.frame_num = 20
+  app.navigateTrackSegment( -1 )
+  app.sldVideoFrame.setValue.assert_called_once_with( 10 )
+
+
+def test_splitting_track_segment_includes_current_frame_in_left_half():
+  track = Track(
+      clip=1,
+      id=8,
+      segments=[ TrackSegment( 0, 10, 17 ) ],
+  )
+  app = cast( Any, App.__new__( App ) )
+  app.curTrackID = 8
+  app.appState = SimpleNamespace( tracks={ 8: track } )
+  app.mainImageController = SimpleNamespace( frame_num=5 )
+  app.persistTrackSegments = Mock( return_value=True )
+  app.tabData = SimpleNamespace( tabTracks=Mock() )
+  app.minimap = Mock()
+  app.updateLivePreviewMappings = Mock()
+
+  app.splitTrackSegment()
+
+  assert [ ( item.frame_start, item.frame_end, item.person_id ) for item in track.segments ] == [
+      ( 0, 5, 17 ),
+      ( 6, 10, 17 ),
+  ]
+  app.persistTrackSegments.assert_called_once_with( 8, track.segments )
+  app.minimap.setTrackSegments.assert_called_once_with( track.segments )
+  app.updateLivePreviewMappings.assert_called_once_with( 5 )
 
 
 def test_crop_coordinates_scale_to_source_frame_dimensions():
