@@ -64,6 +64,7 @@ class App:
 
   def __init__( self, root: tk.Tk, appState: AppState ):
     self.root = root
+    self.curTrackID: int | None = None
     self.root.title( "Homography Mapper" )
     self.root.geometry( "1920x1080" )
     self.root.resizable( True, True )
@@ -364,7 +365,7 @@ class App:
     self.minFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.maxFrame.setMax( max( 0, vidData.frames - 1 ) )
     self.mainImageController.load( capture, vidData )
-    self.mainImageController.setFrame( 0 )
+    self.mainImageController.setFrame( 0, self.curTrackID )
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
     self.minimap.updateTotalFrames( vidData.frames )
@@ -383,7 +384,7 @@ class App:
 
   def cmdUpdateVideoFrame( self, value ):
     frame = int( value )
-    self.mainImageController.setFrame( frame )
+    self.mainImageController.setFrame( frame, self.curTrackID )
     self.minimap.setCurrentFrame( frame )
     self.livePreviewController.updateMappings( self.appState.tracks, frame )
 
@@ -405,6 +406,8 @@ class App:
         self.minimap.clearFrames( TrackingType.CUR_TRACK )
         self.minimap.markFramesAsDone( frames, TrackingType.CUR_TRACK )
     self.minimap.redraw()
+    self.curTrackID = trackID
+    self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num, self.curTrackID )
 
   def checkButtonState( self ):
     cappable = self.appState.cap is not None and self.appState.cap.isOpened()
@@ -564,7 +567,7 @@ class App:
         self.chunkTracking()
         self.refreshHomographyData( self.mainImageController.frame_num )
         self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
-        self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num )
+        self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num, self.curTrackID )
         self.livePreviewController.updateMappings( self.appState.tracks, self.mainImageController.frame_num )
         self.checkButtonState()
         self.tabData.tabTracks.refresh()
@@ -641,7 +644,7 @@ class App:
     self.appState.trackChunk = 0
     self.tabData.tabTracks.refresh()
     frame = self.mainImageController.frame_num
-    self.mainImageController.updateTracks( self.appState.tracks, frame )
+    self.mainImageController.updateTracks( self.appState.tracks, frame, self.curTrackID )
     self.livePreviewController.updateMappings( self.appState.tracks, frame )
     self.minimap.clear( TrackingType.CUR_TRACK )
     self.checkButtonState()
@@ -714,7 +717,7 @@ class App:
     self.tabData.tabImagePreview.refresh( xf )
 
     self.mainImageController.updateBoundingBoxes( self.appState.boxes, self.mainImageController.frame_num )
-    self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num )
+    self.mainImageController.updateTracks( self.appState.tracks, self.mainImageController.frame_num, self.curTrackID )
     self.radarMapController.updateSelectionMarkers( self.appState.data.world_pts )
     self.mainImageController.updateSelectionMarkers( self.appState.data.img_pts_4k )
 

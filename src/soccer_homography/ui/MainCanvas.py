@@ -7,12 +7,12 @@ from supervision import Color
 
 from soccer_homography.appState import AppState
 from soccer_homography.data import (
-  BoundingBox,
-  Point2D,
-  SelectionPoint,
-  Track,
-  VideoData,
-  ViewTransform,
+    BoundingBox,
+    Point2D,
+    SelectionPoint,
+    Track,
+    VideoData,
+    ViewTransform,
 )
 from soccer_homography.LineDetector import LineDetector
 from soccer_homography.log import logger
@@ -97,7 +97,7 @@ class MainCanvasController:
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
   # -------------------------------------------------------------
-  def setFrame( self, frame_index: int ):
+  def setFrame( self, frame_index: int, trackID: int | None = None ):
     self.frame_num = frame_index
     if not self.cap:
       return
@@ -115,7 +115,7 @@ class MainCanvasController:
 
     self.applyHoughTransform()
     self.updateBoundingBoxes( self.appState.boxes, frame_index )
-    self.updateTracks( self.appState.tracks, frame_index )
+    self.updateTracks( self.appState.tracks, frame_index, trackID )
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
@@ -318,7 +318,13 @@ class MainCanvasController:
         # Put in a slightly smaller bounding box so we can see it compared to the track box
         self.canvas.create_rectangle( tlx + 2, tly + 2, brx - 2, bry - 2, outline='yellow', tags=( "boxes",) )
 
-  def updateTracks( self, tracks: dict[ int, Track ], index: int ):
+  def getTrackColor( self, trackIDSelected: int | None, trackID: int ) -> str:
+    if trackIDSelected is not None and trackIDSelected == trackID:
+      return 'red'
+    else:
+      return 'lightgreen'
+
+  def updateTracks( self, tracks: dict[ int, Track ], index: int, trackID: int | None = None ):
     self.canvas.delete( "tracking" )
     for k, v in tracks.items():
       box = v.getByIndex( index )
@@ -326,5 +332,6 @@ class MainCanvasController:
         # Now we need to scale the box coordinates to our image
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )
         brx, bry = self.transform.toDisplay( box.x2, box.y2 )
-        self.canvas.create_rectangle( tlx, tly, brx, bry, outline='lightgreen', tags=( "tracking",) )
-        self.canvas.create_text( tlx, tly, text="Track " + str( k ), tags=( "tracking",), fill='lightgreen', font=( 'Arial', 20 ) )
+        trackColor = self.getTrackColor( trackID, k )
+        self.canvas.create_rectangle( tlx, tly, brx, bry, outline=trackColor, tags=( "tracking",) )
+        self.canvas.create_text( tlx, tly, text="Track " + str( k ), tags=( "tracking",), fill=trackColor, font=( 'Arial', 20 ) )
