@@ -44,6 +44,8 @@ In the app, open **Data Maintenance**, select the **Matches** tab, and choose **
 
 To load a registered database clip, choose **Clip** in the main window and select a clip from the list. The **Clip Participants** tab shows the people associated with that clip's match.
 
+In **Data Maintenance** > **Persons**, choose **Add generic people** to create the reusable Main Referee, Assistant Referees, Opposition Keepers, and Opposition Players if they do not already exist. With a registered clip loaded, **Add Generic** assigns those people to the clip's match as participants: referees get the Referee role, keepers get Away Goalkeeper, and players get Away Player. Since participations are match-level, these generic participants are available to every clip from that match.
+
 When a clip is loaded, existing detection and tracking Parquet chunks in `tracking/` are restored into the canvases and Tracks table. Detection and tracking boxes are stored in source-frame coordinates; tracked rows also include the bounding-box centroid. **Crops** uses those coordinates directly against the decoded source frame for full-resolution crops. The box overlays are redrawn when the canvas is panned or zoomed.
 
 Tracker IDs are short-term motion tracks, not stable player identities. `ClipTrack` stores the current whole-clip participant assignment without a role; roles are stored on `PersonParticipation`. Track history is kept unchanged in Parquet, while `TrackSegment` records offline identity assignments for inclusive frame ranges. A segment identifies a person within the match for its clip, so the same tracker ID can map to different participants in separate non-overlapping segments.

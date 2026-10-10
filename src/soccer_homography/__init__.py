@@ -19,10 +19,12 @@ from soccer_homography.data import (
     VideoData,
 )
 from soccer_homography.db import (
+    addGenericPeopleToMatch,
     deleteClipTracks,
     deleteTrackSegments,
     deleteTrackingChunks,
     getCameraByID,
+    getClipByID,
     getClipHomography,
     getMatchByID,
     getVideoByID,
@@ -152,6 +154,31 @@ class App:
       self.appState.db = initDB()
     DataMaintenance( self.root, self.appState.db )
 
+  def addGenericPeopleToCurrentClip( self ) -> None:
+    clip_id = self.appState.curClipID
+    conn = self.appState.db
+    if clip_id <= 0 or conn is None:
+      messagebox.showerror( "Add generic people", "Load a registered clip first.", parent=self.root )
+      return
+
+    try:
+      clip = getClipByID( conn, clip_id )
+      if clip is None:
+        messagebox.showerror( "Add generic people", f"Clip {clip_id} was not found in the database.", parent=self.root )
+        return
+      participations = addGenericPeopleToMatch( conn, clip.match_id )
+    except ( duckdb.Error, RuntimeError, ValueError ) as error:
+      logger.exception( f"Could not add generic people to clip {clip_id}." )
+      messagebox.showerror( "Could not add generic people", str( error ), parent=self.root )
+      return
+
+    self.tabData.tabClipParticipants.refresh()
+    messagebox.showinfo(
+        "Generic people added",
+        f"Assigned {len( participations )} generic people to the current clip.",
+        parent=self.root,
+    )
+
   def createWidgetsDetection( self, left: int, top: int ):
     # lblDetectAction
     self.lblDetectAction = tk.Label( self.root, text="Detection", fg="#000000", font=( "Arial", 12 ), anchor="w" )
@@ -192,6 +219,7 @@ class App:
     self.btnSourceDB = tk.Button( self.root, text="Clip", font=( "Arial", 10 ), command=self.cmdSourceClip )
     self.btnSourceDB.place( x=left + 110, y=top, width=52, height=28 )
     tk.Button( self.root, text="Data Maintenance", font=( "Arial", 10 ), command=self.openDataMaintenance ).place( x=left + 162, y=top, width=120, height=28 )
+    tk.Button( self.root, text="Add Generic", font=( "Arial", 10 ), command=self.addGenericPeopleToCurrentClip ).place( x=left + 286, y=top, width=90, height=28 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
 

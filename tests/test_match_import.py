@@ -9,6 +9,8 @@ from soccer_homography.db import (
   Match,
   Person,
   PersonParticipationDB,
+  addGenericPeopleToMatch,
+  ensureGenericPersons,
   getMatchByID,
   importSquadiDivision,
   parseMatchDate,
@@ -190,3 +192,39 @@ def test_person_and_participation_upserts_and_explicit_roles( conn ):
         "UPDATE PersonParticipation SET role = 'home' WHERE match_id = ? AND person_id = ?",
         [ match.id, person.id ],
     )
+
+
+@pytest.mark.usefixtures( "clear_test_database" )
+def test_generic_people_are_created_once_and_assigned_with_generic_roles( conn ):
+  match = upsertMatch(
+      conn,
+      Match( id=0, date=None, home="A", away="B", division="D" ),
+  )
+
+  people = ensureGenericPersons( conn )
+  repeated_people = ensureGenericPersons( conn )
+
+  assert len( people ) == 25
+  assert [ ( person.first_name, person.last_name ) for person in people ] == [
+      ( "Main", "Referee" ),
+      ( "Assistant", "Referee 1" ),
+      ( "Assistant", "Referee 2" ),
+      ( "Opposition", "Keeper 1" ),
+      ( "Opposition", "Keeper 2" ),
+      *( ( "Opposition", f"Player {number}" ) for number in range( 1, 21 ) ),
+  ]
+  assert [ person.id for person in repeated_people ] == [ person.id for person in people ]
+  assert conn.execute( "SELECT count(*) FROM Person" ).fetchone() == ( 25, )
+
+  participations = addGenericPeopleToMatch( conn, match.id )
+  repeated_participations = addGenericPeopleToMatch( conn, match.id )
+
+  assert len( participations ) == len( repeated_participations ) == 25
+  assert conn.execute(
+      "SELECT role, count(*) FROM PersonParticipation GROUP BY role ORDER BY role"
+  ).fetchall() == [
+      ( "away_goalkeeper", 2 ),
+      ( "away_player", 20 ),
+      ( "referee", 3 ),
+  ]
+  assert conn.execute( "SELECT count(*) FROM PersonParticipation WHERE is_placeholder" ).fetchone() == ( 25, )

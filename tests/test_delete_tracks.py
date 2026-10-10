@@ -10,6 +10,7 @@ from soccer_homography.ui.frameminimap import TrackingType
 
 def make_app() -> App:
   app = cast( Any, App.__new__( App ) )
+  app.curTrackID = None
   app.root = Mock()
   app.appState = SimpleNamespace(
       curClipID=6,
@@ -87,7 +88,7 @@ def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   assert app.appState.trackChunk == 0
   assert app.pendingTrackingChunks == set()
   app.tabData.tabTracks.refresh.assert_called_once_with()
-  app.mainImageController.updateTracks.assert_called_once_with( {}, 42 )
+  app.mainImageController.updateTracks.assert_called_once_with( {}, 42, None )
   app.livePreviewController.updateMappings.assert_called_once_with( {}, 42 )
   app.minimap.clear.assert_called_once_with( TrackingType.CUR_TRACK )
   app.checkButtonState.assert_called_once_with()

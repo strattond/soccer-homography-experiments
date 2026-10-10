@@ -15,6 +15,7 @@ from soccer_homography.db import (
   Match,
   Video,
   deleteVideo,
+  ensureGenericPersons,
   importSquadiDivision,
   listCameras,
   listClips,
@@ -431,8 +432,24 @@ class DataMaintenance:
     self.notebook.add( tab, text="Persons" )
     self.personTab = tab
     self.personTree = self.makeTree( tab, ( "id", "first", "last" ), ( "ID", "First name", "Last name" ) )
-    ttk.Button( tab, text="Refresh", command=self.refreshPersons ).pack( side="bottom", pady=6 )
+    controls = ttk.Frame( tab )
+    controls.pack( side="bottom", pady=6 )
+    ttk.Button( controls, text="Add generic people", command=self.addGenericPeople ).pack( side="left" )
+    ttk.Button( controls, text="Refresh", command=self.refreshPersons ).pack( side="left", padx=6 )
     self.refreshPersons()
+
+  def addGenericPeople( self ):
+    try:
+      people = ensureGenericPersons( self.conn )
+      self.refreshPersons()
+    except ( duckdb.Error, RuntimeError, ValueError ) as error:
+      messagebox.showerror( "Could not add generic people", str( error ), parent=self.window )
+      return
+    messagebox.showinfo(
+        "Generic people",
+        f"Created or verified {len( people )} generic people.",
+        parent=self.window,
+    )
 
   def refreshPersons( self ):
     self.personTree.delete( *self.personTree.get_children() )

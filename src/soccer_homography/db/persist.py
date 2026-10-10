@@ -117,6 +117,16 @@ class PersonParticipation:
   is_placeholder: bool = False
 
 
+GENERIC_PERSON_DEFINITIONS: tuple[ tuple[ str, str, ParticipationRole ], ... ] = (
+    ( "Main", "Referee", "referee" ),
+    ( "Assistant", "Referee 1", "referee" ),
+    ( "Assistant", "Referee 2", "referee" ),
+    ( "Opposition", "Keeper 1", "away_goalkeeper" ),
+    ( "Opposition", "Keeper 2", "away_goalkeeper" ),
+    *( ( "Opposition", f"Player {number}", "away_player" ) for number in range( 1, 21 ) ),
+)
+
+
 def getConn( db_path: str | Path = "soccer_homography.db" ) -> duckdb.DuckDBPyConnection:
   return duckdb.connect( str( db_path ) )
 
@@ -673,6 +683,43 @@ def upsertPerson( conn: duckdb.DuckDBPyConnection, person: Person ) -> Person:
       raise RuntimeError( f"Could not create person {person.first_name!r} {person.last_name!r}." )
     person.id = int( result[ 0 ] )
   return person
+
+
+def _ensureGenericPersons( conn: duckdb.DuckDBPyConnection ) -> list[ tuple[ Person, ParticipationRole ] ]:
+  return [
+      (
+          upsertPerson( conn, Person( id=0, first_name=first_name, last_name=last_name ) ),
+          role,
+      )
+      for first_name, last_name, role in GENERIC_PERSON_DEFINITIONS
+  ]
+
+
+def ensureGenericPersons( conn: duckdb.DuckDBPyConnection ) -> list[ Person ]:
+  with transaction( conn ):
+    return [ person_role[ 0 ] for person_role in _ensureGenericPersons( conn ) ]
+
+
+def addGenericPeopleToMatch(
+    conn: duckdb.DuckDBPyConnection,
+    match_id: int,
+) -> list[ PersonParticipationDB ]:
+  with transaction( conn ):
+    participations = []
+    for person, role in _ensureGenericPersons( conn ):
+      participations.append(
+          upsertPersonParticipation(
+              conn,
+              PersonParticipationDB(
+                  match_id=match_id,
+                  person_id=person.id,
+                  shirt_number=None,
+                  role=role,
+                  is_placeholder=True,
+              ),
+          )
+      )
+    return participations
 
 
 def upsertPersonParticipation( conn: duckdb.DuckDBPyConnection, participation: PersonParticipationDB ) -> PersonParticipationDB:

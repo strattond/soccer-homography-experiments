@@ -352,6 +352,7 @@ def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
   monkeypatch.setattr( "soccer_homography.readDetectionChunks", lambda clip_id: detections if clip_id == 1 else {} )
   monkeypatch.setattr( "soccer_homography.readTrackingChunks", lambda clip_id: restored_tracks if clip_id == 1 else {} )
   app = cast( Any, App.__new__( App ) )
+  app.curTrackID = None
   app.appState = state
   app.pendingDetectionChunks = set()
   app.pendingTrackingChunks = set()
@@ -1009,6 +1010,7 @@ def test_role_vote_tie_has_no_unique_winner():
 
 def test_view_change_redraws_detection_and_track_overlays():
   app = cast( Any, App.__new__( App ) )
+  app.curTrackID = None
   transform = object()
   app.mainImageController = Mock()
   app.mainImageController.transform = transform
@@ -1024,4 +1026,4 @@ def test_view_change_redraws_detection_and_track_overlays():
   app.on_main_view_change()
 
   app.mainImageController.updateBoundingBoxes.assert_called_once_with( app.appState.boxes, 23 )
-  app.mainImageController.updateTracks.assert_called_once_with( app.appState.tracks, 23 )
+  app.mainImageController.updateTracks.assert_called_once_with( app.appState.tracks, 23, None )
