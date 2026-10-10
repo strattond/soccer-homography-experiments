@@ -218,7 +218,8 @@ class Configuration:
     )
     self.tabTracks = Tracks(
         self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select, self.tabModelOptions.getIdentificationPrompt, self.tabModelOptions.savePrompt,
-        self.tabModelOptions.getIdentificationModel, on_role_changed, on_track_changed
+        self.tabModelOptions.getIdentificationModel, on_role_changed, on_track_changed,
+        crop_count_provider=self.tabModelOptions.getCropsPerSegment,
     )
     self.nbControl.pack( expand=1, fill='both' )
     self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks, self.tabModelOptions ]

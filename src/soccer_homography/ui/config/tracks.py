@@ -50,7 +50,8 @@ class Tracks:
       prompt_saver: Callable[ [ str ], bool ] | None = None,
       model_provider: Callable[ [], str ] | None = None,
       role_change: Callable[ [], None ] | None = None,
-      on_track_changed: Callable[ [ int | None ], None ] | None = None
+      on_track_changed: Callable[ [ int | None ], None ] | None = None,
+      crop_count_provider: Callable[ [], int ] | None = None,
   ) -> None:
     self.appState = appState
     self.tab = tab
@@ -74,6 +75,7 @@ class Tracks:
     self.modelProvider = model_provider
     self.on_role_change = role_change
     self.on_track_changed = on_track_changed
+    self.cropCountProvider = crop_count_provider
 
   def setup( self ) -> None:
     colNames = [ "Track ID", "Num Frames", "Person" ]
@@ -199,6 +201,8 @@ class Tracks:
       if len( values ) == 3:
         values[ 2 ] = self.personLabel( track )
         self.tblTrackData.item( item_id, values=values )
+    if self.selTrackID is not None:
+      self.updateVLMButtonState()
 
   def selectTrack( self, track_id: int ) -> None:
     track = self.appState.tracks.get( track_id )
@@ -373,19 +377,30 @@ class Tracks:
       return
     if self.cropCacheClipID != self.appState.curClipID:
       if self.cropWorker is None:
-        self.cropStatus.config( text="Person assigned; crops are not cached for this track." if self.hasKnownPerson( track ) else "Press Crops to collect samples for unknown tracks." )
+        self.cropStatus.config( text="Assigned segment; crops are not cached." if self.hasKnownPerson( track ) else "Press Crops to collect samples for unassigned segments." )
       return
-    crops = self.cropCache.get( track.id )
-    if crops is None:
-      if self.cropWorker is None:
-        self.cropStatus.config( text="Person assigned; crops are not cached for this track." if self.hasKnownPerson( track ) else "Press Crops to collect samples for unknown tracks." )
-      return
+    crops = self.cropsForTrack( track.id )
     if not crops:
-      self.cropStatus.config( text="No valid crops found for this track." )
+      if self.cropWorker is None:
+        self.cropStatus.config( text="No crops cached for this track's segments. Press Crops to collect unassigned segments." )
       return
-    self.cropStatus.config( text=f"Track {track.id}: {len(crops)} cached crops" )
+    self.cropStatus.config( text=f"Track {track.id}: {len(crops)} cached segment crops" )
     self.updateVLMButtonState()
     self.displayCrops( track.id, crops )
+
+  def cropsForTrack( self, track_id: int ) -> CropSet:
+    return sorted(
+        (
+            crop
+            for ( cached_track_id, _segment_start ), crops in self.cropCache.items()
+            if cached_track_id == track_id
+            for crop in crops
+        ),
+        key=lambda crop: crop[ 0 ],
+    )
+
+  def cropsForSegment( self, track_id: int, segment_start: int ) -> CropSet:
+    return self.cropCache.get( ( track_id, segment_start ), [] )
 
   def collectCrops( self ) -> None:
     if self.appState.curClipID <= 0 or not self.appState.videoFile:
@@ -397,26 +412,40 @@ class Tracks:
     self.cropCache.clear()
     self.cropIdentificationResults.clear()
     self.updateVLMButtonState()
-    unknown_tracks = [ ( track.id, sorted( track.boxes, key=lambda box: box.frame ) ) for track in self.appState.tracks.values() if not self.hasKnownPerson( track ) and track.boxes ]
-    if not unknown_tracks:
+    unknown_segments = []
+    for track in self.appState.tracks.values():
+      for segment in track.segments:
+        if segment.person_id is not None:
+          continue
+        boxes = sorted(
+            (
+                box for box in track.boxes
+                if segment.frame_start <= box.frame <= segment.frame_end
+            ),
+            key=lambda box: box.frame,
+        )
+        if boxes:
+          unknown_segments.append( ( track.id, segment.frame_start, boxes ) )
+    if not unknown_segments:
       self.renderSelectedCrops( None )
-      self.cropStatus.config( text="No unknown tracks with bounding boxes." )
+      self.cropStatus.config( text="No unassigned track segments with bounding boxes." )
       return
 
     self.clearCropImages()
     self.cropCacheClipID = self.appState.curClipID
     self.cropGeneration += 1
     generation = self.cropGeneration
-    self.cropProgress.configure( maximum=len( unknown_tracks ), value=0 )
+    self.cropProgress.configure( maximum=len( unknown_segments ), value=0 )
     self.cropProgress.place( x=8, y=30 )
-    self.cropStatus.config( text=f"Collecting crops for {len(unknown_tracks)} unknown tracks..." )
+    self.cropStatus.config( text=f"Collecting crops for {len(unknown_segments)} unassigned track segments..." )
     self.cropCacheClipID = self.appState.curClipID
     self.cropWorker = CropExtractionWorker(
         generation,
         self.appState.videoFile,
-        unknown_tracks,
+      unknown_segments,
         self.cropResults,
         clip_id=self.appState.curClipID,
+        max_crops=self.cropCountProvider() if self.cropCountProvider is not None else 6,
     )
     self.cropWorker.start()
 
@@ -432,7 +461,14 @@ class Tracks:
   def updateVLMButtonState( self, crops_enabled: bool | None = None ) -> None:
     if crops_enabled is not None:
       self.cropsButtonEnabled = crops_enabled
-    has_crops = ( self.selTrackID is not None and self.cropCacheClipID == self.appState.curClipID and bool( self.cropCache.get( self.selTrackID, [] ) ) )
+    track = self.appState.tracks.get( self.selTrackID ) if self.selTrackID is not None else None
+    segment = track.segmentAt( self.current_frame ) if track is not None else None
+    has_crops = (
+        track is not None
+        and segment is not None
+        and self.cropCacheClipID == self.appState.curClipID
+        and bool( self.cropsForSegment( track.id, segment.frame_start ) )
+    )
     enabled = self.cropsButtonEnabled and has_crops and self.cropInferenceWorker is None
     if self.vlmButton is not None:
       self.vlmButton.config( state=tk.NORMAL if enabled else tk.DISABLED )
@@ -449,9 +485,11 @@ class Tracks:
     if self.selTrackID is None:
       messagebox.showinfo( "VLM role suggestion", "Select a track with cached crops first.", parent=self.tab )
       return
-    crops = self.cropCache.get( self.selTrackID, [] )
+    track = self.appState.tracks.get( self.selTrackID )
+    segment = track.segmentAt( self.current_frame ) if track is not None else None
+    crops = self.cropsForSegment( self.selTrackID, segment.frame_start ) if segment is not None else []
     if self.cropCacheClipID != self.appState.curClipID or not crops:
-      messagebox.showinfo( "VLM role suggestion", "Collect crops before requesting a role suggestion.", parent=self.tab )
+      messagebox.showinfo( "VLM role suggestion", "Collect crops for the selected track segment before requesting a role suggestion.", parent=self.tab )
       self.updateVLMButtonState()
       return
     model_name = self.modelProvider() if self.modelProvider is not None else "VLM"
@@ -542,7 +580,7 @@ class Tracks:
         self.cropProgress.place_forget()
         self.cropCache = message.crops or {}
         self.updateVLMButtonState()
-        self.cropStatus.config( text=f"Crops cached for {len(self.cropCache)} unknown tracks." )
+        self.cropStatus.config( text=f"Crops cached for {len(self.cropCache)} unassigned track segments." )
         selected = self.appState.tracks.get( self.selTrackID ) if self.selTrackID is not None else None
         self.renderSelectedCrops( selected )
     self.tab.after( 50, self.pollCropResults )
@@ -678,7 +716,7 @@ class Tracks:
       return
     frame_number = int( selected[ 0 ] )
     crop = next(
-        ( image for frame, image in self.cropCache.get( self.selTrackID, [] ) if frame == frame_number ),
+        ( image for frame, image in self.cropsForTrack( self.selTrackID ) if frame == frame_number ),
         None,
     )
     if crop is None:

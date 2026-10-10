@@ -72,7 +72,6 @@ def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   app = make_app()
   delete_chunks = Mock( return_value=2 )
   delete_crops = Mock( return_value=3 )
-  delete_clip_tracks = Mock()
   delete_track_segments = Mock()
   monkeypatch.setattr( "soccer_homography.messagebox.askyesno", Mock( return_value=True ) )
   monkeypatch.setattr( "soccer_homography.deleteTrackingChunks", delete_chunks )
@@ -84,7 +83,6 @@ def test_delete_tracks_clears_clip_data_and_refreshes_ui( monkeypatch ):
   app.tracking_writer.waitForPending.assert_called_once_with()
   delete_chunks.assert_called_once_with( 6 )
   delete_crops.assert_called_once_with( 6 )
-  delete_clip_tracks.assert_called_once_with( app.appState.db, 6 )
   delete_track_segments.assert_called_once_with( app.appState.db, 6 )
   assert app.appState.tracks == {}
   assert app.appState.trackChunk == 0
@@ -100,20 +98,22 @@ def test_delete_track_crops_removes_only_valid_clip_crop_files( tmp_path, monkey
   monkeypatch.chdir( tmp_path )
   crop_directory = tmp_path / "crops" / "12"
   crop_directory.mkdir( parents=True )
-  ( crop_directory / "8_4.png" ).write_bytes( b"crop" )
-  ( crop_directory / "9_5.png" ).write_bytes( b"crop" )
+  ( crop_directory / "4_2_8.png" ).write_bytes( b"crop" )
+  ( crop_directory / "4_3_9.png" ).write_bytes( b"crop" )
+  ( crop_directory / "9_5.png" ).write_bytes( b"legacy crop" )
   ( crop_directory / "invalid.png" ).write_bytes( b"crop" )
   other_clip = tmp_path / "crops" / "13"
   other_clip.mkdir()
-  ( other_clip / "8_4.png" ).write_bytes( b"crop" )
+  ( other_clip / "4_2_8.png" ).write_bytes( b"crop" )
 
   from soccer_homography.ui.config.crop_worker import deleteTrackCrops
 
-  assert deleteTrackCrops( 12, { 4 } ) == 1
-  assert not ( crop_directory / "8_4.png" ).exists()
+  assert deleteTrackCrops( 12, { 4 } ) == 2
+  assert not ( crop_directory / "4_2_8.png" ).exists()
+  assert not ( crop_directory / "4_3_9.png" ).exists()
   assert ( crop_directory / "9_5.png" ).exists()
   assert ( crop_directory / "invalid.png" ).exists()
-  assert ( other_clip / "8_4.png" ).exists()
+  assert ( other_clip / "4_2_8.png" ).exists()
 
 
 def test_delete_tracks_is_refused_while_tracking_is_active( monkeypatch ):

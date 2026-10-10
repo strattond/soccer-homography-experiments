@@ -29,6 +29,7 @@ from soccer_homography.SportsTracker import SportsTracker
 from soccer_homography.ui.components import Slider
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
+from soccer_homography.ui.config.modeloptions import ModelOptions
 from soccer_homography.ui.Configuration import ClipParticipants
 from soccer_homography.ui.frameminimap import FrameMinimap
 from soccer_homography.ui.LivePreview import LivePreview
@@ -671,7 +672,7 @@ def test_crop_frame_plan_prioritizes_frames_covering_more_tracks():
   plan = planCropFrames( tracks )
 
   assert plan[ 0 ].frameNumber == 5
-  assert { track_id for track_id, _box in plan[ 0 ].trackBoxes } == { 1, 2, 3 }
+  assert { segment_key[ 0 ] for segment_key, _box in plan[ 0 ].trackBoxes } == { 1, 2, 3 }
 
 
 def test_crop_frame_plan_spreads_samples_across_track_timeline():
@@ -744,10 +745,52 @@ def test_crop_worker_plans_first_and_reads_each_selected_frame_once(monkeypatch,
   assert operations[ 0:2 ] == [ "plan", "open" ]
   assert len( capture.seeks ) == len( set( capture.seeks ) )
   assert len( capture.seeks ) <= 10
-  assert len( result.crops[ 1 ] ) == 6
-  assert len( result.crops[ 2 ] ) == 6
-  assert [ crop[ 0 ] for crop in result.crops[ 3 ] ] == [ 1 ]
-  assert len( result.crops[ 4 ] ) == 6
+  assert len( result.crops[ ( 1, 0 ) ] ) == 6
+  assert len( result.crops[ ( 2, 0 ) ] ) == 6
+  assert [ crop[ 0 ] for crop in result.crops[ ( 3, 1 ) ] ] == [ 1 ]
+  assert len( result.crops[ ( 4, 1 ) ] ) == 6
+
+
+def test_crop_worker_enforces_crop_limit_independently_for_each_segment(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
+
+  class SourceCapture:
+    def __init__( self ):
+      self.frame_number = 0
+      self.seeks = []
+
+    def isOpened( self ):
+      return True
+
+    def set( self, _property_id, frame_number ):
+      self.frame_number = frame_number
+      self.seeks.append( frame_number )
+
+    def read( self ):
+      frame = np.zeros( ( 20, 20, 3 ), dtype=np.uint8 )
+      return True, frame
+
+    def release( self ):
+      pass
+
+  capture = SourceCapture()
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", Mock( return_value=capture ) )
+  box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
+  segments = [
+      ( 7, 0, [ box( frame ) for frame in range( 0, 10 ) ] ),
+      ( 7, 20, [ box( frame ) for frame in range( 20, 30 ) ] ),
+  ]
+  results = queue.Queue()
+
+  CropExtractionWorker( 12, "video.mp4", segments, results, clip_id=15, max_crops=3 ).run()
+
+  message = next( item for item in list( results.queue ) if item.kind == "done" )
+  assert len( message.crops[ ( 7, 0 ) ] ) == 3
+  assert len( message.crops[ ( 7, 20 ) ] ) == 3
+  cache_files = sorted( path.name for path in ( tmp_path / "crops" / "15" ).glob( "*.png" ) )
+  assert len( cache_files ) == 6
+  assert all( name.startswith( ( "7_0_", "7_20_" ) ) for name in cache_files )
+  assert len( capture.seeks ) <= 6
 
 
 def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatch, tmp_path):
@@ -787,7 +830,7 @@ def test_crop_worker_uses_planned_fallback_frames_after_read_failures(monkeypatc
     messages.append( results.get_nowait() )
   result = next( message for message in messages if message.kind == "done" )
   assert capture.read_count == 8
-  assert len( result.crops[ 1 ] ) == 6
+  assert len( result.crops[ ( 1, 0 ) ] ) == 6
 
 
 def test_crop_worker_cancellation_prevents_video_io(monkeypatch, tmp_path):
@@ -814,7 +857,7 @@ def test_crop_worker_uses_cached_png_without_opening_video(monkeypatch, tmp_path
   crop_directory = tmp_path / "crops" / "12"
   crop_directory.mkdir( parents=True )
   assert cv2.imwrite(
-      str( crop_directory / "5_1.png" ),
+      str( crop_directory / "1_5_5.png" ),
       cv2.cvtColor( cached_crop, cv2.COLOR_RGB2BGR ),
   )
 
@@ -831,9 +874,42 @@ def test_crop_worker_uses_cached_png_without_opening_video(monkeypatch, tmp_path
   while not results.empty():
     messages.append( results.get_nowait() )
   result = next( message for message in messages if message.kind == "done" )
-  assert len( result.crops[ 1 ] ) == 1
-  assert result.crops[ 1 ][ 0 ][ 0 ] == 5
-  assert np.array_equal( result.crops[ 1 ][ 0 ][ 1 ], cached_crop )
+  assert len( result.crops[ ( 1, 5 ) ] ) == 1
+  assert result.crops[ ( 1, 5 ) ][ 0 ][ 0 ] == 5
+  assert np.array_equal( result.crops[ ( 1, 5 ) ][ 0 ][ 1 ], cached_crop )
+
+
+def test_crop_worker_ignores_disk_crops_outside_updated_segment_bounds(monkeypatch, tmp_path):
+  monkeypatch.chdir( tmp_path )
+  crop_directory = tmp_path / "crops" / "12"
+  crop_directory.mkdir( parents=True )
+  stale = np.full( ( 10, 10, 3 ), 99, dtype=np.uint8 )
+  cv2.imwrite( str( crop_directory / "1_5_8.png" ), cv2.cvtColor( stale, cv2.COLOR_RGB2BGR ) )
+
+  class SourceCapture:
+    def isOpened( self ):
+      return True
+
+    def set( self, _property_id, _frame_number ):
+      pass
+
+    def read( self ):
+      frame = np.zeros( ( 20, 20, 3 ), dtype=np.uint8 )
+      frame[ 2:12, 2:12 ] = ( 0, 0, 255 )
+      return True, frame
+
+    def release( self ):
+      pass
+
+  monkeypatch.setattr( "soccer_homography.ui.config.crop_worker.cv2.VideoCapture", Mock( return_value=SourceCapture() ) )
+  results = queue.Queue()
+  boxes = [ BoundingBox( 2, 2, 12, 12, 0.9, 0, frame ) for frame in ( 5, 6 ) ]
+
+  CropExtractionWorker( 13, "video.mp4", [ ( 1, 5, boxes ) ], results, clip_id=12, max_crops=2 ).run()
+
+  message = next( item for item in list( results.queue ) if item.kind == "done" )
+  assert [ frame for frame, _ in message.crops[ ( 1, 5 ) ] ] == [ 5, 6 ]
+  assert not any( np.array_equal( crop, stale ) for _frame, crop in message.crops[ ( 1, 5 ) ] )
 
 
 def test_crop_worker_seeks_for_only_tracks_missing_from_disk_cache(monkeypatch, tmp_path):
@@ -842,7 +918,7 @@ def test_crop_worker_seeks_for_only_tracks_missing_from_disk_cache(monkeypatch, 
   crop_directory = tmp_path / "crops" / "12"
   crop_directory.mkdir( parents=True )
   assert cv2.imwrite(
-      str( crop_directory / "5_1.png" ),
+      str( crop_directory / "1_5_5.png" ),
       cv2.cvtColor( cached_crop, cv2.COLOR_RGB2BGR ),
   )
 
@@ -889,11 +965,11 @@ def test_crop_worker_seeks_for_only_tracks_missing_from_disk_cache(monkeypatch, 
   result = next( message for message in messages if message.kind == "done" )
   assert capture.seeks == [ 5 ]
   assert extracted_tracks == [ 5 ]
-  assert np.array_equal( result.crops[ 1 ][ 0 ][ 1 ], cached_crop )
-  assert np.array_equal( result.crops[ 2 ][ 0 ][ 1 ], np.full( ( 10, 10, 3 ), ( 255, 0, 0 ), dtype=np.uint8 ) )
-  saved_crop = cv2.imread( str( crop_directory / "5_2.png" ), cv2.IMREAD_COLOR )
+  assert np.array_equal( result.crops[ ( 1, 5 ) ][ 0 ][ 1 ], cached_crop )
+  assert np.array_equal( result.crops[ ( 2, 5 ) ][ 0 ][ 1 ], np.full( ( 10, 10, 3 ), ( 255, 0, 0 ), dtype=np.uint8 ) )
+  saved_crop = cv2.imread( str( crop_directory / "2_5_5.png" ), cv2.IMREAD_COLOR )
   assert saved_crop is not None
-  assert np.array_equal( cv2.cvtColor( saved_crop, cv2.COLOR_BGR2RGB ), result.crops[ 2 ][ 0 ][ 1 ] )
+  assert np.array_equal( cv2.cvtColor( saved_crop, cv2.COLOR_BGR2RGB ), result.crops[ ( 2, 5 ) ][ 0 ][ 1 ] )
 
 
 def test_slider_set_value_updates_position_and_runs_frame_callback():
@@ -952,7 +1028,7 @@ def test_selecting_crop_displays_its_image_and_identification_guess( monkeypatch
   tracks = Tracks.__new__( Tracks )
   tracks.selTrackID = 9
   crop = np.full( ( 8, 8, 3 ), 17, dtype=np.uint8 )
-  tracks.cropCache = { 9: [ ( 73, crop ) ] }
+  tracks.cropCache = { ( 9, 0 ): [ ( 73, crop ) ] }
   tracks.cropIdentificationResults = {
       9: { 73: IdentificationImageResult( frame_number=73, role="away_goalkeeper" ) }
   }
@@ -974,9 +1050,13 @@ def test_selecting_crop_displays_its_image_and_identification_guess( monkeypatch
 
 def test_vlm_button_requires_enabled_crop_action_and_selected_track_crops():
   tracks = Tracks.__new__( Tracks )
-  cast( Any, tracks ).appState = SimpleNamespace( curClipID=4 )
+  cast( Any, tracks ).appState = SimpleNamespace(
+      curClipID=4,
+      tracks={ 9: Track( clip=1, id=9, segments=[ TrackSegment( 10, 20 ) ] ) },
+  )
+  tracks.current_frame = 12
   tracks.cropCacheClipID = 4
-  tracks.cropCache = { 9: [ ( 13, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) ] }
+  tracks.cropCache = { ( 9, 10 ): [ ( 13, np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) ) ] }
   tracks.selTrackID = 9
   tracks.cropsButtonEnabled = False
   tracks.cropInferenceWorker = None
@@ -987,6 +1067,59 @@ def test_vlm_button_requires_enabled_crop_action_and_selected_track_crops():
 
   tracks.updateVLMButtonState( crops_enabled=True )
   tracks.vlmButton.config.assert_called_with( state="normal" )
+
+
+def test_crop_collection_sends_each_unassigned_segment_and_uses_model_option_limit( monkeypatch ):
+  box = lambda frame: BoundingBox( 2, 2, 12, 12, 0.9, 0, frame )
+  track = Track(
+      clip=4,
+      id=9,
+      boxes=[ box( frame ) for frame in range( 10 ) ],
+      segments=[ TrackSegment( 0, 4 ), TrackSegment( 5, 9, 17 ) ],
+  )
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = SimpleNamespace(
+      curClipID=4,
+      videoFile="video.mp4",
+      tracks={ 9: track },
+  )
+  tracks.tab = Mock()
+  tracks.peopleByLabel = {}
+  tracks.personLabels = {}
+  tracks.person_options = ()
+  tracks.refreshPeople = Mock()
+  tracks.cancelCropJob = Mock()
+  tracks.cancelVLMJob = Mock()
+  tracks.cropCache = {}
+  tracks.cropIdentificationResults = {}
+  tracks.cropWorker = None
+  tracks.updateVLMButtonState = Mock()
+  tracks.clearCropImages = Mock()
+  tracks.renderSelectedCrops = Mock()
+  tracks.cropCacheClipID = None
+  tracks.cropGeneration = 0
+  tracks.cropResults = queue.Queue()
+  tracks.cropProgress = Mock()
+  tracks.cropStatus = Mock()
+  tracks.cropCountProvider = Mock( return_value=3 )
+  worker = Mock()
+  monkeypatch.setattr( tracks_module, "CropExtractionWorker", worker )
+
+  tracks.collectCrops()
+
+  args = worker.call_args
+  assert [ ( track_id, start, [ box.frame for box in boxes ] ) for track_id, start, boxes in args.args[ 2 ] ] == [
+      ( 9, 0, [ 0, 1, 2, 3, 4 ] ),
+  ]
+  assert args.kwargs[ "max_crops" ] == 3
+  worker.return_value.start.assert_called_once_with()
+
+
+def test_model_options_provides_configured_crops_per_segment():
+  options = ModelOptions.__new__( ModelOptions )
+  options.modelOpts = SimpleNamespace( cropsPerSegment=Mock( get=Mock( return_value=12 ) ) )
+
+  assert options.getCropsPerSegment() == 12
 
 
 def test_sports_tracker_releases_inference_resources( monkeypatch ):

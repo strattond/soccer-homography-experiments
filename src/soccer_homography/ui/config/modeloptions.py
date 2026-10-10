@@ -1,6 +1,6 @@
 import tkinter as tk
 from dataclasses import dataclass, field
-from tkinter import StringVar, messagebox, ttk
+from tkinter import IntVar, StringVar, messagebox, ttk
 
 from soccer_homography.appState import AppState
 from soccer_homography.inference.crop_inference import (
@@ -15,6 +15,7 @@ class ModelOptionsState:
   # yapf: disable
   identificationModel: StringVar = field( default_factory=lambda: tk.StringVar( value="Clip" ) )
   identificationPrompt: StringVar = field( default_factory=lambda: tk.StringVar( value=DEFAULT_IDENTIFICATION_PROMPT ) )
+  cropsPerSegment: IntVar = field( default_factory=lambda: tk.IntVar( value=6 ) )
   # yapf: enable
 
 
@@ -39,6 +40,18 @@ class ModelOptions:
     ttk.Label( optionsFrame, text="Person identification model" ).pack( anchor="w" )
     self.optIdentificationModel.pack( anchor="w" )
 
+    ttk.Label( optionsFrame, text="Crops per track segment" ).pack( anchor="w", pady=( 12, 0 ) )
+    self.optCropsPerSegment = ttk.Spinbox(
+        optionsFrame,
+        textvariable=self.modelOpts.cropsPerSegment,
+        from_=1,
+        to=50,
+        increment=1,
+        state="readonly",
+        width=8,
+    )
+    self.optCropsPerSegment.pack( anchor="w" )
+
     promptFrame = ttk.LabelFrame( self.tab, text="Person identification prompt" )
     promptFrame.pack( side="left", anchor="nw", fill="both", expand=True, padx=4, pady=4 )
     self.promptText = tk.Text( promptFrame, height=5, wrap="word", undo=True )
@@ -53,6 +66,9 @@ class ModelOptions:
 
   def getIdentificationModel( self ) -> str:
     return self.modelOpts.identificationModel.get()
+
+  def getCropsPerSegment( self ) -> int:
+    return self.modelOpts.cropsPerSegment.get()
 
   def getIdentificationPrompt( self ) -> str:
     return self.promptText.get( "1.0", "end-1c" ).strip()
