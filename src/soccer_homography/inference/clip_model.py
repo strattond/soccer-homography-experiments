@@ -34,6 +34,35 @@ CLIP_ROLE_LABELS: dict[ ParticipationRole, str ] = {
     "unknown": "a person whose role in a soccer match cannot be identified",
 }
 
+ROLE_PROMPTS: dict[ str, list[ str ] ] = {
+    "home_player": [
+        "a soccer player wearing a red and white striped jersey",
+        "a football player wearing red and white vertical stripes",
+        "a soccer player in a red and white uniform",
+    ],
+    "home_goalkeeper": [
+        "a soccer goalkeeper for the home team",
+        "a football goalkeeper wearing goalkeeper gloves",
+        "a home team goalkeeper",
+    ],
+    "away_player": [
+        "a soccer player on the away team",
+        "a football player wearing the away team kit",
+        "an opposing soccer player",
+    ],
+    "away_goalkeeper": [
+        "a soccer goalkeeper for the away team",
+        "a football goalkeeper on the opposing team",
+        "an away team goalkeeper",
+    ],
+    "referee": [
+        "a soccer referee",
+        "a football referee",
+        "a soccer referee wearing a bright yellow shirt",
+        "a soccer referee holding a yellow flag",
+        "a football assistant referee holding a yellow flag",
+    ],
+}
 
 @dataclass( slots=True )
 class ClipResponse( IdentificationResult ):
