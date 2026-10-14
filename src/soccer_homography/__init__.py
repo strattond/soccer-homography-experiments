@@ -226,7 +226,7 @@ class App:
     self.btnSourceDB = tk.Button( self.root, text="Clip", font=( "Arial", 10 ), command=self.cmdSourceClip )
     self.btnSourceDB.place( x=left + 110, y=top, width=52, height=28 )
     tk.Button( self.root, text="Data Maintenance", font=( "Arial", 10 ), command=self.openDataMaintenance ).place( x=left + 162, y=top, width=120, height=28 )
-    tk.Button( self.root, text="Add Generic", font=( "Arial", 10 ), command=self.addGenericPeopleToCurrentClip ).place( x=left + 286, y=top, width=90, height=28 )
+    tk.Button( self.root, text="Add Generic", font=( "Arial", 10 ), command=self.addGenericPeopleToCurrentClip ).place( x=left + 282, y=top, width=90, height=28 )
 
   def createWidgetsFrameControl( self, left: int, top: int ):
 
@@ -293,7 +293,12 @@ class App:
   def playIt( self, encoder: BaseVideoEncoder | None ):
     min = self.minFrame.get()
     max = self.maxFrame.get()
-    self.prgHomography.setRange( min, max )
+    if encoder is None:
+      self.prgHomography.setRange( min, max )
+    else:
+      frame_count = max - min
+      self.prgHomography.setRange( 0, frame_count * 2 )
+      self.prgHomography.start()
     self.livePreviewController.play( min, max, encoder )
 
   def cmdSourceClip( self ):

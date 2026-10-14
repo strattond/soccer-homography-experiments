@@ -1,12 +1,14 @@
 import importlib
 import queue
 import sys
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
 import cv2
 import numpy as np
+from PIL import Image
 
 from soccer_homography import App
 from soccer_homography.data import BoundingBox, Homography, Person, Point2D, Track, TrackSegment
@@ -14,7 +16,8 @@ from soccer_homography.db.persist import Match as DBMatch
 from soccer_homography.db.persist import Person as DBPerson
 from soccer_homography.db.persist import PersonParticipation
 from soccer_homography.inference.abstractions import IdentificationImageResult, selectModelDevice
-from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ClipImageResult, ClipResponse, ClipRoleClassifier
+from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ROLE_PROMPTS, ClipImageResult, ClipResponse, ClipRoleClassifier
+from soccer_homography.encoder import BaseVideoEncoder, Mp4Encoder
 from soccer_homography.inference.crop_inference import (
   DEFAULT_IDENTIFICATION_PROMPT,
   CropInferenceWorker,
@@ -24,6 +27,7 @@ from soccer_homography.inference.crop_inference import (
   saveIdentificationPrompt,
 )
 from soccer_homography.inference.vlm_model import MIN_VLM_GPU_MEMORY_BYTES, MoondreamVLM, VLMImageResult, VLMResponse, guessRole
+from soccer_homography.homography_frames import HomographyFrameRenderer, HomographyFrameSource
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.SportsTracker import SportsTracker
 from soccer_homography.ui.components import Slider
@@ -126,6 +130,119 @@ def test_live_preview_skips_tracks_without_mapped_points():
   preview.updateMappings( { track.id: track }, 0 )
 
   preview.canvas.delete.assert_called_once_with( "mapping" )
+
+
+def test_homography_frame_source_and_renderer_build_frames_without_canvas():
+  pitch = SoccerPitchImage( padding=10 )
+  pitch.makeEmptyPitch()
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
+      segments=[ TrackSegment( 0, 0, 17 ) ],
+      homog=[ Point2D( 1, 2 ) ],
+      homog_smooth=[ Point2D( 3, 4 ) ],
+  )
+  source = HomographyFrameSource( { track.id: track }, { 17: "referee" } )
+  frame = next( source.iterFrames( 0, 1 ) )
+  renderer = HomographyFrameRenderer( pitch, 440, 292 )
+
+  image = renderer.render( frame )
+
+  assert frame.frame_number == 0
+  assert [ marker.role for marker in frame.markers ] == [ "referee", "referee" ]
+  assert image.size == ( 440, 292 )
+  assert image.getpixel( ( 16, 22 ) ) == ( 255, 255, 255 )
+
+
+def test_live_preview_exports_frames_without_touching_canvas():
+  class FakeEncoder( BaseVideoEncoder ):
+    def __init__( self ):
+      self.saved_frames: list[ Image.Image ] | None = None
+
+    def save(
+        self,
+        source: cv2.VideoCapture,
+        frames: list[ Image.Image ],
+        progress: Callable[ [ int ], None ] | None = None,
+    ) -> None:
+      del source
+      self.saved_frames = frames
+      assert progress is not None
+      progress( len( frames ) )
+
+  pitch = SoccerPitchImage( padding=10 )
+  pitch.makeEmptyPitch()
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
+      homog=[ Point2D( 1, 2 ) ],
+      homog_smooth=[ Point2D( 3, 4 ) ],
+  )
+  callbacks = []
+  preview = LivePreview.__new__( LivePreview )
+  preview.root = Mock()
+  preview.root.after.side_effect = lambda _delay, callback: callbacks.append( callback )
+  preview.canvas = Mock()
+  preview.state = cast( Any, SimpleNamespace( cap=object(), tracks={ track.id: track } ) )
+  preview.pitch = pitch
+  preview.dimensions = Point2D( 420, 272 )
+  preview.offsets = Point2D( 20, 20 )
+  preview.roles_by_person = {}
+  preview.heatmapSelection = Mock()
+  preview.heatmapSelection.current.return_value = -1
+  preview.heatmapImages = {}
+  preview.bump = Mock()
+  encoder = FakeEncoder()
+
+  preview.play( 0, 1, encoder )
+  while callbacks:
+    callbacks.pop( 0 )()
+
+  assert encoder.saved_frames is not None
+  assert len( encoder.saved_frames ) == 1
+  assert encoder.saved_frames[ 0 ].size == ( 440, 292 )
+  preview.canvas.assert_not_called()
+  assert preview.bump.call_count == 2
+
+
+def test_mp4_encoder_reports_progress_for_each_written_frame( monkeypatch ):
+  import soccer_homography.encoder as encoder_module
+
+  class FakeWriter:
+    def __init__( self ):
+      self.frames = []
+      self.released = False
+
+    def write( self, frame ):
+      self.frames.append( frame )
+
+    def release( self ):
+      self.released = True
+
+  writer = FakeWriter()
+
+  class FakeVideoWriter:
+    @staticmethod
+    def fourcc( *_args ):
+      return 0
+
+    def __new__( cls, *_args ):
+      return writer
+
+  monkeypatch.setattr( encoder_module.cv2, "VideoWriter", FakeVideoWriter )
+  progress = Mock()
+
+  Mp4Encoder().save(
+      cast( cv2.VideoCapture, SimpleNamespace( get=lambda _property: 30 ) ),
+      [ Image.new( "RGB", ( 2, 2 ) ), Image.new( "RGB", ( 2, 2 ) ) ],
+      progress=progress,
+  )
+
+  assert len( writer.frames ) == 2
+  assert writer.released
+  assert progress.call_count == 2
 
 
 def test_live_preview_colors_marker_from_segment_participant_role():
@@ -1250,12 +1367,12 @@ def test_identification_guess_shows_confidence_only_for_clip():
   assert Tracks.formatIdentificationGuess( vlm_result ) == "referee"
 
 
-def test_clip_role_classifier_returns_top_role_and_softmax_confidence():
+def test_clip_role_classifier_aggregates_prompt_scores_and_prints_them( capsys ):
   import torch
 
   class FakeProcessor:
     def __call__( self, *, text, images, return_tensors, padding ):
-      assert len( text ) == 6
+      assert text == [ prompt for prompts in ROLE_PROMPTS.values() for prompt in prompts ]
       assert images.size == ( 10, 10 )
       assert return_tensors == "pt"
       assert padding is True
@@ -1263,7 +1380,9 @@ def test_clip_role_classifier_returns_top_role_and_softmax_confidence():
 
   class FakeModel:
     def __call__( self, **_inputs ):
-      return SimpleNamespace( logits_per_image=torch.tensor( [ [ 0.0, 0.0, 0.0, 0.0, 5.0, 0.0 ] ] ) )
+      logits = torch.zeros( len( [ prompt for prompts in ROLE_PROMPTS.values() for prompt in prompts ] ) )
+      logits[ 12: ] = 5.0
+      return SimpleNamespace( logits_per_image=logits.unsqueeze( 0 ) )
 
   model = ClipRoleClassifier()
   model.model = FakeModel()
@@ -1275,6 +1394,32 @@ def test_clip_role_classifier_returns_top_role_and_softmax_confidence():
   assert result.role == "referee"
   assert result.confidence is not None
   assert 0.9 < result.confidence < 1.0
+  printed_scores = capsys.readouterr().out
+  assert all( prompt in printed_scores for prompts in ROLE_PROMPTS.values() for prompt in prompts )
+  assert "CLIP role aggregate [referee]" in printed_scores
+
+
+def test_clip_role_classifier_returns_unknown_when_no_role_exceeds_threshold():
+  import torch
+
+  class FakeProcessor:
+    def __call__( self, **_kwargs ):
+      return { "pixel_values": torch.zeros( ( 1, 3, 10, 10 ) ) }
+
+  class FakeModel:
+    def __call__( self, **_inputs ):
+      prompt_count = sum( len( prompts ) for prompts in ROLE_PROMPTS.values() )
+      return SimpleNamespace( logits_per_image=torch.zeros( ( 1, prompt_count ) ) )
+
+  classifier = ClipRoleClassifier()
+  classifier.model = FakeModel()
+  classifier.processor = FakeProcessor()
+
+  result = classifier.query( np.zeros( ( 10, 10, 3 ), dtype=np.uint8 ) )
+
+  assert result.role == "unknown"
+  assert result.confidence is not None
+  assert abs( result.confidence - 0.2 ) < 1e-6
 
 
 def test_clip_device_selection_falls_back_when_gpu_memory_is_low():

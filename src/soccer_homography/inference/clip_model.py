@@ -25,16 +25,7 @@ CLIP_ROLES: tuple[ ParticipationRole, ...] = (
     "referee",
     "unknown",
 )
-CLIP_ROLE_LABELS: dict[ ParticipationRole, str ] = {
-    "home_player": "a soccer outfield player wearing the red and white striped kit",
-    "home_goalkeeper": "a soccer home-team goalkeeper wearing a goalkeeper kit",
-    "away_player": "a soccer outfield player wearing a kit that is not red and white striped",
-    "away_goalkeeper": "a soccer away-team goalkeeper wearing a goalkeeper kit",
-    "referee": "a soccer referee wearing a bright yellow shirt, or a black shirt holding a yellow flag",
-    "unknown": "a person whose role in a soccer match cannot be identified",
-}
-
-ROLE_PROMPTS: dict[ str, list[ str ] ] = {
+ROLE_PROMPTS: dict[ ParticipationRole, list[ str ] ] = {
     "home_player": [
         "a soccer player wearing a red and white striped jersey",
         "a football player wearing red and white vertical stripes",
@@ -87,18 +78,43 @@ class ClipRoleClassifier( AbstractInferenceModel ):
     import torch
     from PIL import Image
 
+    prompt_roles: list[ ParticipationRole ] = []
+    prompts: list[ str ] = []
+    for role, role_prompts in ROLE_PROMPTS.items():
+      for role_prompt in role_prompts:
+        prompt_roles.append( role )
+        prompts.append( role_prompt )
+
     inputs = processor(
-        text=[ CLIP_ROLE_LABELS[ role ] for role in CLIP_ROLES ],
+        text=prompts,
         images=Image.fromarray( image ),
         return_tensors="pt",
         padding=True,
     )
     inputs = { name: value.to( device ) for name, value in inputs.items() }
     with torch.inference_mode():
-      scores = model( **inputs ).logits_per_image[ 0 ].softmax( dim=-1 )
-    confidence, index = scores.max( dim=-1 )
-    role = CLIP_ROLES[ int( index.item() ) ]
-    return ClipResponse( role, float( confidence.item() ) )
+      prompt_scores = model( **inputs ).logits_per_image[ 0 ].softmax( dim=-1 )
+
+    role_scores: dict[ ParticipationRole, Any ] = {}
+    for role in ROLE_PROMPTS:
+      indices = [ index for index, prompt_role in enumerate( prompt_roles ) if prompt_role == role ]
+      prompt_score = prompt_scores[ indices ]
+      role_scores[ role ] = prompt_score.mean()
+      for index in indices:
+        print( f"CLIP prompt score [{role}] {prompts[index]!r}: {prompt_scores[index].item():.4f}" )
+
+    total_role_score = sum( role_scores.values() )
+    role_confidences: dict[ ParticipationRole, Any ] = {
+        role: score / total_role_score
+        for role, score in role_scores.items()
+    }
+    for role, confidence in role_confidences.items():
+      print( f"CLIP role aggregate [{role}]: {confidence.item():.4f}" )
+
+    best_role = max( role_confidences.items(), key=lambda item: item[ 1 ] )[ 0 ]
+    confidence = float( role_confidences[ best_role ].item() )
+    role: ParticipationRole = best_role if confidence > 0.5 else "unknown"
+    return ClipResponse( role, confidence )
 
   def loadModel( self ) -> tuple[ Any, Any, str ]:
     if self.model is None or self.processor is None:

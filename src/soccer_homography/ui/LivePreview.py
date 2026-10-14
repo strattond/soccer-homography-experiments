@@ -4,24 +4,13 @@ from tkinter import ttk
 
 import cv2
 import numpy as np
-from PIL import Image, ImageGrab, ImageTk
+from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
 from soccer_homography.data import ParticipationRole, Point2D, Track, roles
 from soccer_homography.encoder import BaseVideoEncoder
+from soccer_homography.homography_frames import HomographyFrameRenderer, HomographyFrameSource, role_colors
 from soccer_homography.pitch import SoccerPitchImage
-
-# Marker colours keyed by participation role
-# yapf: disable
-role_colors: dict[ ParticipationRole, str ] = {
-  "home_player":        "#ff0000",   # Red for Home Player
-  "away_player":        "#0000ff",   # Blue for Away Player
-  "home_goalkeeper":    "#00ff00",   # Bright Green for home goalkeeper
-  "away_goalkeeper":    "#66ccff",   # Light Blue for away goalkeeper
-  "unknown":            "#000000",   # Black for unknown
-  "referee":            "#ffffff",   # White for referee
-}
-# yapf: enable
 
 
 class LivePreview:
@@ -57,8 +46,10 @@ class LivePreview:
         width=42,
     )
     self.heatmapSelection.place( x=coords[0] + 100, y=coords[1] - 50, width=320, height=24 )
+    self.heatmapImages: dict[ ParticipationRole, Image.Image | None ] = {}
     for role in roles:
       self.heatmaps[role] = None
+      self.heatmapImages[role] = None
 
     self.preserved = []
     self.pitch_photo = pitch_photo
@@ -173,36 +164,73 @@ class LivePreview:
     return role_colors.get( role, "#000000" )
 
   def play( self, min: int, max: int, encoder: BaseVideoEncoder | None ):
+    if max <= min:
+      raise ValueError( "Homography playback range must contain at least one frame." )
+    if encoder is not None and self.state.cap is None:
+      raise RuntimeError( "Cannot export homography playback without a loaded video." )
     self.preserved = []
-    self.preserve = True
     self.homogIdx = min
     self.homogMax = max
     self.encoder = encoder
-    self.canvas.after( 50, self.homographyPlayLoop )
+    if encoder is None:
+      self.preserve = False
+      self.root.after( 50, self.homographyPlayLoop )
+      return
+
+    self.preserve = True
+    width = int( self.dimensions.x + self.offsets.x )
+    height = int( self.dimensions.y + self.offsets.y )
+    self.frameRenderer = HomographyFrameRenderer( self.pitch, width, height )
+    self.frameSource = iter( HomographyFrameSource(
+        self.state.tracks,
+        self.roles_by_person,
+    ).iterFrames( min, max ) )
+    self.root.after( 1, self.homographyExportLoop )
+
+  def homographyExportLoop( self ) -> None:
+    try:
+      frame = next( self.frameSource )
+    except StopIteration:
+      try:
+        if self.encoder is None or self.state.cap is None:
+          raise RuntimeError( "The video or encoder became unavailable during homography export." )
+        self.encoder.save( self.state.cap, self.preserved, progress=self.encoderProgress )
+      finally:
+        self.preserve = False
+        self.preserved = []
+      return
+
+    selected_heatmap: Image.Image | None = None
+    heatmap_index = self.heatmapSelection.current()
+    if heatmap_index >= 0:
+      selected_heatmap = self.heatmapImages[ roles[ heatmap_index ] ]
+    self.preserved.append(
+        self.frameRenderer.render(
+            frame,
+            heatmap=selected_heatmap,
+            heatmap_offset=( int( self.offsets.x / 2 ), int( self.offsets.y / 2 ) ),
+        )
+    )
+    if self.bump is not None:
+      self.bump()
+    self.root.after( 1, self.homographyExportLoop )
+
+  def encoderProgress( self, completed_frames: int ) -> None:
+    if self.bump is not None:
+      for _ in range( completed_frames ):
+        self.bump()
+    self.root.update_idletasks()
 
   def homographyPlayLoop( self ):
     self.updateMappings( self.state.tracks, self.homogIdx )
     self.homogIdx += 1
     if self.homogIdx >= self.homogMax:
-      if self.preserve and self.state.cap is not None and self.encoder is not None:
-        self.preserve = False
-        self.encoder.save( self.state.cap, self.preserved )
-        self.preserved = []
       if self.bump is not None:
         self.bump()
       return
-    if self.preserve:
-      self.preserved.append( self.saveFrame( self.canvas ) )
     if self.bump is not None:
       self.bump()
-    self.canvas.after( 50, self.homographyPlayLoop )
-
-  def saveFrame( self, canvas ):
-    x = canvas.winfo_rootx()
-    y = canvas.winfo_rooty()
-    w = x + canvas.winfo_width()
-    h = y + canvas.winfo_height()
-    return ImageGrab.grab( bbox=( x, y, w, h ) )
+    self.root.after( 50, self.homographyPlayLoop )
 
   def refreshHeatmap( self ):
     self.canvas.delete( "heatmap" )
@@ -216,5 +244,7 @@ class LivePreview:
   def updateHeatmap( self, role: ParticipationRole, heatmap_image: np.ndarray ):
     # Before we turn it into a photoimage ... let's resize it first
     new_image = cv2.resize( heatmap_image, ( int(self.dimensions.x), int(self.dimensions.y) ), interpolation=cv2.INTER_CUBIC )
-    self.heatmaps[role] = ImageTk.PhotoImage( Image.fromarray( new_image ) )
+    pil_image = Image.fromarray( new_image )
+    self.heatmapImages[role] = pil_image
+    self.heatmaps[role] = ImageTk.PhotoImage( pil_image )
     self.refreshHeatmap()

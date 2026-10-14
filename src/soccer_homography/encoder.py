@@ -1,4 +1,5 @@
 import abc
+from collections.abc import Callable
 
 import cv2
 import numpy as np
@@ -11,11 +12,13 @@ class BaseVideoEncoder( abc.ABC ):
     """
 
   @abc.abstractmethod
-  def save( self, source: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
-    """
-        Encode a video using the provided source capture and raw PIL frames.
-        Returns MP4 bytes in memory.
-        """
+  def save(
+      self,
+      source: cv2.VideoCapture,
+      frames: list[ Image.Image ],
+      progress: Callable[ [ int ], None ] | None = None,
+  ) -> None:
+    """Encode PIL frames using metadata from the source capture."""
 
   def dimensions( self, frame: Image.Image ) -> tuple[ int, int ]:
     # Determine output size from first frame
@@ -31,11 +34,13 @@ class BaseVideoEncoder( abc.ABC ):
 
 class Mp4Encoder( BaseVideoEncoder ):
 
-  def save( self, source: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
-    """
-        Encode frames into an MP4 entirely in memory.
-        The source_capture is provided for metadata (fps, size, etc).
-        """
+  def save(
+      self,
+      source: cv2.VideoCapture,
+      frames: list[ Image.Image ],
+      progress: Callable[ [ int ], None ] | None = None,
+  ) -> None:
+    """Write PIL frames to an MP4 file using the source frame rate."""
     if not frames:
       raise ValueError( "No frames provided to encoder." )
 
@@ -47,18 +52,24 @@ class Mp4Encoder( BaseVideoEncoder ):
     writer = cv2.VideoWriter( "saved_homography.mp4", fourcc, fps, ( width, height ) )
 
     # Write frames
-    for frame in frames:
-      writer.write( self.pil_to_cv( frame ) )
-
-    writer.release()
+    try:
+      for frame in frames:
+        writer.write( self.pil_to_cv( frame ) )
+        if progress is not None:
+          progress( 1 )
+    finally:
+      writer.release()
 
 
 class GifEncoder( BaseVideoEncoder ):
-  """
-    In-memory GIF encoder using Pillow.
-    """
+  """Write PIL frames to a GIF file using the source frame rate."""
 
-  def save( self, source: cv2.VideoCapture, frames: list[ Image.Image ] ) -> None:
+  def save(
+      self,
+      source: cv2.VideoCapture,
+      frames: list[ Image.Image ],
+      progress: Callable[ [ int ], None ] | None = None,
+  ) -> None:
 
     if not frames:
       raise ValueError( "No frames provided to encoder." )
@@ -75,3 +86,5 @@ class GifEncoder( BaseVideoEncoder ):
         loop=1,
         optimize=False,
     )
+    if progress is not None:
+      progress( len( frames ) )
