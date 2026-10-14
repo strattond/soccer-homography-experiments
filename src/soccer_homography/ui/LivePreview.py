@@ -163,7 +163,13 @@ class LivePreview:
   def role_color( self, role: ParticipationRole ) -> str:
     return role_colors.get( role, "#000000" )
 
-  def play( self, min: int, max: int, encoder: BaseVideoEncoder | None ):
+  def play(
+      self,
+      min: int,
+      max: int,
+      encoder: BaseVideoEncoder | None,
+      include_heatmap: bool = True,
+  ):
     if max <= min:
       raise ValueError( "Homography playback range must contain at least one frame." )
     if encoder is not None and self.state.cap is None:
@@ -180,7 +186,12 @@ class LivePreview:
     self.preserve = True
     width = int( self.dimensions.x + self.offsets.x )
     height = int( self.dimensions.y + self.offsets.y )
-    self.frameRenderer = HomographyFrameRenderer( self.pitch, width, height )
+    self.frameRenderer = HomographyFrameRenderer(
+        self.pitch,
+        width,
+        height,
+        include_heatmap=include_heatmap,
+    )
     self.frameSource = iter( HomographyFrameSource(
         self.state.tracks,
         self.roles_by_person,
@@ -200,17 +211,7 @@ class LivePreview:
         self.preserved = []
       return
 
-    selected_heatmap: Image.Image | None = None
-    heatmap_index = self.heatmapSelection.current()
-    if heatmap_index >= 0:
-      selected_heatmap = self.heatmapImages[ roles[ heatmap_index ] ]
-    self.preserved.append(
-        self.frameRenderer.render(
-            frame,
-            heatmap=selected_heatmap,
-            heatmap_offset=( int( self.offsets.x / 2 ), int( self.offsets.y / 2 ) ),
-        )
-    )
+    self.preserved.append( self.frameRenderer.render( frame ) )
     if self.bump is not None:
       self.bump()
     self.root.after( 1, self.homographyExportLoop )

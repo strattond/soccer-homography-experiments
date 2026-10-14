@@ -290,16 +290,31 @@ class App:
     self.redisplayHomographyData()
     self.checkButtonState()
 
-  def playIt( self, encoder: BaseVideoEncoder | None ):
-    min = self.minFrame.get()
-    max = self.maxFrame.get()
+  def playIt(
+      self,
+      encoder: BaseVideoEncoder | None,
+      include_heatmap: bool = True,
+      full_clip_range: bool = False,
+  ):
+    if full_clip_range:
+      if self.appState.cap is None:
+        messagebox.showerror( "Export Homography", "Load a video before exporting.", parent=self.root )
+        return
+      min = 0
+      max = int( self.appState.cap.get( cv2.CAP_PROP_FRAME_COUNT ) )
+    else:
+      min = self.minFrame.get()
+      max = self.maxFrame.get()
+    if max <= min:
+      messagebox.showerror( "Export Homography", "The selected frame range is empty.", parent=self.root )
+      return
     if encoder is None:
       self.prgHomography.setRange( min, max )
     else:
       frame_count = max - min
       self.prgHomography.setRange( 0, frame_count * 2 )
       self.prgHomography.start()
-    self.livePreviewController.play( min, max, encoder )
+    self.livePreviewController.play( min, max, encoder, include_heatmap=include_heatmap )
 
   def cmdSourceClip( self ):
     conn = self.appState.db
@@ -406,16 +421,11 @@ class App:
       if self.appState.db is not None:
         segments_by_track: dict[ int, list[ TrackSegment ] ] = {}
         for saved in listTrackSegments( self.appState.db, clip_id ):
-          segments_by_track.setdefault( saved.track_id, [] ).append(
-              TrackSegment( saved.frame_start, saved.frame_end, saved.person_id )
-          )
+          segments_by_track.setdefault( saved.track_id, [] ).append( TrackSegment( saved.frame_start, saved.frame_end, saved.person_id ) )
         for track_id, segments in segments_by_track.items():
           if track_id in self.appState.tracks:
             self.appState.tracks[ track_id ].segments = segments
-        self.participationRoles = {
-            participant.person_id.id: participant.role
-            for participant in listClipParticipants( self.appState.db, clip_id )
-        }
+        self.participationRoles = { participant.person_id.id: participant.role for participant in listClipParticipants( self.appState.db, clip_id ) }
     except ( duckdb.Error, OSError, ValueError, pa.ArrowException ) as error:
       logger.exception( f"Could not load tracking data for clip {clip_id}." )
       messagebox.showerror( "Load tracking data failed", str( error ), parent=self.root )
@@ -459,10 +469,7 @@ class App:
   def onRoleChanged( self ) -> None:
     self.tabData.tabTracks.refreshPeople()
     if self.appState.db is not None and self.appState.curClipID > 0:
-      self.participationRoles = {
-          participant.person_id.id: participant.role
-          for participant in listClipParticipants( self.appState.db, self.appState.curClipID )
-      }
+      self.participationRoles = { participant.person_id.id: participant.role for participant in listClipParticipants( self.appState.db, self.appState.curClipID ) }
     self.tabData.tabTracks.refresh()
     selected_track = self.appState.tracks.get( self.curTrackID ) if self.curTrackID is not None else None
     self.minimap.setTrackSegments( selected_track.segments if selected_track is not None else [] )
@@ -547,8 +554,7 @@ class App:
             person_id=segment.person_id,
             frame_start=segment.frame_start,
             frame_end=segment.frame_end,
-        )
-        for segment in segments
+        ) for segment in segments
     ]
     try:
       replaceTrackSegments( self.appState.db, self.appState.curClipID, track_id, records )
@@ -765,11 +771,7 @@ class App:
       return
     tracker = self.tracking
     if tracker is not None and tracker.thread is not None:
-      tracking_active = (
-          tracker.thread.is_alive()
-          and not tracker.stopped
-          and tracker.curMode in ( CommandType.RUN_TRACK, CommandType.RUN_BBOX )
-      )
+      tracking_active = ( tracker.thread.is_alive() and not tracker.stopped and tracker.curMode in ( CommandType.RUN_TRACK, CommandType.RUN_BBOX ) )
       if tracking_active or not tracker.out_queue.empty():
         messagebox.showwarning( "Delete tracks", "Wait for tracking to finish before deleting tracks.", parent=self.root )
         return
@@ -800,10 +802,8 @@ class App:
     self.updateLivePreviewMappings( frame )
     self.minimap.clear( TrackingType.CUR_TRACK )
     self.checkButtonState()
-    logger.info(
-        f"Deleted tracking data for clip {clip_id}, {deleted_chunks} parquet chunks, "
-        f"and {deleted_crops} cached crops."
-    )
+    logger.info( f"Deleted tracking data for clip {clip_id}, {deleted_chunks} parquet chunks, "
+                 f"and {deleted_crops} cached crops." )
 
   def chunkDetections( self ):
     for chunk_id in sorted( self.pendingDetectionChunks ):

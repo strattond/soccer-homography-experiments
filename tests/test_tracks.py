@@ -17,7 +17,7 @@ from soccer_homography.db.persist import Person as DBPerson
 from soccer_homography.db.persist import PersonParticipation
 from soccer_homography.inference.abstractions import IdentificationImageResult, selectModelDevice
 from soccer_homography.inference.clip_model import MIN_CLIP_GPU_MEMORY_BYTES, ROLE_PROMPTS, ClipImageResult, ClipResponse, ClipRoleClassifier
-from soccer_homography.encoder import BaseVideoEncoder, Mp4Encoder
+from soccer_homography.encoder import BaseVideoEncoder, GifEncoder, Mp4Encoder
 from soccer_homography.inference.crop_inference import (
   DEFAULT_IDENTIFICATION_PROMPT,
   CropInferenceWorker,
@@ -31,6 +31,7 @@ from soccer_homography.homography_frames import HomographyFrameRenderer, Homogra
 from soccer_homography.pitch import SoccerPitchImage
 from soccer_homography.SportsTracker import SportsTracker
 from soccer_homography.ui.components import Slider
+from soccer_homography.ui.HomographyUI import HomographyUI
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
 from soccer_homography.ui.config.tracks import Tracks
 from soccer_homography.ui.config.modeloptions import ModelOptions
@@ -151,8 +152,95 @@ def test_homography_frame_source_and_renderer_build_frames_without_canvas():
 
   assert frame.frame_number == 0
   assert [ marker.role for marker in frame.markers ] == [ "referee", "referee" ]
+  assert frame.heatmap_points == ( Point2D( 3, 4 ), )
   assert image.size == ( 440, 292 )
   assert image.getpixel( ( 16, 22 ) ) == ( 255, 255, 255 )
+
+
+def test_export_heatmap_accumulates_all_roles_across_frames():
+  pitch = SoccerPitchImage( padding=10 )
+  pitch.makeEmptyPitch()
+  home_track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
+      segments=[ TrackSegment( 0, 0, 17 ) ],
+      homog=[ Point2D( 20, 20 ) ],
+      homog_smooth=[ Point2D( 20, 20 ) ],
+  )
+  referee_track = Track(
+      clip=1,
+      id=9,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 1 ) ],
+      segments=[ TrackSegment( 1, 1, 18 ) ],
+      homog=[ Point2D( 60, 30 ) ],
+      homog_smooth=[ Point2D( 60, 30 ) ],
+  )
+  frames = HomographyFrameSource(
+      { home_track.id: home_track, referee_track.id: referee_track },
+      { 17: "home_player", 18: "referee" },
+  ).iterFrames( 0, 2 )
+  renderer = HomographyFrameRenderer( pitch, 440, 292 )
+
+  renderer.render( next( frames ) )
+  renderer.render( next( frames ) )
+
+  assert renderer.heatmap.data[ 20, 20 ] == 1
+  assert renderer.heatmap.data[ 30, 60 ] == 1
+
+
+def test_export_renderer_can_omit_heatmap():
+  pitch = SoccerPitchImage( padding=10 )
+  pitch.makeEmptyPitch()
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
+      homog=[ Point2D( 20, 20 ) ],
+      homog_smooth=[ Point2D( 20, 20 ) ],
+  )
+  frame = next( HomographyFrameSource( { track.id: track }, {} ).iterFrames( 0, 1 ) )
+  renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
+
+  image = renderer.render( frame )
+
+  assert not renderer.heatmap.data.any()
+  assert image.size == ( 440, 292 )
+
+
+def test_export_dialog_confirmation_selects_format_and_forwards_options():
+  ui = HomographyUI.__new__( HomographyUI )
+  ui.playFunc = Mock()
+  dialog = Mock()
+
+  ui.confirmExport( dialog, "GIF", False, True )
+
+  ui.playFunc.assert_called_once()
+  assert isinstance( ui.playFunc.call_args.args[ 0 ], GifEncoder )
+  assert ui.playFunc.call_args.args[ 1: ] == ( False, True )
+  dialog.destroy.assert_called_once_with()
+
+
+def test_play_it_uses_full_clip_or_selected_range():
+  app = cast( Any, App.__new__( App ) )
+  app.appState = SimpleNamespace(
+      cap=SimpleNamespace( get=lambda _prop: 250 ),
+  )
+  app.root = Mock()
+  app.minFrame = SimpleNamespace( get=lambda: 12 )
+  app.maxFrame = SimpleNamespace( get=lambda: 42 )
+  app.prgHomography = Mock()
+  app.livePreviewController = Mock()
+
+  app.playIt( Mp4Encoder(), False, True )
+  app.playIt( GifEncoder(), True, False )
+
+  assert app.livePreviewController.play.call_args_list[ 0 ].args[ :2 ] == ( 0, 250 )
+  assert isinstance( app.livePreviewController.play.call_args_list[ 0 ].args[ 2 ], Mp4Encoder )
+  assert app.livePreviewController.play.call_args_list[ 0 ].kwargs == { "include_heatmap": False }
+  assert app.livePreviewController.play.call_args_list[ 1 ].args[ :2 ] == ( 12, 42 )
+  assert isinstance( app.livePreviewController.play.call_args_list[ 1 ].args[ 2 ], GifEncoder )
+  assert app.livePreviewController.play.call_args_list[ 1 ].kwargs == { "include_heatmap": True }
 
 
 def test_live_preview_exports_frames_without_touching_canvas():
