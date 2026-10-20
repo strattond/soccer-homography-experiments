@@ -82,7 +82,7 @@ class LivePreview:
         mx + radius,
         my + radius,
         fill=color,
-        outline="black",
+        outline="black" if smoothed else "pink",
         width=1,
         stipple="" if smoothed else "gray50",
         tags=( "mapping", "homography_marker", f"track:{track_id}" ),
@@ -110,10 +110,10 @@ class LivePreview:
     scaleW, scaleL = self.pitch.get_pitch_scale
     for track in tracks.values():
       lkpIndex = track.getListIndex( frame_index )
-      if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_smooth ):
+      if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_position ):
         color = self.role_color( track.roleAt( frame_index, self.roles_by_person ) )
         self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=False )
-        self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=True )
+        self.draw( track.homog_position[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=True )
     if self.pointerPosition is not None:
       self.updateHoveredTrack( *self.pointerPosition )
 

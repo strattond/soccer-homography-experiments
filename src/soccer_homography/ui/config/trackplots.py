@@ -40,14 +40,14 @@ class TrackPlots( ttk.Frame ):
     if self.min_frame > self.max_frame:
       canvas.create_text( width / 2, height / 2, text="Start frame must not exceed finish frame", fill="#555555" )
       return
-    point_count = min( len( track.boxes ), len( track.homog ), len( track.homog_smooth ), len( track.homog_velocity ) )
+    point_count = min( len( track.boxes ), len( track.homog ), len( track.homog_position ), len( track.homog_velocity ) )
     if point_count == 0:
       canvas.create_text( width / 2, height / 2, text="Select a track with homography data to view plots", fill="#555555" )
       return
 
     all_frames = [ box.frame for box in track.boxes[ :point_count ] ]
     all_raw = track.homog[ :point_count ]
-    all_smoothed = track.homog_smooth[ :point_count ]
+    all_smoothed = track.homog_position[ :point_count ]
     all_velocity = track.homog_velocity[ :point_count ]
     visible_indices = [
         index for index, frame in enumerate( all_frames )

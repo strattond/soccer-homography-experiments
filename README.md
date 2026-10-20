@@ -8,6 +8,10 @@ Ultimately, the plan is to build out some degree of automatic
 tracking and people classification to find key events and drive
 other things.
 
+The main image canvas can show the projected pitch overlay, including its center circle; toggle it with **Show Projected Field** in **Image Options**. Projected segments are clipped to the source image and segments crossing the projective horizon are omitted. Clipping only keeps the display tidy; distorted lines can still indicate inaccurate calibration. Drag the green calibration points on the image or pitch map to adjust the correspondences and recalculate the homography.
+
+On the pitch map, click a known field location to pair it with the next image point; clicks near existing markings snap to those lines, and clicks elsewhere inside the pitch create a free calibration point. The green points can be dragged anywhere within the pitch boundaries. By default, homography fitting uses RANSAC, which may reject inconsistent pairs. Enable **Fit all calibration points (no outlier rejection)** in **Image Options** to use a least-squares fit over every pair instead. This can pull the overall fit toward your selected points, but incorrect correspondences can then distort the entire field.
+
 # Getting it setup
 
 ## Pre-requisites

@@ -1,4 +1,5 @@
 import tkinter as tk
+from itertools import pairwise
 
 import cv2
 import numpy as np
@@ -30,10 +31,10 @@ class MainCanvasController:
       - hover callbacks
     """
 
-  def __init__( self, canvas: tk.Canvas, appState: AppState, on_click=None, on_hover=None, on_view_change=None, on_selection_move=None ):
+  def __init__( self, canvas: tk.Canvas, appState: AppState, on_click=None, on_hover=None, on_view_change=None, on_selection_move=None, on_selection_delete=None ):
 
-    self.canvas = canvas
-    self.appState = appState
+    self.canvas: tk.Canvas = canvas
+    self.appState: AppState = appState
     self.cap: cv2.VideoCapture | None = None
     self.cfg: SoccerPitchConfiguration = appState.cfg
     self.pitch: SoccerPitchImage = appState.pitch
@@ -45,6 +46,7 @@ class MainCanvasController:
     self.on_hover = on_hover
     self.on_view_change = on_view_change
     self.on_selection_move = on_selection_move
+    self.on_selection_delete = on_selection_delete
 
     # State
     self.transform = ViewTransform()
@@ -68,7 +70,7 @@ class MainCanvasController:
     self.canvas.bind( "<B1-Motion>", self.handleMouseDrag )
     self.canvas.bind( "<ButtonRelease-1>", self.handleMouseRelease )
     self.canvas.bind( "<Motion>", self.handleHover )
-    self.canvas.bind( "<ButtonPress-3>", self.startPan )
+    self.canvas.bind( "<ButtonPress-3>", self.handleRightClick )
     self.canvas.bind( "<B3-Motion>", self.doPan )
 
     # Mouse wheel (Windows/macOS)
@@ -85,6 +87,7 @@ class MainCanvasController:
     self.canvas.addtag_withtag( "tracking", "tracking" )
     self.canvas.addtag_withtag( "selection", "selection" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
+    self.canvas.addtag_withtag( "projfield", "projfield" )
 
   def stratify( self ):
     self.canvas.tag_lower( "frame" )
@@ -93,6 +96,7 @@ class MainCanvasController:
     self.canvas.tag_raise( "tracking" )
     self.canvas.tag_raise( "selection" )
     self.canvas.tag_raise( "mapping" )
+    self.canvas.tag_raise( "projfield" )
 
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
@@ -116,6 +120,7 @@ class MainCanvasController:
     self.applyHoughTransform()
     self.updateBoundingBoxes( self.appState.boxes, frame_index )
     self.updateTracks( self.appState.tracks, frame_index, trackID )
+    self.stratify()
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
@@ -192,6 +197,16 @@ class MainCanvasController:
   def handleMouseRelease( self, _event ):
     self.dragged_selection = None
 
+  def handleRightClick( self, event ):
+    overlapping = self.canvas.find_overlapping( event.x - 8, event.y - 8, event.x + 8, event.y + 8 )
+    for item_id in reversed( overlapping ):
+      point = self.selection_items.get( item_id )
+      if point is not None:
+        if self.on_selection_delete is not None:
+          self.on_selection_delete( point )
+        return "break"
+    self.startPan( event )
+
   def clearPendingMapping( self ):
     self.mapping = None
     self.canvas.itemconfig( self.mapping_item, state="hidden" )
@@ -262,6 +277,7 @@ class MainCanvasController:
     self.updateMappingMarker()
     if self.on_view_change is not None:
       self.on_view_change()
+    self.drawFieldLines()
 
   def resetView( self ):
     self.transform.scale = self.initial_scale
@@ -335,3 +351,86 @@ class MainCanvasController:
         trackColor = self.getTrackColor( trackID, k )
         self.canvas.create_rectangle( tlx, tly, brx, bry, outline=trackColor, tags=( "tracking",) )
         self.canvas.create_text( tlx, tly, text="Track " + str( k ), tags=( "tracking",), fill=trackColor, font=( 'Arial', 20 ) )
+
+  def invert( self, invH, point ):
+      imagePoint = invH @ np.array( [ point[ 0 ], point[ 1 ], 1.0 ] )
+      scale = np.linalg.norm( invH[ 2 ] ) * np.linalg.norm( [ point[ 0 ], point[ 1 ], 1.0 ] )
+      if not np.isfinite( imagePoint ).all() or abs( imagePoint[ 2 ] ) <= np.finfo( float ).eps * scale * 16:
+        return None
+      imagePoint /= imagePoint[ 2 ]
+      return imagePoint[ 0 ], imagePoint[ 1 ]
+
+  def clipToImage( self, start, end ):
+    width = self.transform.dimensions.x
+    height = self.transform.dimensions.y
+    if width <= 0 or height <= 0:
+      return None
+
+    x1, y1 = start
+    x2, y2 = end
+    dx = x2 - x1
+    dy = y2 - y1
+    lower = 0.0
+    upper = 1.0
+    for p, q in ( ( -dx, x1 ), ( dx, width - 1 - x1 ), ( -dy, y1 ), ( dy, height - 1 - y1 ) ):
+      if p == 0:
+        if q < 0:
+          return None
+        continue
+      ratio = q / p
+      if p < 0:
+        lower = max( lower, ratio )
+      else:
+        upper = min( upper, ratio )
+      if lower > upper:
+        return None
+
+    clipped = (
+        ( x1 + lower * dx, y1 + lower * dy ),
+        ( x1 + upper * dx, y1 + upper * dy ),
+    )
+    return tuple(
+        ( min( max( x, 0.0 ), width - 1 ), min( max( y, 0.0 ), height - 1 ) )
+        for x, y in clipped
+    )
+
+  def drawProjectedSegment( self, invH, start, end ):
+    # A line crossing the projective horizon has no finite segment between its endpoints.
+    start_denominator = invH[ 2 ] @ np.array( [ start[ 0 ], start[ 1 ], 1.0 ] )
+    end_denominator = invH[ 2 ] @ np.array( [ end[ 0 ], end[ 1 ], 1.0 ] )
+    if start_denominator * end_denominator <= 0:
+      return
+
+    image_start = self.invert( invH, start )
+    image_end = self.invert( invH, end )
+    if image_start is None or image_end is None:
+      return
+    clipped = self.clipToImage( image_start, image_end )
+    if clipped is None:
+      return
+    display_start = self.transform.toDisplay( *clipped[ 0 ] )
+    display_end = self.transform.toDisplay( *clipped[ 1 ] )
+    self.canvas.create_line( *display_start, *display_end, fill="cyan", width=2, tags=( "projfield",) )
+
+  def drawFieldLines( self ):
+    self.canvas.delete( "projfield" )
+    if not self.appState.imgOpts.showProjectedField or self.appState.data is None or self.appState.data.hom4k is None:
+      return
+
+    invH = np.linalg.inv( self.appState.data.hom4k )
+
+    for start, end in self.appState.cfg.edges:
+      vStart = self.appState.cfg.vertices[ start - 1 ]
+      vEnd = self.appState.cfg.vertices[ end - 1 ]
+      self.drawProjectedSegment( invH, vStart, vEnd )
+
+    center = ( self.appState.cfg.length / 2, self.appState.cfg.width / 2 )
+    radius = self.appState.cfg.centre_circle_radius
+    if radius <= 0:
+      return
+    circle_points = [
+        ( center[ 0 ] + radius * np.cos( angle ), center[ 1 ] + radius * np.sin( angle ) )
+        for angle in np.linspace( 0, 2 * np.pi, 97 )
+    ]
+    for start, end in pairwise( circle_points ):
+      self.drawProjectedSegment( invH, start, end )

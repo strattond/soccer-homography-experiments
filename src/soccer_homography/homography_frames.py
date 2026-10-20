@@ -47,10 +47,10 @@ class HomographyFrameSource:
       heatmap_points: list[ Point2D ] = []
       for track in self.tracks.values():
         index = track.getListIndex( frame_number )
-        if index is None or index >= len( track.homog ) or index >= len( track.homog_smooth ):
+        if index is None or index >= len( track.homog ) or index >= len( track.homog_position ):
           continue
         role = track.roleAt( frame_number, self.roles_by_person )
-        smooth_point = track.homog_smooth[ index ]
+        smooth_point = track.homog_position[ index ]
         markers.extend( (
             HomographyMarker( role, track.homog[ index ], False ),
             HomographyMarker( role, smooth_point, True ),

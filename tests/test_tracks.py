@@ -77,7 +77,7 @@ def test_track_without_homography_does_not_create_partial_mappings():
   track.refreshHomography( Homography() )
 
   assert track.homog == []
-  assert track.homog_smooth == []
+  assert track.homog_position == []
 
 
 def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame_time():
@@ -96,7 +96,7 @@ def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )
 
   assert track.homog == [ Point2D( 0, 0 ), Point2D( 1, 1 ), Point2D( 2, 2 ) ]
-  assert track.homog_smooth == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ), Point2D( 0.56, 0.56 ) ]
+  assert track.homog_position == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ), Point2D( 0.56, 0.56 ) ]
   np.testing.assert_allclose(
       [ tuple( velocity ) for velocity in track.homog_velocity ],
       [ ( 0, 0 ), ( 0.2, 0.2 ), ( 0.36, 0.36 ) ],
@@ -117,15 +117,15 @@ def test_kalman_smoother_rejects_measurements_over_ten_metres_per_second():
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
 
   assert track.homog[ 1 ] == Point2D( 20, 20 )
-  assert track.homog_smooth[ 1 ].x < 10
+  assert track.homog_position[ 1 ].x < 10
   assert np.linalg.norm( track.homog_velocity[ 1 ].to_numpy() ) <= 10
 
   track.clearHomography()
   assert track.homog == []
-  assert track.homog_smooth == []
+  assert track.homog_position == []
   assert track.homog_velocity == []
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
-  assert track.homog_smooth[ 0 ] == Point2D( 0, 0 )
+  assert track.homog_position[ 0 ] == Point2D( 0, 0 )
 
 
 def test_track_initial_segments_follow_consecutive_frame_runs_and_extend_live():
@@ -202,7 +202,7 @@ def test_homography_frame_source_and_renderer_build_frames_without_canvas():
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
       homog=[ Point2D( 1, 2 ) ],
-      homog_smooth=[ Point2D( 3, 4 ) ],
+      homog_position=[ Point2D( 3, 4 ) ],
   )
   source = HomographyFrameSource( { track.id: track }, { 17: "referee" } )
   frame = next( source.iterFrames( 0, 1 ) )
@@ -230,7 +230,7 @@ def test_homography_playback_draws_raw_markers_half_transparent_and_smoothed_mar
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
       homog=[ Point2D( 1, 1 ) ],
-      homog_smooth=[ Point2D( 3, 3 ) ],
+      homog_position=[ Point2D( 3, 3 ) ],
   )
   frame = next( HomographyFrameSource( { track.id: track }, { 17: "home_player" } ).iterFrames( 0, 1 ) )
   renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
@@ -254,7 +254,7 @@ def test_track_plots_mark_speed_outliers():
           BoundingBox( 1, 2, 3, 4, 0.9, 0, 1 ),
       ],
       homog=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
-      homog_smooth=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
+      homog_position=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
       homog_velocity=[ Point2D( 0, 0 ), Point2D( 12, 0 ) ],
   )
   plots = TrackPlots.__new__( TrackPlots )
@@ -278,7 +278,7 @@ def test_track_plots_filter_samples_and_scale_x_axis_to_slider_range():
       id=8,
       boxes=[ BoundingBox( 0, 0, 0, 0, 0.9, 0, frame ) for frame in ( 0, 10, 20, 30 ) ],
       homog=[ Point2D( 0, 0 ), Point2D( 100, 0 ), Point2D( 100, 0 ), Point2D( 200, 0 ) ],
-      homog_smooth=[ Point2D( 0, 0 ), Point2D( 90, 0 ), Point2D( 100, 0 ), Point2D( 190, 0 ) ],
+      homog_position=[ Point2D( 0, 0 ), Point2D( 90, 0 ), Point2D( 100, 0 ), Point2D( 190, 0 ) ],
       homog_velocity=[ Point2D( 0, 0 ), Point2D( 5, 0 ), Point2D( 0, 0 ), Point2D( 5, 0 ) ],
   )
   plots = TrackPlots.__new__( TrackPlots )
@@ -316,7 +316,7 @@ def test_track_plots_show_empty_message_when_range_has_no_track_samples():
       id=8,
       boxes=[ BoundingBox( 0, 0, 0, 0, 0.9, 0, 4 ) ],
       homog=[ Point2D( 1, 2 ) ],
-      homog_smooth=[ Point2D( 1, 2 ) ],
+      homog_position=[ Point2D( 1, 2 ) ],
       homog_velocity=[ Point2D( 0, 0 ) ],
   )
   plots = TrackPlots.__new__( TrackPlots )
@@ -338,7 +338,7 @@ def test_export_heatmap_accumulates_all_roles_across_frames():
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
       homog=[ Point2D( 20, 20 ) ],
-      homog_smooth=[ Point2D( 20, 20 ) ],
+      homog_position=[ Point2D( 20, 20 ) ],
   )
   referee_track = Track(
       clip=1,
@@ -346,7 +346,7 @@ def test_export_heatmap_accumulates_all_roles_across_frames():
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 1 ) ],
       segments=[ TrackSegment( 1, 1, 18 ) ],
       homog=[ Point2D( 60, 30 ) ],
-      homog_smooth=[ Point2D( 60, 30 ) ],
+      homog_position=[ Point2D( 60, 30 ) ],
   )
   frames = HomographyFrameSource(
       { home_track.id: home_track, referee_track.id: referee_track },
@@ -369,7 +369,7 @@ def test_export_renderer_can_omit_heatmap():
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       homog=[ Point2D( 20, 20 ) ],
-      homog_smooth=[ Point2D( 20, 20 ) ],
+      homog_position=[ Point2D( 20, 20 ) ],
   )
   frame = next( HomographyFrameSource( { track.id: track }, {} ).iterFrames( 0, 1 ) )
   renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
@@ -438,7 +438,7 @@ def test_live_preview_exports_frames_without_touching_canvas():
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       homog=[ Point2D( 1, 2 ) ],
-      homog_smooth=[ Point2D( 3, 4 ) ],
+      homog_position=[ Point2D( 3, 4 ) ],
   )
   callbacks = []
   preview = LivePreview.__new__( LivePreview )
@@ -519,7 +519,7 @@ def test_live_preview_colors_marker_from_segment_participant_role():
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
       homog=[ Point2D( 1, 2 ) ],
-      homog_smooth=[ Point2D( 1, 2 ) ],
+      homog_position=[ Point2D( 1, 2 ) ],
   )
 
   preview.updateMappings( { track.id: track }, 0, { 17: "referee" } )
@@ -1537,13 +1537,15 @@ def test_refresh_homography_applies_model_options_smoother_and_recalculates_trac
   app.root = Mock()
   app.bumpIt = Mock()
   app.updateLivePreviewMappings = Mock()
+  app.mainImageController = SimpleNamespace( drawFieldLines=Mock() )
 
   app.refreshHomographyData()
 
   assert isinstance( track.smoother, ExponentialSmoother )
-  assert track.homog_smooth == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ) ]
+  assert track.homog_position == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ) ]
   app.tabData.tabTracks.refreshSelectedPlot.assert_called_once_with( 12, 42 )
   app.updateLivePreviewMappings.assert_called_once_with( 0 )
+  app.mainImageController.drawFieldLines.assert_called_once_with()
 
 
 def test_sports_tracker_releases_inference_resources( monkeypatch ):

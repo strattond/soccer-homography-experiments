@@ -138,6 +138,7 @@ class App:
         on_role_changed=self.onRoleChanged,
         on_track_changed=self.onTrackChanged,
         on_smoother_change=self.onSmootherChange,
+        on_homography_fit_change=self.onHomographyFitChange,
         frame_range_provider=lambda: ( self.minFrame.get(), self.maxFrame.get() ),
     )
 
@@ -146,7 +147,7 @@ class App:
     self.radarMap.place( x=1460, y=50, width=420 + 20, height=272 + 20 )
 
     # lblRadar
-    self.lblRadar = tk.Label( self.root, text="Bird's eye view (point matcher)", fg="#000000", font=( "Arial", 12 ), anchor="center" )
+    self.lblRadar = tk.Label( self.root, text="Bird's eye view (click any field point)", fg="#000000", font=( "Arial", 12 ), anchor="center" )
     self.lblRadar.place( x=1460, y=20, width=250, height=24 )
 
     self.uiHomography = HomographyUI( self.root, self.appState, 1460, 700, self.playIt, self.homoReplace, self.saveClipHomography, self.loadHomographyFromDisk )
@@ -288,6 +289,7 @@ class App:
         self.on_radar_click,
         self.on_radar_hover,
         self.on_radar_selection_move,
+        self.on_radar_selection_delete,
     )
 
     self.mainImageController = MainCanvasController(
@@ -297,6 +299,7 @@ class App:
         self.on_main_hover,
         self.on_main_view_change,
         self.on_main_selection_move,
+        self.on_main_selection_delete,
     )
     self.root.bind( "<Escape>", self.clearPendingMapping )
     self.livePreviewController = LivePreview( self.root, ( 1460, 400 ), ImageTk.PhotoImage( Image.fromarray( self.appState.pitch.empty ) ), self.appState, self.bumpIt )
@@ -472,7 +475,7 @@ class App:
       self.minimap.markFramesAsDone( list( processed_frames ) )
     self.minimap.setCurrentFrame( 0 )
     if self.appState.tracks and self.appState.data.hom4k is not None:
-      self.refreshHomographyData( 0 )
+      self.refreshHomographyData( 0, )
     self.tabData.tabClipParticipants.refresh()
     self.tabData.tabTracks.refresh()
     self.checkButtonState()
@@ -617,7 +620,7 @@ class App:
       with open( path, "r" ) as f:
         data = json.load( f )
       self.appState.data.load_dict( data )
-      self.appState.data.compute()
+      self.appState.data.compute( method=self.tabData.tabImageOptions.getHomographyMethod() )
     except ( OSError, ValueError, TypeError, KeyError ) as error:
       logger.exception( f"Could not load homography from {path}." )
       messagebox.showerror( "Load Homography failed", str( error ), parent=self.root )
@@ -779,7 +782,7 @@ class App:
     self.root.after( 100, self.pollForUI )
     logger.info( f"Generating heatmaps for {len(self.appState.tracks)} tracks" )
     for track in self.appState.tracks.values():
-      for homog, box in zip( track.homog_smooth, track.boxes ):
+      for homog, box in zip( track.homog_position, track.boxes ):
         if homog is not None:
           role = track.roleAt( box.frame, self.participationRoles )
           self.appState.heatmaps[ role ].accumulate( int( homog.x ), int( homog.y ), frameRate )
@@ -882,6 +885,9 @@ class App:
   def on_main_selection_move( self ):
     self.redisplayHomographyData()
 
+  def on_main_selection_delete( self, point: SelectionPoint ):
+    self.removeHomographyPoint( point, self.appState.data.img_pts_4k )
+
   def cmdResetZoom( self ):
     self.mainImageController.resetZoom()
 
@@ -908,6 +914,27 @@ class App:
   def on_radar_selection_move( self ):
     self.redisplayHomographyData()
 
+  def on_radar_selection_delete( self, point: SelectionPoint ):
+    self.removeHomographyPoint( point, self.appState.data.world_pts )
+
+  def removeHomographyPoint( self, point: SelectionPoint, source_points: list[ SelectionPoint ] ):
+    try:
+      point_index = next( index for index, candidate in enumerate( source_points ) if candidate is point )
+    except StopIteration:
+      return
+
+    image_points = self.appState.data.img_pts_4k
+    world_points = self.appState.data.world_pts
+    if len( image_points ) != len( world_points ):
+      logger.error( "Cannot remove a homography point because image and world correspondences are not paired." )
+      return
+
+    del image_points[ point_index ]
+    del world_points[ point_index ]
+    self.radarMapController.updateSelectionMarkers( world_points )
+    self.mainImageController.updateSelectionMarkers( image_points )
+    self.redisplayHomographyData()
+
   def clearPendingMapping( self, _event=None ):
     self.appState.last_image_click = None
     self.appState.sel_world_point = None
@@ -916,6 +943,10 @@ class App:
 
   def onOptionsChange( self ):
     self.mainImageController.refreshHough()
+    self.mainImageController.drawFieldLines()
+
+  def onHomographyFitChange( self ):
+    self.redisplayHomographyData()
 
   def onSmootherChange( self ):
     self.refreshHomographyData( self.mainImageController.frame_num )
@@ -926,7 +957,7 @@ class App:
 
   def redisplayHomographyData( self ):
     self.tabData.tabHomographyData.refresh()
-    self.appState.data.compute()
+    self.appState.data.compute( method=self.tabData.tabImageOptions.getHomographyMethod() )
     logger.info( "Clearing existing homography calculations" )
     for value in self.appState.tracks.values():
       value.clearHomography()
@@ -949,6 +980,7 @@ class App:
       self.root.after( 0, self.bumpIt )
     self.tabData.tabTracks.refreshSelectedPlot( self.minFrame.get(), self.maxFrame.get() )
     self.updateLivePreviewMappings( index )
+    self.mainImageController.drawFieldLines()
 
 
 def main() -> None:

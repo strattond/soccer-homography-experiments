@@ -183,6 +183,7 @@ class Configuration:
       on_role_changed=None,
       on_track_changed=None,
       on_smoother_change=None,
+      on_homography_fit_change=None,
       frame_range_provider=None,
   ):
 
@@ -191,7 +192,7 @@ class Configuration:
     self.crops_frame = crops_frame or ttk.LabelFrame( parent, text="Crops" )
 
     # Build UI
-    self.createLayout( on_change, on_frame_select, on_role_changed, on_track_changed, on_smoother_change, frame_range_provider )
+    self.createLayout( on_change, on_frame_select, on_role_changed, on_track_changed, on_smoother_change, on_homography_fit_change, frame_range_provider )
 
     # Set options based on current config
     self.tabImageOptions.stateToUI()
@@ -207,7 +208,7 @@ class Configuration:
   # -------------------------------------------------------------
   # Layout controls
   # -------------------------------------------------------------
-  def createLayout( self, on_change, on_frame_select, on_role_changed, on_track_changed, on_smoother_change, frame_range_provider ):
+  def createLayout( self, on_change, on_frame_select, on_role_changed, on_track_changed, on_smoother_change, on_homography_fit_change, frame_range_provider ):
 
     #style = ttk.Style()
     #style.configure( "Red.TFrame", background="red" )
@@ -217,7 +218,7 @@ class Configuration:
     self.nbControl = ttk.Notebook( self.root, width=600, height=190 )
     self.tabImagePreview = ImagePreview( self.createTab( "Image Preview" ) )
     self.tabLog = Log( self.createTab( "Log" ) )
-    self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
+    self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change, on_homography_fit_change )
     self.tabModelOptions = ModelOptions( self.appState, self.createTab( "Model Options" ), on_smoother_change )
     self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
     self.tabClipParticipants = ClipParticipants(

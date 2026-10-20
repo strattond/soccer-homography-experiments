@@ -101,22 +101,22 @@ class Homography:
   def setSourceDimensions( self, orig: Point2D ):
     self.source = Point2D( orig.x, orig.y )
 
-  def computeScaledHomography( self, transform: ViewTransform ) -> MatLike:
+  def computeScaledHomography( self, transform: ViewTransform, method: int = cv2.RANSAC ) -> MatLike:
     if len( self.img_pts_4k ) < 4 or len( self.img_pts_4k ) != len( self.world_pts ):
       raise ValueError( "At least four matching image and world points are required" )
     img_pts_scaled = transform.getScaledPoints( self.img_pts_4k )
     img_pts_arr = np.array( [ ip.coords.to_numpy() for ip in img_pts_scaled ], dtype=np.float32 )
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
-    homScaled, _ = cv2.findHomography( img_pts_arr, world_pts_arr, method=cv2.RANSAC )
+    homScaled, _ = cv2.findHomography( img_pts_arr, world_pts_arr, method=method )
     return homScaled
 
-  def compute( self ):
+  def compute( self, method: int = cv2.RANSAC ):
     self.hom4k = None
     if len( self.img_pts_4k ) < 4 or len( self.img_pts_4k ) != len( self.world_pts ):
       return
     img_pts_4k_arr = np.array( [ ip.coords.to_numpy() for ip in self.img_pts_4k ], dtype=np.float32 )
     world_pts_arr = np.array( [ wp.coords.to_numpy() for wp in self.world_pts ], dtype=np.float32 )
-    self.hom4k, _ = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=cv2.RANSAC )
+    self.hom4k, _ = cv2.findHomography( img_pts_4k_arr, world_pts_arr, method=method )
 
   def to_dict( self ):
     return {
@@ -230,16 +230,16 @@ class TrackSegment:
 @dataclass( slots=True )
 class Track:
   # yapf: disable
-  clip:          int
-  id:            int
-  person:        Person | int | None = None
-  boxes:         list[BoundingBox]   = field( default_factory=list )
-  role:          ParticipationRole   = "unknown"
-  homog:         list[Point2D]       = field( default_factory=list )
-  homog_smooth:  list[Point2D]       = field( default_factory=list )
-  homog_velocity: list[Point2D]      = field( default_factory=list )
-  segments:      list[TrackSegment]  = field( default_factory=list )
-  smoother:      PositionSmoother    = field( default_factory=KalmanSmoother, repr=False, compare=False )
+  clip:           int
+  id:             int
+  person:         Person | int | None = None
+  boxes:          list[BoundingBox]   = field( default_factory=list )
+  role:           ParticipationRole   = "unknown"
+  homog:          list[Point2D]       = field( default_factory=list )
+  homog_position: list[Point2D]       = field( default_factory=list )
+  homog_velocity: list[Point2D]       = field( default_factory=list )
+  segments:       list[TrackSegment]  = field( default_factory=list )
+  smoother:       PositionSmoother    = field( default_factory=KalmanSmoother, repr=False, compare=False )
   # yapf: enable
 
   def __post_init__( self ) -> None:
@@ -332,7 +332,7 @@ class Track:
 
   def clearHomography( self ):
     self.homog.clear()
-    self.homog_smooth.clear()
+    self.homog_position.clear()
     self.homog_velocity.clear()
     self.smoother.reset()
 
@@ -362,6 +362,6 @@ class Track:
           raise ValueError( "Track box frames must be strictly increasing" )
         estimate = self.smoother.update( ( float( x ), float( y ) ), dt )
         self.homog.append( Point2D( x, y ) )
-        self.homog_smooth.append( Point2D( *estimate.position ) )
+        self.homog_position.append( Point2D( *estimate.position ) )
         self.homog_velocity.append( Point2D( *estimate.velocity ) )
         previous_frame = box.frame

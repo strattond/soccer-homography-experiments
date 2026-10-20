@@ -10,7 +10,7 @@ class RadarCanvas:
 
   FIELD_POINT_SNAP_DISTANCE = 12
 
-  def __init__( self, canvas: tk.Canvas, pitch_photo, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage, on_click=None, on_hover=None, on_selection_move=None ):
+  def __init__( self, canvas: tk.Canvas, pitch_photo, cfg: SoccerPitchConfiguration, pitch: SoccerPitchImage, on_click=None, on_hover=None, on_selection_move=None, on_selection_delete=None ):
 
     self.canvas: tk.Canvas = canvas
     self.pitch_photo = pitch_photo
@@ -23,6 +23,7 @@ class RadarCanvas:
     self.on_click = on_click
     self.on_hover = on_hover
     self.on_selection_move = on_selection_move
+    self.on_selection_delete = on_selection_delete
     self.selection_items: dict[ int, tuple[ SelectionPoint, tuple[ tuple[ float, float ], tuple[ float, float ] ] | None ] ] = {}
     self.dragged_selection: SelectionPoint | None = None
     self.dragged_edge: tuple[ tuple[ float, float ], tuple[ float, float ] ] | None = None
@@ -41,6 +42,7 @@ class RadarCanvas:
     self.canvas.bind( "<ButtonPress-1>", self.handle_press )
     self.canvas.bind( "<B1-Motion>", self.handle_drag )
     self.canvas.bind( "<ButtonRelease-1>", self.handle_release )
+    self.canvas.bind( "<ButtonPress-3>", self.handle_right_click )
 
   def drawPitch( self ):
     self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
@@ -119,7 +121,16 @@ class RadarCanvas:
     distance = ( x - nearest_screen[ 0 ] )**2 + ( y - nearest_screen[ 1 ] )**2
     if distance <= self.FIELD_POINT_SNAP_DISTANCE**2:
       return nearest, None
-    return self.nearest_line( x, y )
+    line_point, edge = self.nearest_line( x, y )
+    line_screen = self.pitch.calcPointOffset( line_point )
+    line_distance = ( x - line_screen.x )**2 + ( y - line_screen.y )**2
+    if line_distance <= self.FIELD_POINT_SNAP_DISTANCE**2:
+      return line_point, edge
+
+    if self.pitch.padding <= x <= self.pitch.padding + self.pitch.width and self.pitch.padding <= y <= self.pitch.padding + self.pitch.height:
+      world_x, world_y = self.screen_to_world( x, y )
+      return SelectionPoint( None, Point2D( world_x, world_y ) ), None
+    return line_point, edge
 
   def handle_hover( self, event ):
 
@@ -154,6 +165,15 @@ class RadarCanvas:
         return "break"
     self.handle_click( event )
 
+  def handle_right_click( self, event ):
+    overlapping = self.canvas.find_overlapping( event.x - 8, event.y - 8, event.x + 8, event.y + 8 )
+    for item_id in reversed( overlapping ):
+      selection = self.selection_items.get( item_id )
+      if selection is not None:
+        if self.on_selection_delete is not None:
+          self.on_selection_delete( selection[ 0 ] )
+        return "break"
+
   def handle_drag( self, event ):
     if self.dragged_selection is None:
       return
@@ -162,18 +182,10 @@ class RadarCanvas:
       if moved < self.FIELD_POINT_SNAP_DISTANCE**2:
         return "break"
       self.dragged_selection.index = None
-      _, self.dragged_edge = self.nearest_line( event.x, event.y )
       self.drag_was_fixed = False
-    if self.dragged_edge is None:
-      return
-    start, end = self.dragged_edge
-    dx = end[ 0 ] - start[ 0 ]
-    dy = end[ 1 ] - start[ 1 ]
-    length_squared = dx * dx + dy * dy
-    ratio = 0.0 if length_squared == 0 else ( ( event.x - start[ 0 ] ) * dx + ( event.y - start[ 1 ] ) * dy ) / length_squared
-    ratio = max( 0.0, min( 1.0, ratio ) )
-    point = ( start[ 0 ] + ratio * dx, start[ 1 ] + ratio * dy )
-    world_x, world_y = self.screen_to_world( *point )
+    x = min( max( event.x, self.pitch.padding ), self.pitch.padding + self.pitch.width )
+    y = min( max( event.y, self.pitch.padding ), self.pitch.padding + self.pitch.height )
+    world_x, world_y = self.screen_to_world( x, y )
     self.dragged_selection.coords = Point2D( world_x, world_y )
     self.updateSelectionMarkers( self.selected )
     if self.on_selection_move:

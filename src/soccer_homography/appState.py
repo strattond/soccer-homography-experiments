@@ -16,6 +16,8 @@ from soccer_homography.pitch import (
 class ImageOptions:
   # yapf: disable
   showHough:   bool = False                 # Checkbox - Show Hough layer
+  showProjectedField: bool = True           # Checkbox - Show projected pitch overlay
+  fitAllHomographyPoints: bool = False       # Checkbox - use all calibration pairs without outlier rejection
   preBlur:     bool = True                  # Checkbox - blur for edge detection
   removeSky:   bool = True                  # Checkbox - try to remove sky
   edgeEnhance: bool = True                  # Checkbox - apply CLAHE enhancement
