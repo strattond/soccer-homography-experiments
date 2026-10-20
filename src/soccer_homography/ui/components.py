@@ -87,6 +87,8 @@ class LabelledSpinBox:
     self.label.place( x=x - offset, y=y, width=offset, height=height )
     self._debounce_job = None
     self.spinner.set( initValue )
+    self.spinner.bind( "<KeyRelease>", lambda _event: self.internalCommand() )
+    self.spinner.bind( "<FocusOut>", lambda _event: self.internalCommand() )
 
   def internalCommand( self ):
     # Cancel any pending callback
@@ -104,6 +106,8 @@ class LabelledSpinBox:
     self.spinner.config( to=value )  # type: ignore
     if self.get() > value:
       self.spinner.set( value )
+      if self.command is not None:
+        self.command( value )
 
   def get( self ) -> int:
     return int( self.spinner.get() )

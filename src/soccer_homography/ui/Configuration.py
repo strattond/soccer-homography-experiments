@@ -133,9 +133,7 @@ class ClipParticipants:
       selected_role = self.editor.get()
       self.editor.destroy()
       self.editor = None
-      role: ParticipationRole = next(
-          role for role in roles if role.replace( "_", " " ) == selected_role
-      )
+      role: ParticipationRole = next( role for role in roles if role.replace( "_", " " ) == selected_role )
       if self.state.db is None:
         messagebox.showerror( "Participant update failed", "The database connection is unavailable.", parent=self.tab )
         return
@@ -175,14 +173,25 @@ class ClipParticipants:
 
 class Configuration:
 
-  def __init__( self, parent: tk.Tk, state: AppState, on_change=None, crops_frame: ttk.LabelFrame | None = None, on_frame_select=None, on_role_changed=None, on_track_changed=None ):
+  def __init__(
+      self,
+      parent: tk.Tk,
+      state: AppState,
+      on_change=None,
+      crops_frame: ttk.LabelFrame | None = None,
+      on_frame_select=None,
+      on_role_changed=None,
+      on_track_changed=None,
+      on_smoother_change=None,
+      frame_range_provider=None,
+  ):
 
     self.parent = parent
     self.appState: AppState = state
     self.crops_frame = crops_frame or ttk.LabelFrame( parent, text="Crops" )
 
     # Build UI
-    self.createLayout( on_change, on_frame_select, on_role_changed, on_track_changed )
+    self.createLayout( on_change, on_frame_select, on_role_changed, on_track_changed, on_smoother_change, frame_range_provider )
 
     # Set options based on current config
     self.tabImageOptions.stateToUI()
@@ -198,7 +207,7 @@ class Configuration:
   # -------------------------------------------------------------
   # Layout controls
   # -------------------------------------------------------------
-  def createLayout( self, on_change, on_frame_select, on_role_changed, on_track_changed ):
+  def createLayout( self, on_change, on_frame_select, on_role_changed, on_track_changed, on_smoother_change, frame_range_provider ):
 
     #style = ttk.Style()
     #style.configure( "Red.TFrame", background="red" )
@@ -209,7 +218,7 @@ class Configuration:
     self.tabImagePreview = ImagePreview( self.createTab( "Image Preview" ) )
     self.tabLog = Log( self.createTab( "Log" ) )
     self.tabImageOptions = ImageOptionsUI( self.appState, self.createTab( "Image Options" ), on_change )
-    self.tabModelOptions = ModelOptions( self.appState, self.createTab( "Model Options" ) )
+    self.tabModelOptions = ModelOptions( self.appState, self.createTab( "Model Options" ), on_smoother_change )
     self.tabHomographyData = homographyData( self.appState, self.createTab( "Homography Data" ) )
     self.tabClipParticipants = ClipParticipants(
         self.appState,
@@ -217,9 +226,17 @@ class Configuration:
         on_role_changed,
     )
     self.tabTracks = Tracks(
-        self.appState, self.createTab( "Tracks" ), self.crops_frame, on_frame_select, self.tabModelOptions.getIdentificationPrompt, self.tabModelOptions.savePrompt,
-        self.tabModelOptions.getIdentificationModel, on_role_changed, on_track_changed,
+        self.appState,
+        self.createTab( "Tracks" ),
+        self.crops_frame,
+        on_frame_select,
+        self.tabModelOptions.getIdentificationPrompt,
+        self.tabModelOptions.savePrompt,
+        self.tabModelOptions.getIdentificationModel,
+        on_role_changed,
+        on_track_changed,
         crop_count_provider=self.tabModelOptions.getCropsPerSegment,
+        frame_range_provider=frame_range_provider,
     )
     self.nbControl.pack( expand=1, fill='both' )
     self.allTabs = [ self.tabHomographyData, self.tabImageOptions, self.tabImagePreview, self.tabLog, self.tabClipParticipants, self.tabTracks, self.tabModelOptions ]

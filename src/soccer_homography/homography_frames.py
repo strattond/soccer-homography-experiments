@@ -21,6 +21,7 @@ role_colors: dict[ ParticipationRole, str ] = {
 class HomographyMarker:
   role: ParticipationRole
   point: Point2D
+  smoothed: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,8 +52,8 @@ class HomographyFrameSource:
         role = track.roleAt( frame_number, self.roles_by_person )
         smooth_point = track.homog_smooth[ index ]
         markers.extend( (
-            HomographyMarker( role, track.homog[ index ] ),
-            HomographyMarker( role, smooth_point ),
+            HomographyMarker( role, track.homog[ index ], False ),
+            HomographyMarker( role, smooth_point, True ),
         ) )
         heatmap_points.append( smooth_point )
       yield HomographyFrame( frame_number, tuple( markers ), tuple( heatmap_points ) )
@@ -95,9 +96,25 @@ class HomographyFrameRenderer:
       )
       overlay = Image.fromarray( heatmap_image )
       image.alpha_composite( overlay, self.heatmap_offset )
-    draw = ImageDraw.Draw( image )
+    raw_overlay = Image.new( "RGBA", image.size, ( 0, 0, 0, 0 ) )
+    raw_draw = ImageDraw.Draw( raw_overlay )
     radius = 6
     for marker in frame.markers:
+      x = int( marker.point.x * self.scale_width + self.pitch.padding )
+      y = int( marker.point.y * self.scale_length + self.pitch.padding )
+      if not marker.smoothed:
+        color = role_colors.get( marker.role, "#000000" )
+        raw_draw.ellipse(
+            ( x - radius, y - radius, x + radius, y + radius ),
+            fill=( *tuple( bytes.fromhex( color.lstrip( "#" ) ) ), 128 ),
+            outline=( 0, 0, 0, 128 ),
+            width=1,
+        )
+    image.alpha_composite( raw_overlay )
+    draw = ImageDraw.Draw( image )
+    for marker in frame.markers:
+      if not marker.smoothed:
+        continue
       x = int( marker.point.x * self.scale_width + self.pitch.padding )
       y = int( marker.point.y * self.scale_length + self.pitch.padding )
       draw.ellipse(

@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from cv2.typing import MatLike
 
-from .smoothing import ExponentialSmoother, KalmanSmoother, PositionSmoother
+from .smoothing import KalmanSmoother, PositionSmoother
 
 
 @dataclass( slots=True )
@@ -239,7 +239,6 @@ class Track:
   homog_smooth:  list[Point2D]       = field( default_factory=list )
   homog_velocity: list[Point2D]      = field( default_factory=list )
   segments:      list[TrackSegment]  = field( default_factory=list )
-  #smoother:      PositionSmoother    = field( default_factory=ExponentialSmoother, repr=False, compare=False )
   smoother:      PositionSmoother    = field( default_factory=KalmanSmoother, repr=False, compare=False )
   # yapf: enable
 

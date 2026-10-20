@@ -70,10 +70,12 @@ Segments may also be saved with `person_id=None` while identity is unknown. `rep
 
 The **VLM** button analyzes the selected track's cached crops with the model selected in **Image Options**. **VLM** (the default) uses Moondream and its editable multi-line identification prompt, saved to `identificationPrompt.txt` in the repository root. **Clip** uses zero-shot CLIP classification over the six participation roles and reports its per-crop confidence. Both modes show each crop's role and a tally for every role; the most-voted role can be saved to the assigned participant's `PersonParticipation`, while a tie is reported without assigning a role.
 
-Track homography mappings use an exponential smoother by default and store a velocity estimate in metres per second alongside each smoothed position. A different implementation can be supplied per track; the Kalman smoother rejects position measurements that imply speeds above 10 m/s:
+Track homography mappings support pluggable smoothers and store a velocity estimate in metres per second alongside each smoothed position. The Kalman smoother rejects position measurements that imply speeds above 10 m/s:
 
 ```python
 from soccer_homography.data import KalmanSmoother, Track
 
 track = Track(clip=1, id=1, smoother=KalmanSmoother())
 ```
+
+The **Model Options** tab lets you choose the Exponential or Kalman position smoother for the current tracks. The track detail panel has **Crops** and **Plots** tabs; Plots compares raw and smoothed positions and shows estimated and measured speeds, highlighting measurements over 10 m/s. In homography playback, raw markers are rendered at 50% opacity while smoothed markers use solid role colors.

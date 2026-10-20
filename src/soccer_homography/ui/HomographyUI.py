@@ -68,21 +68,29 @@ class HomographyUI:
         dialog,
         text="Include heatmap",
         variable=include_heatmap,
-    ).grid( row=1, column=0, columnspan=2, padx=10, pady=4, sticky="w" )
+    ).grid(
+        row=1, column=0, columnspan=2, padx=10, pady=4, sticky="w"
+    )
     ttk.Checkbutton(
         dialog,
         text="Use full clip range",
         variable=full_clip_range,
-    ).grid( row=2, column=0, columnspan=2, padx=10, pady=4, sticky="w" )
+    ).grid(
+        row=2, column=0, columnspan=2, padx=10, pady=4, sticky="w"
+    )
 
     buttons = ttk.Frame( dialog )
     buttons.grid( row=3, column=0, columnspan=2, padx=10, pady=( 8, 10 ), sticky="e" )
-    ttk.Button( buttons, text="OK", command=lambda: self.confirmExport(
-        dialog,
-        format_value.get(),
-        include_heatmap.get(),
-        full_clip_range.get(),
-    ) ).pack( side=tk.LEFT, padx=( 0, 6 ) )
+    ttk.Button(
+        buttons, text="OK", command=lambda: self.confirmExport(
+            dialog,
+            format_value.get(),
+            include_heatmap.get(),
+            full_clip_range.get(),
+        )
+    ).pack(
+        side=tk.LEFT, padx=( 0, 6 )
+    )
     ttk.Button( buttons, text="Cancel", command=dialog.destroy ).pack( side=tk.LEFT )
 
     dialog.columnconfigure( 1, weight=1 )

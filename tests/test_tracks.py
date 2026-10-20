@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 from soccer_homography import App
-from soccer_homography.data import BoundingBox, Homography, KalmanSmoother, Person, Point2D, Track, TrackSegment
+from soccer_homography.data import BoundingBox, ExponentialSmoother, Homography, KalmanSmoother, Person, Point2D, Track, TrackSegment
 from soccer_homography.db.persist import Match as DBMatch
 from soccer_homography.db.persist import Person as DBPerson
 from soccer_homography.db.persist import PersonParticipation
@@ -33,6 +33,7 @@ from soccer_homography.SportsTracker import SportsTracker
 from soccer_homography.ui.components import Slider
 from soccer_homography.ui.HomographyUI import HomographyUI
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
+from soccer_homography.ui.config.trackplots import TrackPlots
 from soccer_homography.ui.config.tracks import Tracks
 from soccer_homography.ui.config.modeloptions import ModelOptions
 from soccer_homography.ui.Configuration import ClipParticipants
@@ -87,6 +88,7 @@ def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame
           BoundingBox( 0, 0, 0, 0, 0.9, 0, 0 ),
           BoundingBox( 1, 0, 1, 1, 0.9, 0, 10 ),
       ],
+      smoother=ExponentialSmoother(),
   )
 
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )
@@ -180,6 +182,17 @@ def test_live_preview_skips_tracks_without_mapped_points():
   preview.canvas.delete.assert_called_once_with( "mapping" )
 
 
+def test_live_preview_uses_half_stipple_for_raw_markers():
+  preview = LivePreview.__new__( LivePreview )
+  preview.canvas = Mock()
+  preview.pitch = Mock( spec=SoccerPitchImage )
+  preview.pitch.padding = 10
+
+  preview.draw( Point2D( 1, 2 ), "#ff0000", 1.0, 1.0, 8, smoothed=False )
+
+  assert preview.canvas.create_oval.call_args.kwargs[ "stipple" ] == "gray50"
+
+
 def test_homography_frame_source_and_renderer_build_frames_without_canvas():
   pitch = SoccerPitchImage( padding=10 )
   pitch.makeEmptyPitch()
@@ -193,15 +206,127 @@ def test_homography_frame_source_and_renderer_build_frames_without_canvas():
   )
   source = HomographyFrameSource( { track.id: track }, { 17: "referee" } )
   frame = next( source.iterFrames( 0, 1 ) )
-  renderer = HomographyFrameRenderer( pitch, 440, 292 )
+  renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
 
   image = renderer.render( frame )
 
   assert frame.frame_number == 0
   assert [ marker.role for marker in frame.markers ] == [ "referee", "referee" ]
+  assert [ marker.smoothed for marker in frame.markers ] == [ False, True ]
   assert frame.heatmap_points == ( Point2D( 3, 4 ), )
   assert image.size == ( 440, 292 )
-  assert image.getpixel( ( 16, 22 ) ) == ( 255, 255, 255 )
+  raw_xy = ( int( renderer.scale_width + pitch.padding ), int( 2 * renderer.scale_length + pitch.padding ) )
+  background = cast( tuple[ int, int, int ], Image.fromarray( pitch.empty ).convert( "RGB" ).getpixel( raw_xy ) )
+  raw_pixel = cast( tuple[ int, int, int ], image.getpixel( raw_xy ) )
+  np.testing.assert_allclose( raw_pixel, ( np.asarray( background ) + 255 ) / 2, atol=1 )
+
+
+def test_homography_playback_draws_raw_markers_half_transparent_and_smoothed_markers_solid():
+  pitch = SoccerPitchImage( padding=10 )
+  pitch.makeEmptyPitch()
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
+      segments=[ TrackSegment( 0, 0, 17 ) ],
+      homog=[ Point2D( 1, 1 ) ],
+      homog_smooth=[ Point2D( 3, 3 ) ],
+  )
+  frame = next( HomographyFrameSource( { track.id: track }, { 17: "home_player" } ).iterFrames( 0, 1 ) )
+  renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
+  image = renderer.render( frame )
+
+  raw_xy = ( int( renderer.scale_width + pitch.padding ), int( renderer.scale_length + pitch.padding ) )
+  smooth_xy = ( int( 3 * renderer.scale_width + pitch.padding ), int( 3 * renderer.scale_length + pitch.padding ) )
+  background = cast( tuple[ int, int, int ], Image.fromarray( pitch.empty ).convert( "RGB" ).getpixel( raw_xy ) )
+  raw_pixel = cast( tuple[ int, int, int ], image.getpixel( raw_xy ) )
+
+  np.testing.assert_allclose( raw_pixel, np.asarray( ( 255, 0, 0 ) ) * 0.5 + np.asarray( background ) * 0.5, atol=1 )
+  assert image.getpixel( smooth_xy ) == ( 255, 0, 0 )
+
+
+def test_track_plots_mark_speed_outliers():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ),
+          BoundingBox( 1, 2, 3, 4, 0.9, 0, 1 ),
+      ],
+      homog=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
+      homog_smooth=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
+      homog_velocity=[ Point2D( 0, 0 ), Point2D( 12, 0 ) ],
+  )
+  plots = TrackPlots.__new__( TrackPlots )
+  plots.track = track
+  plots.frame_rate = 1
+  plots.canvas = Mock()
+  plots.canvas.winfo_width.return_value = 640
+  plots.canvas.winfo_height.return_value = 210
+  plots.min_frame = 0
+  plots.max_frame = 1
+
+  plots.draw()
+
+  assert any( call.kwargs.get( "fill" ) == "#c62828" for call in plots.canvas.create_oval.call_args_list )
+  assert any( call.kwargs.get( "text" ) == "10 m/s" for call in plots.canvas.create_text.call_args_list )
+
+
+def test_track_plots_filter_samples_and_scale_x_axis_to_slider_range():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 0, 0, 0, 0, 0.9, 0, frame ) for frame in ( 0, 10, 20, 30 ) ],
+      homog=[ Point2D( 0, 0 ), Point2D( 100, 0 ), Point2D( 100, 0 ), Point2D( 200, 0 ) ],
+      homog_smooth=[ Point2D( 0, 0 ), Point2D( 90, 0 ), Point2D( 100, 0 ), Point2D( 190, 0 ) ],
+      homog_velocity=[ Point2D( 0, 0 ), Point2D( 5, 0 ), Point2D( 0, 0 ), Point2D( 5, 0 ) ],
+  )
+  plots = TrackPlots.__new__( TrackPlots )
+  plots.canvas = Mock()
+  plots.canvas.winfo_width.return_value = 640
+  plots.canvas.winfo_height.return_value = 210
+
+  plots.setTrack( track, frame_rate=50, min_frame=10, max_frame=20 )
+
+  labels = [ call.kwargs.get( "text" ) for call in plots.canvas.create_text.call_args_list ]
+  assert "10" in labels
+  assert "20" in labels
+  assert "0" not in labels
+  assert "30" not in labels
+  raw_position_lines = [
+      call.args for call in plots.canvas.create_line.call_args_list
+      if call.kwargs.get( "fill" ) == "#d38b00"
+      and call.kwargs.get( "width" ) == 1
+      and len( call.args ) == 4
+  ]
+  assert raw_position_lines
+  assert raw_position_lines[ 0 ][ 0 ] == 56
+  assert raw_position_lines[ 0 ][ 2 ] == 624
+  outlier_dots = [
+      call for call in plots.canvas.create_oval.call_args_list
+      if call.kwargs.get( "fill" ) == "#c62828"
+  ]
+  assert len( outlier_dots ) == 1
+  assert outlier_dots[ 0 ].args[ 0 ] == 53
+
+
+def test_track_plots_show_empty_message_when_range_has_no_track_samples():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[ BoundingBox( 0, 0, 0, 0, 0.9, 0, 4 ) ],
+      homog=[ Point2D( 1, 2 ) ],
+      homog_smooth=[ Point2D( 1, 2 ) ],
+      homog_velocity=[ Point2D( 0, 0 ) ],
+  )
+  plots = TrackPlots.__new__( TrackPlots )
+  plots.canvas = Mock()
+  plots.canvas.winfo_width.return_value = 640
+  plots.canvas.winfo_height.return_value = 210
+
+  plots.setTrack( track, min_frame=10, max_frame=20 )
+
+  assert plots.canvas.create_text.call_args.kwargs[ "text" ] == "No track data between frames 10 and 20"
 
 
 def test_export_heatmap_accumulates_all_roles_across_frames():
@@ -1372,6 +1497,53 @@ def test_model_options_provides_configured_crops_per_segment():
   options.modelOpts = SimpleNamespace( cropsPerSegment=Mock( get=Mock( return_value=12 ) ) )
 
   assert options.getCropsPerSegment() == 12
+
+
+def test_model_options_exposes_the_selected_smoother_type():
+  options = ModelOptions.__new__( ModelOptions )
+  options.modelOpts = SimpleNamespace( positionSmoother=Mock( get=Mock( return_value="Exponential" ) ) )
+  options.on_change = Mock()
+
+  assert options.getSmootherType().__name__ == "ExponentialSmoother"
+  options.onSmootherChanged()
+
+  options.on_change.assert_called_once_with()
+
+
+def test_refresh_homography_applies_model_options_smoother_and_recalculates_track():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( 0, 0, 0, 0, 0.9, 0, 0 ),
+          BoundingBox( 1, 0, 1, 1, 0.9, 0, 10 ),
+      ],
+      smoother=KalmanSmoother(),
+  )
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )
+  app = cast( Any, App.__new__( App ) )
+  app.appState = SimpleNamespace(
+      tracks={ track.id: track },
+      data=Homography( hom4k=np.eye( 3 ) ),
+      frameRate=10,
+  )
+  app.tabData = SimpleNamespace(
+      tabModelOptions=SimpleNamespace( getSmootherType=Mock( return_value=ExponentialSmoother ) ),
+      tabTracks=SimpleNamespace( refreshSelectedPlot=Mock() ),
+  )
+  app.minFrame = SimpleNamespace( get=lambda: 12 )
+  app.maxFrame = SimpleNamespace( get=lambda: 42 )
+  app.prgHomography = Mock()
+  app.root = Mock()
+  app.bumpIt = Mock()
+  app.updateLivePreviewMappings = Mock()
+
+  app.refreshHomographyData()
+
+  assert isinstance( track.smoother, ExponentialSmoother )
+  assert track.homog_smooth == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ) ]
+  app.tabData.tabTracks.refreshSelectedPlot.assert_called_once_with( 12, 42 )
+  app.updateLivePreviewMappings.assert_called_once_with( 0 )
 
 
 def test_sports_tracker_releases_inference_resources( monkeypatch ):

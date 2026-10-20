@@ -9,33 +9,34 @@ from PIL import Image, ImageTk
 from soccer_homography.appState import AppState
 from soccer_homography.data import ParticipationRole, Track, TrackSegment, roles
 from soccer_homography.db import (
-  PersonParticipation,
-  PersonParticipationDB,
-  TrackSegmentDB,
-  listClipParticipants,
-  replaceTrackSegments,
-  upsertPersonParticipation,
+    PersonParticipation,
+    PersonParticipationDB,
+    TrackSegmentDB,
+    listClipParticipants,
+    replaceTrackSegments,
+    upsertPersonParticipation,
 )
 from soccer_homography.inference.abstractions import (
-  AbstractInferenceModel,
-  IdentificationImageResult,
+    AbstractInferenceModel,
+    IdentificationImageResult,
 )
 from soccer_homography.inference.clip_model import ClipImageResult, ClipRoleClassifier
 from soccer_homography.inference.crop_inference import (
-  DEFAULT_IDENTIFICATION_PROMPT,
-  CropInferenceJobMessage,
-  CropInferenceWorker,
-  mostLikelyRole,
-  roleVoteCounts,
+    DEFAULT_IDENTIFICATION_PROMPT,
+    CropInferenceJobMessage,
+    CropInferenceWorker,
+    mostLikelyRole,
+    roleVoteCounts,
 )
 from soccer_homography.inference.vlm_model import MoondreamVLM
 from soccer_homography.log import logger
 from soccer_homography.ui.config.crop_worker import (
-  CropCache,
-  CropExtractionWorker,
-  CropJobMessage,
-  CropSet,
+    CropCache,
+    CropExtractionWorker,
+    CropJobMessage,
+    CropSet,
 )
+from soccer_homography.ui.config.trackplots import TrackPlots
 
 
 class Tracks:
@@ -52,6 +53,7 @@ class Tracks:
       role_change: Callable[ [], None ] | None = None,
       on_track_changed: Callable[ [ int | None ], None ] | None = None,
       crop_count_provider: Callable[ [], int ] | None = None,
+      frame_range_provider: Callable[ [], tuple[ int, int ] ] | None = None,
   ) -> None:
     self.appState = appState
     self.tab = tab
@@ -76,6 +78,7 @@ class Tracks:
     self.on_role_change = role_change
     self.on_track_changed = on_track_changed
     self.cropCountProvider = crop_count_provider
+    self.frameRangeProvider = frame_range_provider
 
   def setup( self ) -> None:
     colNames = [ "Track ID", "Num Frames", "Person" ]
@@ -99,13 +102,22 @@ class Tracks:
     self.tblTrackData.bind( "<Double-1>", self.editCell )
     self.tblTrackData.bind( "<<TreeviewSelect>>", self.onTrackSelected )
 
-    self.cropStatus = ttk.Label( self.cropsFrame, text="Click Crops to collect samples for unknown tracks." )
+    self.detailTabs = ttk.Notebook( self.cropsFrame )
+    self.detailTabs.pack( fill="both", expand=True )
+    self.cropTab = ttk.Frame( self.detailTabs )
+    self.plotTab = ttk.Frame( self.detailTabs )
+    self.detailTabs.add( self.cropTab, text="Crops" )
+    self.detailTabs.add( self.plotTab, text="Plots" )
+    self.plotWidget = TrackPlots( self.plotTab )
+    self.plotWidget.pack( fill="both", expand=True )
+
+    self.cropStatus = ttk.Label( self.cropTab, text="Click Crops to collect samples for unknown tracks." )
     self.cropStatus.place( x=8, y=6 )
-    self.cropProgress = ttk.Progressbar( self.cropsFrame, mode="determinate", length=180 )
-    self.cropProgress.place( x=8, y=30 )
+    self.cropProgress = ttk.Progressbar( self.cropTab, mode="determinate", length=180 )
+    self.cropProgress.place( x=8, y=25 )
     self.cropProgress.place_forget()
     self.cropTable = ttk.Treeview(
-        self.cropsFrame,
+        self.cropTab,
         columns=( "frame", "guess" ),
         show="headings",
         selectmode="browse",
@@ -114,15 +126,15 @@ class Tracks:
     self.cropTable.heading( "guess", text="Identified guess" )
     self.cropTable.column( "frame", width=75, anchor="w" )
     self.cropTable.column( "guess", width=245, anchor="w" )
-    self.cropTable.place( x=8, y=54, width=330, height=158 )
-    cropScrollbar = ttk.Scrollbar( self.cropsFrame, orient="vertical", command=self.cropTable.yview )
-    cropScrollbar.place( x=338, y=54, height=158 )
+    self.cropTable.place( x=8, y=48, width=330, height=138 )
+    cropScrollbar = ttk.Scrollbar( self.cropTab, orient="vertical", command=self.cropTable.yview )
+    cropScrollbar.place( x=338, y=48, height=138 )
     self.cropTable.configure( yscrollcommand=cropScrollbar.set )
     self.cropTable.bind( "<<TreeviewSelect>>", self.onCropSelected )
-    self.cropPreview = ttk.Label( self.cropsFrame, text="Select a crop", anchor="center", relief="sunken" )
-    self.cropPreview.place( x=350, y=54, width=286, height=158 )
-    self.cropPreviewCaption = ttk.Label( self.cropsFrame, text="", anchor="center" )
-    self.cropPreviewCaption.place( x=350, y=214, width=286, height=20 )
+    self.cropPreview = ttk.Label( self.cropTab, text="Select a crop", anchor="center", relief="sunken" )
+    self.cropPreview.place( x=350, y=48, width=286, height=138 )
+    self.cropPreviewCaption = ttk.Label( self.cropTab, text="", anchor="center" )
+    self.cropPreviewCaption.place( x=350, y=190, width=286, height=20 )
     self.cropWorker: CropExtractionWorker | None = None
     self.cropInferenceWorker: CropInferenceWorker | None = None
     self.inferenceModelVLM: AbstractInferenceModel = MoondreamVLM()
@@ -251,10 +263,7 @@ class Tracks:
       selection = self.editor.get()
       participant = self.peopleByLabel.get( selection )
       if participant is None:
-        matches = [
-            label for label in self.peopleByLabel
-            if selection.casefold() in label.casefold()
-        ]
+        matches = [ label for label in self.peopleByLabel if selection.casefold() in label.casefold() ]
         if len( matches ) == 1:
           selection = matches[ 0 ]
           participant = self.peopleByLabel[ selection ]
@@ -266,10 +275,7 @@ class Tracks:
         person_id = None
       else:
         person_id = participant.person_id.id
-      revised_segments = [
-          TrackSegment( item.frame_start, item.frame_end, person_id if item is segment else item.person_id )
-          for item in track.segments
-      ]
+      revised_segments = [ TrackSegment( item.frame_start, item.frame_end, person_id if item is segment else item.person_id ) for item in track.segments ]
       if not self.persistSegments( track.id, revised_segments ):
         self.refresh()
         return
@@ -292,10 +298,7 @@ class Tracks:
     if self.editor is None or event.keysym in ( "Up", "Down", "Left", "Right", "Return", "Escape" ):
       return
     text = self.editor.get()
-    matches = tuple(
-        label for label in self.person_options
-        if text.casefold() in label.casefold()
-    )
+    matches = tuple( label for label in self.person_options if text.casefold() in label.casefold() )
     self.editor.configure( values=matches or self.person_options )
 
   def updateParticipantRole( self, participant: PersonParticipation, role: ParticipationRole ) -> bool:
@@ -337,8 +340,7 @@ class Tracks:
                   person_id=segment.person_id,
                   frame_start=segment.frame_start,
                   frame_end=segment.frame_end,
-              )
-              for segment in segments
+              ) for segment in segments
           ],
       )
     except ( duckdb.Error, RuntimeError, ValueError ) as error:
@@ -366,8 +368,21 @@ class Tracks:
     self.selTrackID = track_id
     self.updateVLMButtonState()
     self.renderSelectedCrops( track )
+    min_frame, max_frame = self.selectedFrameRange()
+    self.plotWidget.setTrack( track, self.appState.frameRate, min_frame, max_frame )
     if self.on_track_changed is not None:
       self.on_track_changed( track_id )
+
+  def selectedFrameRange( self ) -> tuple[ int, int ]:
+    if self.frameRangeProvider is not None:
+      return self.frameRangeProvider()
+    return ( 0, max( ( box.frame for track in self.appState.tracks.values() for box in track.boxes ), default=0 ) )
+
+  def refreshSelectedPlot( self, min_frame: int | None = None, max_frame: int | None = None ) -> None:
+    if min_frame is None or max_frame is None:
+      min_frame, max_frame = self.selectedFrameRange()
+    track = self.appState.tracks.get( self.selTrackID ) if self.selTrackID is not None else None
+    self.plotWidget.setTrack( track, self.appState.frameRate, min_frame, max_frame )
 
   def renderSelectedCrops( self, track: Track | None ) -> None:
     self.clearCropImages()
@@ -390,12 +405,7 @@ class Tracks:
 
   def cropsForTrack( self, track_id: int ) -> CropSet:
     return sorted(
-        (
-            crop
-            for ( cached_track_id, _segment_start ), crops in self.cropCache.items()
-            if cached_track_id == track_id
-            for crop in crops
-        ),
+        ( crop for ( cached_track_id, _segment_start ), crops in self.cropCache.items() if cached_track_id == track_id for crop in crops ),
         key=lambda crop: crop[ 0 ],
     )
 
@@ -418,10 +428,7 @@ class Tracks:
         if segment.person_id is not None:
           continue
         boxes = sorted(
-            (
-                box for box in track.boxes
-                if segment.frame_start <= box.frame <= segment.frame_end
-            ),
+            ( box for box in track.boxes if segment.frame_start <= box.frame <= segment.frame_end ),
             key=lambda box: box.frame,
         )
         if boxes:
@@ -442,7 +449,7 @@ class Tracks:
     self.cropWorker = CropExtractionWorker(
         generation,
         self.appState.videoFile,
-      unknown_segments,
+        unknown_segments,
         self.cropResults,
         clip_id=self.appState.curClipID,
         max_crops=self.cropCountProvider() if self.cropCountProvider is not None else 6,
@@ -463,12 +470,7 @@ class Tracks:
       self.cropsButtonEnabled = crops_enabled
     track = self.appState.tracks.get( self.selTrackID ) if self.selTrackID is not None else None
     segment = track.segmentAt( self.current_frame ) if track is not None else None
-    has_crops = (
-        track is not None
-        and segment is not None
-        and self.cropCacheClipID == self.appState.curClipID
-        and bool( self.cropsForSegment( track.id, segment.frame_start ) )
-    )
+    has_crops = ( track is not None and segment is not None and self.cropCacheClipID == self.appState.curClipID and bool( self.cropsForSegment( track.id, segment.frame_start ) ) )
     enabled = self.cropsButtonEnabled and has_crops and self.cropInferenceWorker is None
     if self.vlmButton is not None:
       self.vlmButton.config( state=tk.NORMAL if enabled else tk.DISABLED )

@@ -171,7 +171,7 @@ class FrameMinimap( tk.Canvas ):
     if self.totalFrames <= 1 or height <= 1:
       return 0
     y = min( max( y, 0 ), height - 1 )
-    return round( ( height - 1 - y ) * ( self.totalFrames - 1 ) / ( height - 1 ) )
+    return round( ( height-1-y ) * ( self.totalFrames - 1 ) / ( height-1 ) )
 
   def onClick( self, event ) -> None:
     if self.on_frame_select is not None and self.totalFrames > 0:
@@ -201,7 +201,8 @@ class FrameMinimap( tk.Canvas ):
       self.create_rectangle(
           0,
           min( start_y, end_y ),
-          max( 1, self.winfo_width() // 2 ),
+          max( 1,
+               self.winfo_width() // 2 ),
           max( min( start_y, end_y ) + 1, max( start_y, end_y ) ),
           fill="#0000ff" if segment.person_id is not None else "#ff0000",
           outline="",

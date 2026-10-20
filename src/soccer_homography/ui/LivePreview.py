@@ -72,7 +72,7 @@ class LivePreview:
   def drawPitch( self ):
     self.canvas.create_image( 0, 0, anchor="nw", image=self.pitch_photo, tags=( "pitch",) )
 
-  def draw( self, homography: Point2D, color: str, scaleW, scaleL, track_id: int ):
+  def draw( self, homography: Point2D, color: str, scaleW, scaleL, track_id: int, smoothed: bool = True ):
     mx = int( homography.x * scaleW + self.pitch.padding )
     my = int( homography.y * scaleL + self.pitch.padding )
     radius = 6
@@ -84,6 +84,7 @@ class LivePreview:
         fill=color,
         outline="black",
         width=1,
+        stipple="" if smoothed else "gray50",
         tags=( "mapping", "homography_marker", f"track:{track_id}" ),
     )
 
@@ -111,8 +112,8 @@ class LivePreview:
       lkpIndex = track.getListIndex( frame_index )
       if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_smooth ):
         color = self.role_color( track.roleAt( frame_index, self.roles_by_person ) )
-        self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL, track.id )
-        self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL, track.id )
+        self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=False )
+        self.draw( track.homog_smooth[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=True )
     if self.pointerPosition is not None:
       self.updateHoveredTrack( *self.pointerPosition )
 

@@ -10,58 +10,58 @@ from PIL import Image, ImageTk
 
 from soccer_homography.appState import AppState
 from soccer_homography.data import (
-    CHUNK_SIZE,
-    BoundingBox,
-    Homography,
-    ParticipationRole,
-    SelectionPoint,
-    Track,
-    TrackData,
-    TrackSegment,
-    VideoData,
+  CHUNK_SIZE,
+  BoundingBox,
+  Homography,
+  ParticipationRole,
+  SelectionPoint,
+  Track,
+  TrackData,
+  TrackSegment,
+  VideoData,
 )
 from soccer_homography.db import (
-    TrackSegmentDB,
-    addGenericPeopleToMatch,
-    deleteTrackSegments,
-    deleteTrackingChunks,
-    getCameraByID,
-    getClipByID,
-    getClipHomography,
-    getMatchByID,
-    getVideoByID,
-    initDB,
-    listClipParticipants,
-    listClips,
-    listTrackSegments,
-    readDetectionChunks,
-    readTrackingChunks,
-    replaceTrackSegments,
-    saveClipHomography,
-    writeBatchDetections,
-    writeBatchTracking,
+  TrackSegmentDB,
+  addGenericPeopleToMatch,
+  deleteTrackingChunks,
+  deleteTrackSegments,
+  getCameraByID,
+  getClipByID,
+  getClipHomography,
+  getMatchByID,
+  getVideoByID,
+  initDB,
+  listClipParticipants,
+  listClips,
+  listTrackSegments,
+  readDetectionChunks,
+  readTrackingChunks,
+  replaceTrackSegments,
+  saveClipHomography,
+  writeBatchDetections,
+  writeBatchTracking,
 )
 from soccer_homography.db.chunk_writer import AsyncChunkWriter
 from soccer_homography.encoder import BaseVideoEncoder
 from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import (
-    Command,
-    CommandType,
-    Output,
-    OutputType,
-    SportsTracker,
+  Command,
+  CommandType,
+  Output,
+  OutputType,
+  SportsTracker,
 )
 from soccer_homography.ui import (
-    Configuration,
-    DataMaintenance,
-    FrameMinimap,
-    HomographyUI,
-    LabelledSpinBox,
-    LivePreview,
-    MainCanvasController,
-    ProgressBarETA,
-    RadarCanvas,
-    Slider,
+  Configuration,
+  DataMaintenance,
+  FrameMinimap,
+  HomographyUI,
+  LabelledSpinBox,
+  LivePreview,
+  MainCanvasController,
+  ProgressBarETA,
+  RadarCanvas,
+  Slider,
 )
 from soccer_homography.ui.config.crop_worker import deleteTrackCrops
 from soccer_homography.ui.frameminimap import TrackingType
@@ -127,7 +127,7 @@ class App:
     self.imagePreview.place( x=50, y=20, width=1280, height=720 )
 
     # Tabular data + line detection options
-    self.crops = ttk.LabelFrame( self.root, text="Crops" )
+    self.crops = ttk.LabelFrame( self.root, text="Track details" )
     self.crops.place( x=680, y=690 + 56, width=650, height=240 )
     self.tabData = Configuration(
         parent=self.root,
@@ -136,7 +136,9 @@ class App:
         crops_frame=self.crops,
         on_frame_select=self.onFrameSelect,
         on_role_changed=self.onRoleChanged,
-        on_track_changed=self.onTrackChanged
+        on_track_changed=self.onTrackChanged,
+        on_smoother_change=self.onSmootherChange,
+        frame_range_provider=lambda: ( self.minFrame.get(), self.maxFrame.get() ),
     )
 
     # radarMap
@@ -245,8 +247,31 @@ class App:
     self.lblVideoFrameSlider = tk.Label( self.root, text="Video Frame", fg="#000000", font=( "Arial", 10 ), anchor="center" )
     self.lblVideoFrameSlider.place( x=left, y=top, width=100, height=24 )
 
-    self.minFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 90, y=top + 40, width=100, height=24, offset=80, label="Start" )
-    self.maxFrame = LabelledSpinBox( root=self.root, from_=0, to=100, x=left + 90, y=top + 68, width=100, height=24, offset=80, label="Finish", initValue=100 )
+    self.minFrame = LabelledSpinBox(
+        root=self.root,
+        from_=0,
+        to=100,
+        x=left + 90,
+        y=top + 40,
+        width=100,
+        height=24,
+        offset=80,
+        label="Start",
+        command=self.onPlotFrameRangeChanged,
+    )
+    self.maxFrame = LabelledSpinBox(
+        root=self.root,
+        from_=0,
+        to=100,
+        x=left + 90,
+        y=top + 68,
+        width=100,
+        height=24,
+        offset=80,
+        label="Finish",
+        initValue=100,
+        command=self.onPlotFrameRangeChanged,
+    )
 
     self.btnResetZoom = tk.Button( self.root, text="Reset Zoom", font=( "Arial", 10 ), command=self.cmdResetZoom )
     self.btnResetZoom.place( x=left + 210, y=top + 40, width=88, height=28 )
@@ -892,6 +917,13 @@ class App:
   def onOptionsChange( self ):
     self.mainImageController.refreshHough()
 
+  def onSmootherChange( self ):
+    self.refreshHomographyData( self.mainImageController.frame_num )
+
+  def onPlotFrameRangeChanged( self, _value=None ):
+    if hasattr( self, "minFrame" ) and hasattr( self, "maxFrame" ):
+      self.tabData.tabTracks.refreshSelectedPlot( self.minFrame.get(), self.maxFrame.get() )
+
   def redisplayHomographyData( self ):
     self.tabData.tabHomographyData.refresh()
     self.appState.data.compute()
@@ -908,9 +940,14 @@ class App:
     # Now recalculate
     logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
     self.prgHomography.setRange( 0, len( self.appState.tracks.items() ) )
+    smoother_type = self.tabData.tabModelOptions.getSmootherType()
     for value in self.appState.tracks.values():
+      if not isinstance( value.smoother, smoother_type ):
+        value.smoother = smoother_type()
+        value.clearHomography()
       value.refreshHomography( self.appState.data, fps=self.appState.frameRate )
       self.root.after( 0, self.bumpIt )
+    self.tabData.tabTracks.refreshSelectedPlot( self.minFrame.get(), self.maxFrame.get() )
     self.updateLivePreviewMappings( index )
 
 

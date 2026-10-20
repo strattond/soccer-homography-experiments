@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from tkinter import IntVar, StringVar, messagebox, ttk
 
 from soccer_homography.appState import AppState
+from soccer_homography.data import ExponentialSmoother, KalmanSmoother, PositionSmoother
 from soccer_homography.inference.crop_inference import (
     DEFAULT_IDENTIFICATION_PROMPT,
     loadIdentificationPrompt,
@@ -16,6 +17,7 @@ class ModelOptionsState:
   identificationModel: StringVar = field( default_factory=lambda: tk.StringVar( value="Clip" ) )
   identificationPrompt: StringVar = field( default_factory=lambda: tk.StringVar( value=DEFAULT_IDENTIFICATION_PROMPT ) )
   cropsPerSegment: IntVar = field( default_factory=lambda: tk.IntVar( value=6 ) )
+  positionSmoother: StringVar = field( default_factory=lambda: tk.StringVar( value="Kalman" ) )
   # yapf: enable
 
 
@@ -52,6 +54,21 @@ class ModelOptions:
     )
     self.optCropsPerSegment.pack( anchor="w" )
 
+    ttk.Label(
+        optionsFrame,
+        text="Position smoother",
+    ).pack(
+        anchor="w", pady=( 12, 0 )
+    )
+    self.optPositionSmoother = ttk.Combobox(
+        optionsFrame,
+        textvariable=self.modelOpts.positionSmoother,
+        values=( "Exponential", "Kalman" ),
+        state="readonly",
+    )
+    self.optPositionSmoother.pack( anchor="w" )
+    self.optPositionSmoother.bind( "<<ComboboxSelected>>", self.onSmootherChanged )
+
     promptFrame = ttk.LabelFrame( self.tab, text="Person identification prompt" )
     promptFrame.pack( side="left", anchor="nw", fill="both", expand=True, padx=4, pady=4 )
     self.promptText = tk.Text( promptFrame, height=5, wrap="word", undo=True )
@@ -69,6 +86,18 @@ class ModelOptions:
 
   def getCropsPerSegment( self ) -> int:
     return self.modelOpts.cropsPerSegment.get()
+
+  def getSmootherType( self ) -> type[ PositionSmoother ]:
+    name = self.modelOpts.positionSmoother.get()
+    if name == "Exponential":
+      return ExponentialSmoother
+    if name == "Kalman":
+      return KalmanSmoother
+    raise ValueError( f"Unsupported position smoother: {name}" )
+
+  def onSmootherChanged( self, _event=None ) -> None:
+    if self.on_change is not None:
+      self.on_change()
 
   def getIdentificationPrompt( self ) -> str:
     return self.promptText.get( "1.0", "end-1c" ).strip()

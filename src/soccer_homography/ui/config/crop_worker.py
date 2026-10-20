@@ -85,10 +85,7 @@ def planCropFrames(
     return []
 
   center = ( frameNums[ 0 ] + frameNums[ -1 ] ) / 2
-  segmentRemaining = {
-      segment_key: min( max_crops, len( frame_numbers_for_segment ) )
-      for segment_key, frame_numbers_for_segment in framesBySegment.items()
-  }
+  segmentRemaining = { segment_key: min( max_crops, len( frame_numbers_for_segment ) ) for segment_key, frame_numbers_for_segment in framesBySegment.items() }
   frameScores = { frame: sum( segmentRemaining[ key ] > 0 for key in segments_by_frame ) for frame, segments_by_frame in boxesByFrame.items() }
   pendingFrames = set( frameNums )
   selFrames: list[ int ] = []
@@ -181,15 +178,9 @@ class CropExtractionWorker( threading.Thread ):
         return
       logger.info( f"Planned {len( plan )} crop frames for generation {self.generation}" )
 
-      segment_keys = {
-          ( track_id, segment_start )
-          for track_id, segment_start, _ in map( normalizeTrackBoxes, self.tracks )
-      }
+      segment_keys = { ( track_id, segment_start ) for track_id, segment_start, _ in map( normalizeTrackBoxes, self.tracks ) }
       cache: CropCache = { key: [] for key in segment_keys }
-      frames_by_segment = {
-          ( track_id, segment_start ): { box.frame for box in boxes }
-          for track_id, segment_start, boxes in map( normalizeTrackBoxes, self.tracks )
-      }
+      frames_by_segment = { ( track_id, segment_start ): { box.frame for box in boxes } for track_id, segment_start, boxes in map( normalizeTrackBoxes, self.tracks ) }
       crop_directory = Path( "crops" ) / str( self.clip_id )
       pendingBySegment = Counter( assignment[ 0 ] for plannedFrame in plan for assignment in plannedFrame.trackBoxes )
       self.loadCachedCrops( cache, crop_directory, frames_by_segment )
@@ -200,16 +191,11 @@ class CropExtractionWorker( threading.Thread ):
           return
 
         segmentsNeedingCrops = [
-            assignment
-            for assignment in plannedFrame.trackBoxes
-            if len( cache[ assignment[ 0 ] ] ) < self.max_crops
-            and all( frame_number != plannedFrame.frameNumber for frame_number, _ in cache[ assignment[ 0 ] ] )
+            assignment for assignment in plannedFrame.trackBoxes
+            if len( cache[ assignment[ 0 ] ] ) < self.max_crops and all( frame_number != plannedFrame.frameNumber for frame_number, _ in cache[ assignment[ 0 ] ] )
         ]
         # Get the crops from disk if they exist, otherwise extract them from the video frame
-        uncachedSegments = [
-            assignment for assignment in segmentsNeedingCrops
-            if not self.cropPath( crop_directory, assignment[ 0 ], plannedFrame.frameNumber ).is_file()
-        ]
+        uncachedSegments = [ assignment for assignment in segmentsNeedingCrops if not self.cropPath( crop_directory, assignment[ 0 ], plannedFrame.frameNumber ).is_file() ]
         cached_segments = [ assignment for assignment in segmentsNeedingCrops if assignment not in uncachedSegments ]
         self.getUncachedSegmentsFromDisk( cache, crop_directory, plannedFrame, cached_segments )
         if uncachedSegments:
@@ -286,15 +272,12 @@ class CropExtractionWorker( threading.Thread ):
       track_id, segment_start = segment_key
       prefix = f"{track_id}_{segment_start}_"
       cached_frames = sorted(
-          (
-              ( int( path.stem[len(prefix):] ), path )
-              for path in crop_directory.glob( f"{prefix}*.png" )
-              if path.stem[len(prefix):].isdecimal()
-              and int( path.stem[len(prefix):] ) in frames_by_segment[ segment_key ]
-          ),
+          ( ( int( path.stem[ len( prefix ): ] ), path )
+            for path in crop_directory.glob( f"{prefix}*.png" )
+            if path.stem[ len( prefix ): ].isdecimal() and int( path.stem[ len( prefix ): ] ) in frames_by_segment[ segment_key ] ),
           key=lambda item: item[ 0 ],
       )
-      for frame_number, crop_path in cached_frames[: self.max_crops]:
+      for frame_number, crop_path in cached_frames[ :self.max_crops ]:
         crop = cv2.imread( str( crop_path ), cv2.IMREAD_COLOR )
         if crop is None:
           logger.warning( f"Could not load cached crop {crop_path}; it will be re-extracted if selected." )
