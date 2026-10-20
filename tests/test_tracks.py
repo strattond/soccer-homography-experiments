@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 from soccer_homography import App
-from soccer_homography.data import BoundingBox, Homography, Person, Point2D, Track, TrackSegment
+from soccer_homography.data import BoundingBox, Homography, KalmanSmoother, Person, Point2D, Track, TrackSegment
 from soccer_homography.db.persist import Match as DBMatch
 from soccer_homography.db.persist import Person as DBPerson
 from soccer_homography.db.persist import PersonParticipation
@@ -77,6 +77,53 @@ def test_track_without_homography_does_not_create_partial_mappings():
 
   assert track.homog == []
   assert track.homog_smooth == []
+
+
+def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame_time():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( 0, 0, 0, 0, 0.9, 0, 0 ),
+          BoundingBox( 1, 0, 1, 1, 0.9, 0, 10 ),
+      ],
+  )
+
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )
+  track.addBox( BoundingBox( 2, 0, 2, 2, 0.9, 0, 20 ) )
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )
+
+  assert track.homog == [ Point2D( 0, 0 ), Point2D( 1, 1 ), Point2D( 2, 2 ) ]
+  assert track.homog_smooth == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ), Point2D( 0.56, 0.56 ) ]
+  np.testing.assert_allclose(
+      [ tuple( velocity ) for velocity in track.homog_velocity ],
+      [ ( 0, 0 ), ( 0.2, 0.2 ), ( 0.36, 0.36 ) ],
+  )
+
+
+def test_kalman_smoother_rejects_measurements_over_ten_metres_per_second():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( 0, 0, 0, 0, 0.9, 0, 0 ),
+          BoundingBox( 20, 0, 20, 20, 0.9, 0, 1 ),
+      ],
+      smoother=KalmanSmoother(),
+  )
+
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
+
+  assert track.homog[ 1 ] == Point2D( 20, 20 )
+  assert track.homog_smooth[ 1 ].x < 10
+  assert np.linalg.norm( track.homog_velocity[ 1 ].to_numpy() ) <= 10
+
+  track.clearHomography()
+  assert track.homog == []
+  assert track.homog_smooth == []
+  assert track.homog_velocity == []
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
+  assert track.homog_smooth[ 0 ] == Point2D( 0, 0 )
 
 
 def test_track_initial_segments_follow_consecutive_frame_runs_and_extend_live():

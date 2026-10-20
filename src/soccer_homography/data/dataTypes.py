@@ -6,6 +6,8 @@ import cv2
 import numpy as np
 from cv2.typing import MatLike
 
+from .smoothing import ExponentialSmoother, KalmanSmoother, PositionSmoother
+
 
 @dataclass( slots=True )
 class Point2D:
@@ -190,7 +192,6 @@ roles: tuple[ ParticipationRole, ...] = (
 )
 
 
-
 @dataclass( slots=True )
 class BoundingBox:
   # yapf: disable
@@ -236,8 +237,10 @@ class Track:
   role:          ParticipationRole   = "unknown"
   homog:         list[Point2D]       = field( default_factory=list )
   homog_smooth:  list[Point2D]       = field( default_factory=list )
-  smooth_pos:    np.ndarray | None   = None
+  homog_velocity: list[Point2D]      = field( default_factory=list )
   segments:      list[TrackSegment]  = field( default_factory=list )
+  #smoother:      PositionSmoother    = field( default_factory=ExponentialSmoother, repr=False, compare=False )
+  smoother:      PositionSmoother    = field( default_factory=KalmanSmoother, repr=False, compare=False )
   # yapf: enable
 
   def __post_init__( self ) -> None:
@@ -302,9 +305,7 @@ class Track:
             max( segment.frame_start, lo ),
             min( segment.frame_end, hi - 1 ),
             segment.person_id,
-        )
-        for segment in self.segments
-        if segment.frame_start < hi and segment.frame_end >= lo
+        ) for segment in self.segments if segment.frame_start < hi and segment.frame_end >= lo
     ]
     return exported
 
@@ -333,10 +334,14 @@ class Track:
   def clearHomography( self ):
     self.homog.clear()
     self.homog_smooth.clear()
+    self.homog_velocity.clear()
+    self.smoother.reset()
 
-  def refreshHomography( self, transformer: Homography ):
+  def refreshHomography( self, transformer: Homography, fps: float = 1.0 ):
     if transformer.hom4k is None:
       return
+    if not np.isfinite( fps ) or fps <= 0:
+      raise ValueError( "Frame rate must be a positive finite number" )
     boxLen = len( self.boxes )
     hmgLen = len( self.homog )
     positions: list[ list[ float ] ] = []
@@ -350,30 +355,14 @@ class Track:
     # Something to homography
     xf = transformer.shazam( positions )
     if xf is not None:
-      for ( x, y ) in xf:
-        # Raw positions
+      previous_frame = self.boxes[ hmgLen - 1 ].frame if hmgLen > 0 else None
+      for box_index, ( x, y ) in enumerate( xf, start=hmgLen ):
+        box = self.boxes[ box_index ]
+        dt = 1.0 / fps if previous_frame is None else ( box.frame - previous_frame ) / fps
+        if dt <= 0:
+          raise ValueError( "Track box frames must be strictly increasing" )
+        estimate = self.smoother.update( ( float( x ), float( y ) ), dt )
         self.homog.append( Point2D( x, y ) )
-        # Smooth it
-        xs, ys = self.smooth( x, y )
-
-        self.homog_smooth.append( Point2D( xs, ys ) )
-
-  def smooth( self, x, y ):
-    alpha = 0.2
-    dead_zone = 0.15
-
-    curr = np.array( [ x, y ], dtype=float )
-
-    if self.smooth_pos is None:
-      self.smooth_pos = curr
-      return Point2D( curr[ 0 ], curr[ 1 ] )
-
-    prev = self.smooth_pos
-    delta = curr - prev
-
-    if np.linalg.norm( delta ) < dead_zone:
-      return prev
-
-    new = alpha*curr + ( 1-alpha ) * prev
-    self.smooth_pos = new
-    return Point2D( new[ 0 ], new[ 1 ] )
+        self.homog_smooth.append( Point2D( *estimate.position ) )
+        self.homog_velocity.append( Point2D( *estimate.velocity ) )
+        previous_frame = box.frame

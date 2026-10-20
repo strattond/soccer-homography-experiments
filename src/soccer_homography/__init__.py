@@ -909,7 +909,7 @@ class App:
     logger.info( f"Refreshing homography calculations for {len(self.appState.tracks.items())} tracks" )
     self.prgHomography.setRange( 0, len( self.appState.tracks.items() ) )
     for value in self.appState.tracks.values():
-      value.refreshHomography( self.appState.data )
+      value.refreshHomography( self.appState.data, fps=self.appState.frameRate )
       self.root.after( 0, self.bumpIt )
     self.updateLivePreviewMappings( index )
 
