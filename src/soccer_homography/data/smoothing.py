@@ -7,6 +7,7 @@ from filterpy.kalman import KalmanFilter
 
 
 CHI_SQUARED_2D_99_PERCENT = 9.21
+MAX_CONSECUTIVE_REJECTIONS = 3
 
 
 @dataclass( frozen=True, slots=True )
@@ -70,9 +71,11 @@ class KalmanSmoother:
     self.measurement_noise = measurement_noise
     self.acceleration_variance = acceleration_variance
     self._filter: KalmanFilter | None = None
+    self._consecutive_rejections = 0
 
   def reset( self ) -> None:
     self._filter = None
+    self._consecutive_rejections = 0
 
   def update( self, position: tuple[ float, float ], dt: float ) -> PositionEstimate:
     if dt <= 0:
@@ -86,6 +89,7 @@ class KalmanSmoother:
       kf.H = np.array( [ [ 1.0, 0.0, 0.0, 0.0 ], [ 0.0, 1.0, 0.0, 0.0 ] ] )
       kf.R = np.eye( 2 ) * self.measurement_noise
       self._filter = kf
+      self._consecutive_rejections = 0
       return PositionEstimate( position, ( 0.0, 0.0 ) )
 
     kf = self._filter
@@ -114,6 +118,14 @@ class KalmanSmoother:
     )
     if mahalanobis_distance_squared <= CHI_SQUARED_2D_99_PERCENT:
       kf.update( measurement )
+      self._consecutive_rejections = 0
+    else:
+      self._consecutive_rejections += 1
+      if self._consecutive_rejections >= MAX_CONSECUTIVE_REJECTIONS:
+        kf.x = np.array( [ position[ 0 ], position[ 1 ], 0.0, 0.0 ] ).reshape( 4, 1 )
+        kf.P = np.diag( [ 1.0, 1.0, 25.0, 25.0 ] )
+        self._consecutive_rejections = 0
+        return PositionEstimate( position, ( 0.0, 0.0 ) )
 
     velocity = kf.x[ 2:4, 0 ]
     speed = np.linalg.norm( velocity )

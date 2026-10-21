@@ -567,7 +567,11 @@ class App:
     if not self.persistTrackSegments( track.id, revised ):
       return
     track.segments = revised
+    if self.appState.data.hom4k is not None:
+      track.clearHomography()
+      track.refreshHomography( self.appState.data, fps=self.appState.frameRate )
     self.tabData.tabTracks.refresh()
+    self.tabData.tabTracks.refreshSelectedPlot()
     self.minimap.setTrackSegments( track.segments )
     self.updateLivePreviewMappings( frame )
 

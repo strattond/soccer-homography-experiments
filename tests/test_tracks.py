@@ -89,6 +89,7 @@ def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame
           BoundingBox( 0, 0, 0, 0, 0.9, 0, 0 ),
           BoundingBox( 1, 0, 1, 1, 0.9, 0, 10 ),
       ],
+      segments=[ TrackSegment( 0, 20 ) ],
       smoother=ExponentialSmoother(),
   )
 
@@ -145,6 +146,38 @@ def test_kalman_smoother_recovers_from_fast_measurements_and_tracks_reversal():
   assert max( position[ 0 ] for position in positions ) > 0.5
   assert estimate.position[ 0 ] < positions[ -1 ][ 0 ]
   assert estimate.velocity[ 0 ] < 0
+
+
+def test_kalman_smoother_recovers_after_consecutive_rejected_measurements():
+  smoother = KalmanSmoother()
+  smoother.update( ( 0, 0 ), dt=0.02 )
+
+  first = smoother.update( ( 20, 0 ), dt=0.02 )
+  second = smoother.update( ( 20, 0 ), dt=0.02 )
+  recovered = smoother.update( ( 20, 0 ), dt=0.02 )
+
+  assert first.position[ 0 ] < 1
+  assert second.position[ 0 ] < 1
+  assert recovered.position == ( 20, 0 )
+  assert recovered.velocity == ( 0, 0 )
+
+
+def test_track_resets_smoothing_at_segment_boundaries():
+  track = Track(
+      clip=1,
+      id=8,
+      boxes=[
+          BoundingBox( position, 0, position, 0, 0.9, 0, frame )
+          for frame, position in enumerate( ( 0, 1, 100, 101 ) )
+      ],
+      segments=[ TrackSegment( 0, 1, 17 ), TrackSegment( 2, 3, 18 ) ],
+  )
+
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
+
+  assert track.raw_velocity[ 2 ] == Point2D( 0, 0 )
+  assert track.filtered_position[ 2 ] == track.raw_position[ 2 ]
+  assert track.filtered_velocity[ 2 ] == Point2D( 0, 0 )
 
 
 def test_track_initial_segments_follow_consecutive_frame_runs_and_extend_live():
@@ -1072,11 +1105,16 @@ def test_splitting_track_segment_includes_current_frame_in_left_half():
   track = Track(
       clip=1,
       id=8,
+      boxes=[
+          BoundingBox( position, 0, position, 0, 0.9, 0, frame )
+          for frame, position in enumerate( [ *range( 6 ), *range( 100, 105 ) ] )
+      ],
       segments=[ TrackSegment( 0, 10, 17 ) ],
   )
+  track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
   app = cast( Any, App.__new__( App ) )
   app.curTrackID = 8
-  app.appState = SimpleNamespace( tracks={ 8: track } )
+  app.appState = SimpleNamespace( tracks={ 8: track }, data=Homography( hom4k=np.eye( 3 ) ), frameRate=1 )
   app.mainImageController = SimpleNamespace( frame_num=5 )
   app.persistTrackSegments = Mock( return_value=True )
   app.tabData = SimpleNamespace( tabTracks=Mock() )
@@ -1092,6 +1130,10 @@ def test_splitting_track_segment_includes_current_frame_in_left_half():
   app.persistTrackSegments.assert_called_once_with( 8, track.segments )
   app.minimap.setTrackSegments.assert_called_once_with( track.segments )
   app.updateLivePreviewMappings.assert_called_once_with( 5 )
+  assert track.raw_velocity[ 6 ] == Point2D( 0, 0 )
+  assert track.filtered_position[ 6 ] == track.raw_position[ 6 ]
+  assert track.filtered_velocity[ 6 ] == Point2D( 0, 0 )
+  app.tabData.tabTracks.refreshSelectedPlot.assert_called_once_with()
 
 
 def test_crop_coordinates_scale_to_source_frame_dimensions():
@@ -1608,6 +1650,7 @@ def test_refresh_homography_applies_model_options_smoother_and_recalculates_trac
           BoundingBox( 0, 0, 0, 0, 0.9, 0, 0 ),
           BoundingBox( 1, 0, 1, 1, 0.9, 0, 10 ),
       ],
+      segments=[ TrackSegment( 0, 10 ) ],
       smoother=KalmanSmoother(),
   )
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )

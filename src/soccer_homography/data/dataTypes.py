@@ -361,9 +361,21 @@ class Track:
     if xf is not None:
       previous_frame = self.boxes[ hmgLen - 1 ].frame if hmgLen > 0 else None
       previous_position = self.raw_position[ hmgLen - 1 ] if hmgLen > 0 else None
+      previous_segment = self.segmentAt( previous_frame ) if previous_frame is not None else None
       for box_index, ( x, y ) in enumerate( xf, start=hmgLen ):
         box = self.boxes[ box_index ]
-        dt = 1.0 / fps if previous_frame is None else ( box.frame - previous_frame ) / fps
+        segment = self.segmentAt( box.frame )
+        starts_segment = (
+            previous_frame is None
+            or segment is not previous_segment
+            or ( segment is None and box.frame != previous_frame + 1 )
+        )
+        if starts_segment:
+          self.smoother.reset()
+          previous_position = None
+          dt = 1.0 / fps
+        else:
+          dt = ( box.frame - previous_frame ) / fps
         if dt <= 0:
           raise ValueError( "Track box frames must be strictly increasing" )
         raw_position = Point2D( x, y )
@@ -378,3 +390,4 @@ class Track:
         self.filtered_velocity.append( Point2D( *estimate.velocity ) )
         previous_position = raw_position
         previous_frame = box.frame
+        previous_segment = segment
