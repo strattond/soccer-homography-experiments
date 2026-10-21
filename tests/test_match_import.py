@@ -204,27 +204,32 @@ def test_generic_people_are_created_once_and_assigned_with_generic_roles( conn )
   people = ensureGenericPersons( conn )
   repeated_people = ensureGenericPersons( conn )
 
-  assert len( people ) == 25
+  assert len( people ) == 47
   assert [ ( person.first_name, person.last_name ) for person in people ] == [
       ( "Main", "Referee" ),
       ( "Assistant", "Referee 1" ),
       ( "Assistant", "Referee 2" ),
+      ( "Home", "Keeper 1" ),
+      ( "Home", "Keeper 2" ),
+      *( ( "Home", f"Player {number}" ) for number in range( 1, 21 ) ),
       ( "Opposition", "Keeper 1" ),
       ( "Opposition", "Keeper 2" ),
       *( ( "Opposition", f"Player {number}" ) for number in range( 1, 21 ) ),
   ]
   assert [ person.id for person in repeated_people ] == [ person.id for person in people ]
-  assert conn.execute( "SELECT count(*) FROM Person" ).fetchone() == ( 25, )
+  assert conn.execute( "SELECT count(*) FROM Person" ).fetchone() == ( 47, )
 
   participations = addGenericPeopleToMatch( conn, match.id )
   repeated_participations = addGenericPeopleToMatch( conn, match.id )
 
-  assert len( participations ) == len( repeated_participations ) == 25
+  assert len( participations ) == len( repeated_participations ) == 47
   assert conn.execute(
       "SELECT role, count(*) FROM PersonParticipation GROUP BY role ORDER BY role"
   ).fetchall() == [
       ( "away_goalkeeper", 2 ),
       ( "away_player", 20 ),
+      ( "home_goalkeeper", 2 ),
+      ( "home_player", 20 ),
       ( "referee", 3 ),
   ]
-  assert conn.execute( "SELECT count(*) FROM PersonParticipation WHERE is_placeholder" ).fetchone() == ( 25, )
+  assert conn.execute( "SELECT count(*) FROM PersonParticipation WHERE is_placeholder" ).fetchone() == ( 47, )

@@ -1,7 +1,12 @@
 import time
 import tkinter as tk
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from tkinter import ttk
+
+from PIL import Image, ImageDraw, ImageFont
+
+from soccer_homography.data.dataTypes import Point2D, Track
 
 
 class Slider:
@@ -196,3 +201,97 @@ class ProgressBarETA:
         self.canvas.itemconfig( self.lblETATime, text="--:--" )
       timeSpent = time.strftime( "%M:%S", time.gmtime( elapsed ) )
       self.canvas.itemconfig( self.lblDuratin, text=timeSpent )
+
+
+@dataclass
+class TrackOverlay:
+  title: str
+  width: int
+  height: int
+  background_colour: tuple[ int, int, int ]
+  opacity: float
+  data: Track | None
+  frameIndex: int
+
+  corner_radius: int = 12
+  padding: int = 10
+  text_colour: tuple[ int, int, int, int ] = ( 0, 0, 0, 255 )
+
+  def render( self ) -> Image.Image:
+    alpha = max( 0, min( 255, int( self.opacity * 255 ) ) )
+    image = Image.new(
+        "RGBA",
+        ( self.width, self.height ),
+        ( 0, 0, 0, 0 ),
+    )
+
+    draw = ImageDraw.Draw( image )
+
+    # Background panel
+    draw.rounded_rectangle(
+        [ ( 0, 0 ), ( self.width - 1, self.height - 1 ) ],
+        radius=self.corner_radius,
+        fill=( *self.background_colour, alpha ),
+    )
+
+    title_font = ImageFont.load_default()
+    body_font = ImageFont.load_default()
+
+    x = self.padding
+    y = self.padding
+
+    # Title
+    draw.text(
+        ( x, y ),
+        self.title,
+        font=title_font,
+        fill=self.text_colour,
+    )
+
+    y += int( title_font.size * 1.6 ) if hasattr( title_font, "size" ) else 20
+
+    # Separator
+    draw.line(
+        [ ( x, y ), ( self.width - self.padding, y ) ],
+        fill=( 255, 255, 255, alpha ),
+        width=1,
+    )
+
+    y += 8
+
+    if self.data is not None:
+      raw_position = self.data.raw_position[ self.frameIndex ] if self.frameIndex < len( self.data.raw_position ) else None
+      raw_velocity = self.data.raw_velocity[ self.frameIndex ] if self.frameIndex < len( self.data.raw_velocity ) else None
+      filtered_position = self.data.filtered_position[ self.frameIndex ] if self.frameIndex < len( self.data.filtered_position ) else None
+      filtered_velocity = self.data.filtered_velocity[ self.frameIndex ] if self.frameIndex < len( self.data.filtered_velocity ) else None
+
+      yIncr = int( body_font.size * 1.4 ) if hasattr( body_font, "size" ) else 18
+
+      self.textLine( draw, x, y + yIncr*0, raw_position, "Raw Position", body_font )
+      self.textLine( draw, x, y + yIncr*1, raw_velocity.magnitude() if raw_velocity is not None else None, "Raw Velocity", body_font )
+      self.textLine( draw, x, y + yIncr*2, filtered_position, "Filtered Position", body_font )
+      self.textLine( draw, x, y + yIncr*3, filtered_velocity.magnitude() if filtered_velocity is not None else None, "Filtered Velocity", body_font )
+
+    return image
+
+  def textLine( self, draw, x, y, value: Point2D | float | None, label, font ):
+    if value is None:
+      return
+    draw.text(
+        ( x, y ),
+        label,
+        font=font,
+        fill=self.text_colour,
+    )
+    if isinstance( value, Point2D ):
+      display = f"{value.x:.2f}, {value.y:.2f}"
+    elif isinstance( value, float ):
+      display = f"{value:.2f}"
+    else:
+      display = ""
+    draw.text(
+        ( x + 100, y ),
+        display,
+        font=font,
+        fill=self.text_colour,
+    )

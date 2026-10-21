@@ -38,9 +38,11 @@ def test_add_generic_people_to_current_clip_assigns_them_to_clip_match( conn, mo
   app.addGenericPeopleToCurrentClip()
 
   participants = listClipParticipants( conn, clip.id )
-  assert len( participants ) == 25
+  assert len( participants ) == 47
   assert Counter( participant.role for participant in participants ) == {
       "referee": 3,
+      "home_goalkeeper": 2,
+      "home_player": 20,
       "away_goalkeeper": 2,
       "away_player": 20,
   }

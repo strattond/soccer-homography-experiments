@@ -110,10 +110,10 @@ class LivePreview:
     scaleW, scaleL = self.pitch.get_pitch_scale
     for track in tracks.values():
       lkpIndex = track.getListIndex( frame_index )
-      if lkpIndex is not None and lkpIndex < len( track.homog ) and lkpIndex < len( track.homog_position ):
+      if lkpIndex is not None and lkpIndex < len( track.raw_position ) and lkpIndex < len( track.filtered_position ):
         color = self.role_color( track.roleAt( frame_index, self.roles_by_person ) )
-        self.draw( track.homog[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=False )
-        self.draw( track.homog_position[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=True )
+        self.draw( track.raw_position[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=False )
+        self.draw( track.filtered_position[ lkpIndex ], color, scaleW, scaleL, track.id, smoothed=True )
     if self.pointerPosition is not None:
       self.updateHoveredTrack( *self.pointerPosition )
 

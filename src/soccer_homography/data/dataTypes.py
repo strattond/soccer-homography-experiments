@@ -31,6 +31,9 @@ class Point2D:
   def to_numpy( self ) -> np.ndarray:
     return np.array( [ self.x, self.y ], dtype=np.float32 )
 
+  def magnitude( self ) -> float:
+    return (self.x**2 + self.y**2) ** 0.5
+
 
 @dataclass( slots=True )
 class SelectionPoint:
@@ -230,16 +233,17 @@ class TrackSegment:
 @dataclass( slots=True )
 class Track:
   # yapf: disable
-  clip:           int
-  id:             int
-  person:         Person | int | None = None
-  boxes:          list[BoundingBox]   = field( default_factory=list )
-  role:           ParticipationRole   = "unknown"
-  homog:          list[Point2D]       = field( default_factory=list )
-  homog_position: list[Point2D]       = field( default_factory=list )
-  homog_velocity: list[Point2D]       = field( default_factory=list )
-  segments:       list[TrackSegment]  = field( default_factory=list )
-  smoother:       PositionSmoother    = field( default_factory=KalmanSmoother, repr=False, compare=False )
+  clip:              int
+  id:                int
+  person:            Person | int | None = None
+  boxes:             list[BoundingBox]   = field( default_factory=list )
+  role:              ParticipationRole   = "unknown"
+  raw_position:      list[Point2D]       = field( default_factory=list )
+  raw_velocity:      list[Point2D]       = field( default_factory=list )
+  filtered_position: list[Point2D]       = field( default_factory=list )
+  filtered_velocity: list[Point2D]       = field( default_factory=list )
+  segments:          list[TrackSegment]  = field( default_factory=list )
+  smoother:          PositionSmoother    = field( default_factory=KalmanSmoother, repr=False, compare=False )
   # yapf: enable
 
   def __post_init__( self ) -> None:
@@ -331,9 +335,10 @@ class Track:
         return
 
   def clearHomography( self ):
-    self.homog.clear()
-    self.homog_position.clear()
-    self.homog_velocity.clear()
+    self.raw_position.clear()
+    self.raw_velocity.clear()
+    self.filtered_position.clear()
+    self.filtered_velocity.clear()
     self.smoother.reset()
 
   def refreshHomography( self, transformer: Homography, fps: float = 1.0 ):
@@ -342,7 +347,7 @@ class Track:
     if not np.isfinite( fps ) or fps <= 0:
       raise ValueError( "Frame rate must be a positive finite number" )
     boxLen = len( self.boxes )
-    hmgLen = len( self.homog )
+    hmgLen = len( self.raw_position )
     positions: list[ list[ float ] ] = []
     for i in range( hmgLen, boxLen ):
       b = self.boxes[ i ]
@@ -355,13 +360,21 @@ class Track:
     xf = transformer.shazam( positions )
     if xf is not None:
       previous_frame = self.boxes[ hmgLen - 1 ].frame if hmgLen > 0 else None
+      previous_position = self.raw_position[ hmgLen - 1 ] if hmgLen > 0 else None
       for box_index, ( x, y ) in enumerate( xf, start=hmgLen ):
         box = self.boxes[ box_index ]
         dt = 1.0 / fps if previous_frame is None else ( box.frame - previous_frame ) / fps
         if dt <= 0:
           raise ValueError( "Track box frames must be strictly increasing" )
+        raw_position = Point2D( x, y )
+        raw_velocity = Point2D() if previous_position is None else Point2D(
+            ( raw_position.x - previous_position.x ) / dt,
+            ( raw_position.y - previous_position.y ) / dt,
+        )
         estimate = self.smoother.update( ( float( x ), float( y ) ), dt )
-        self.homog.append( Point2D( x, y ) )
-        self.homog_position.append( Point2D( *estimate.position ) )
-        self.homog_velocity.append( Point2D( *estimate.velocity ) )
+        self.raw_position.append( raw_position )
+        self.raw_velocity.append( raw_velocity )
+        self.filtered_position.append( Point2D( *estimate.position ) )
+        self.filtered_velocity.append( Point2D( *estimate.velocity ) )
+        previous_position = raw_position
         previous_frame = box.frame

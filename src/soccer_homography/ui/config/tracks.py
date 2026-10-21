@@ -369,7 +369,7 @@ class Tracks:
     self.updateVLMButtonState()
     self.renderSelectedCrops( track )
     min_frame, max_frame = self.selectedFrameRange()
-    self.plotWidget.setTrack( track, self.appState.frameRate, min_frame, max_frame )
+    self.plotWidget.setTrack( track, min_frame, max_frame )
     if self.on_track_changed is not None:
       self.on_track_changed( track_id )
 
@@ -382,7 +382,7 @@ class Tracks:
     if min_frame is None or max_frame is None:
       min_frame, max_frame = self.selectedFrameRange()
     track = self.appState.tracks.get( self.selTrackID ) if self.selTrackID is not None else None
-    self.plotWidget.setTrack( track, self.appState.frameRate, min_frame, max_frame )
+    self.plotWidget.setTrack( track, min_frame, max_frame )
 
   def renderSelectedCrops( self, track: Track | None ) -> None:
     self.clearCropImages()
@@ -628,37 +628,82 @@ class Tracks:
         else:
           apply_role = messagebox.askyesno(
               f"{self.activeIdentifier} role votes",
-              f"Track {message.track_id}\n\n{report}\n\nApply and save the most likely role?",
+              f"Track {message.track_id}\n\n{report}\n\nApply and save the most likely role? "
+              "Home/away player guesses will use an available generic participant.",
               parent=self.tab,
           )
           if apply_role:
-            track = self.appState.tracks.get( message.track_id )
-            if track is None:
-              continue
-            segment = track.segmentAt( self.current_frame )
-            person_id = segment.person_id if segment is not None else None
-            participant = next(
-                ( item for item in self.peopleByLabel.values() if item.person_id.id == person_id ),
-                None,
-            )
-            if participant is None:
-              messagebox.showinfo(
-                  "Participant required",
-                  "Assign a match participant or placeholder before saving a role.",
-                  parent=self.tab,
-              )
-              continue
-            if self.updateParticipantRole( participant, role ):
-              self.refresh()
-              if self.tblTrackData.exists( str( track.id ) ):
-                self.tblTrackData.selection_set( str( track.id ) )
-              if self.on_role_change is not None:
-                self.on_role_change()
-              self.cropStatus.config( text=f"Saved {self.activeIdentifier} role {role.replace( '_', ' ' )} for Track {track.id}." )
+            self.applyGuessedRole( message.track_id, role )
           else:
             self.cropStatus.config( text=f"{self.activeIdentifier} most likely role: {role.replace( '_', ' ' )} "
                                     f"for Track {message.track_id}." )
     self.tab.after( 100, self.pollVLMResults )
+
+  def availableGenericParticipant( self, role: ParticipationRole, track: Track, segment: TrackSegment ) -> PersonParticipation | None:
+    assigned_person_ids = {
+        other_segment.person_id
+        for other_track in self.appState.tracks.values()
+        for other_segment in other_track.segments
+        if other_segment.person_id is not None and not ( other_track is track and other_segment is segment )
+    }
+    return next(
+        (
+            participant
+            for participant in self.peopleByLabel.values()
+            if participant.is_placeholder
+            and participant.role == role
+            and participant.person_id.id not in assigned_person_ids
+        ),
+        None,
+    )
+
+  def applyGuessedRole( self, track_id: int, role: ParticipationRole ) -> bool:
+    track = self.appState.tracks.get( track_id )
+    segment = track.segmentAt( self.current_frame ) if track is not None else None
+    if track is None or segment is None:
+      messagebox.showinfo( "Track segment unavailable", "Select a frame within the track segment before applying a role guess.", parent=self.tab )
+      return False
+
+    if role in ( "home_player", "home_goalkeeper", "away_player", "away_goalkeeper" ):
+      participant = self.availableGenericParticipant( role, track, segment )
+      if participant is None:
+        messagebox.showinfo(
+            "Generic participant unavailable",
+            f"No unassigned generic participant is available for {role.replace( '_', ' ' )}. "
+            "Use Add Generic if this match has no generic participants, or free an existing generic assignment.",
+            parent=self.tab,
+          )
+        return False
+      revised_segments = [
+          TrackSegment( item.frame_start, item.frame_end, participant.person_id.id if item is segment else item.person_id )
+          for item in track.segments
+      ]
+      if not self.persistSegments( track.id, revised_segments ):
+        return False
+      track.segments = revised_segments
+    else:
+      participant_id = segment.person_id
+      participant = next(
+          ( item for item in self.peopleByLabel.values() if item.person_id.id == participant_id ),
+          None,
+      )
+      if participant is None:
+        messagebox.showinfo(
+            "Participant required",
+            "Assign a match participant or placeholder before saving this role.",
+            parent=self.tab,
+        )
+        return False
+      if not self.updateParticipantRole( participant, role ):
+        return False
+
+    self.refresh()
+    if self.tblTrackData.exists( str( track.id ) ):
+      self.tblTrackData.selection_set( str( track.id ) )
+    if self.on_role_change is not None:
+      self.on_role_change()
+    self.cropStatus.config( text=f"Saved {self.activeIdentifier} role {role.replace( '_', ' ' )} for Track {track.id}." )
+    return True
 
   @staticmethod
   def formatIdentificationGuess( result: IdentificationImageResult ) -> str:

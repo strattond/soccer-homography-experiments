@@ -18,6 +18,7 @@ from soccer_homography.data import (
 from soccer_homography.LineDetector import LineDetector
 from soccer_homography.log import logger
 from soccer_homography.pitch import SoccerPitchConfiguration, SoccerPitchImage
+from soccer_homography.ui.components import TrackOverlay
 
 
 class MainCanvasController:
@@ -40,6 +41,7 @@ class MainCanvasController:
     self.pitch: SoccerPitchImage = appState.pitch
     self.selected: list[ SelectionPoint ] = []
     self.mapping: SelectionPoint | None = None
+    self.trackOverlay: TrackOverlay = TrackOverlay( "Track Data", 320, 120, ( 127, 255, 127 ), 0.4, None, -1 )
 
     # Callbacks
     self.on_click = on_click
@@ -88,6 +90,7 @@ class MainCanvasController:
     self.canvas.addtag_withtag( "selection", "selection" )
     self.canvas.addtag_withtag( "mapping", "mapping" )
     self.canvas.addtag_withtag( "projfield", "projfield" )
+    self.canvas.addtag_withtag( "trackoverlay", "trackoverlay" )
 
   def stratify( self ):
     self.canvas.tag_lower( "frame" )
@@ -97,6 +100,7 @@ class MainCanvasController:
     self.canvas.tag_raise( "selection" )
     self.canvas.tag_raise( "mapping" )
     self.canvas.tag_raise( "projfield" )
+    self.canvas.tag_raise( "trackoverlay" )
 
   # -------------------------------------------------------------
   # Load a video frame (PIL Image)
@@ -120,12 +124,23 @@ class MainCanvasController:
     self.applyHoughTransform()
     self.updateBoundingBoxes( self.appState.boxes, frame_index )
     self.updateTracks( self.appState.tracks, frame_index, trackID )
+    self.updateOverlay( frame_index, trackID )
     self.stratify()
 
   def setResizedImage( self ):
     self.rsz_image = self.pil_image.resize( self.transform.scaledDimensions(), Image.Resampling.LANCZOS )
     self.frame_photo = ImageTk.PhotoImage( self.rsz_image )
     self.canvas.itemconfig( self.frame_item, image=self.frame_photo )
+
+  def updateOverlay( self, frame_index, trackID ):
+    self.canvas.delete( 'trackoverlay' )
+    if trackID is None:
+      return
+    self.trackOverlay.data = self.appState.tracks[trackID]
+    self.trackOverlay.frameIndex = frame_index
+    image = self.trackOverlay.render()
+    self.trackOverlayImage = ImageTk.PhotoImage(image)
+    self.canvas.create_image( 940, 20, anchor="nw", image=self.trackOverlayImage, tags=( 'trackoverlay', ) )    
 
   def applyHoughTransform( self ):
     self.canvas.delete( 'hough' )
@@ -340,10 +355,10 @@ class MainCanvasController:
     else:
       return 'lightgreen'
 
-  def updateTracks( self, tracks: dict[ int, Track ], index: int, trackID: int | None = None ):
+  def updateTracks( self, tracks: dict[ int, Track ], frameIndex: int, trackID: int | None = None ):
     self.canvas.delete( "tracking" )
     for k, v in tracks.items():
-      box = v.getByIndex( index )
+      box = v.getByIndex( frameIndex )
       if box is not None:
         # Now we need to scale the box coordinates to our image
         tlx, tly = self.transform.toDisplay( box.x1, box.y1 )

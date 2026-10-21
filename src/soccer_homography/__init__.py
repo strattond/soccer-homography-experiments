@@ -782,7 +782,7 @@ class App:
     self.root.after( 100, self.pollForUI )
     logger.info( f"Generating heatmaps for {len(self.appState.tracks)} tracks" )
     for track in self.appState.tracks.values():
-      for homog, box in zip( track.homog_position, track.boxes ):
+      for homog, box in zip( track.filtered_position, track.boxes ):
         if homog is not None:
           role = track.roleAt( box.frame, self.participationRoles )
           self.appState.heatmaps[ role ].accumulate( int( homog.x ), int( homog.y ), frameRate )

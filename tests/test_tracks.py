@@ -76,8 +76,9 @@ def test_track_without_homography_does_not_create_partial_mappings():
 
   track.refreshHomography( Homography() )
 
-  assert track.homog == []
-  assert track.homog_position == []
+  assert track.raw_position == []
+  assert track.raw_velocity == []
+  assert track.filtered_position == []
 
 
 def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame_time():
@@ -95,10 +96,14 @@ def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame
   track.addBox( BoundingBox( 2, 0, 2, 2, 0.9, 0, 20 ) )
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=10 )
 
-  assert track.homog == [ Point2D( 0, 0 ), Point2D( 1, 1 ), Point2D( 2, 2 ) ]
-  assert track.homog_position == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ), Point2D( 0.56, 0.56 ) ]
+  assert track.raw_position == [ Point2D( 0, 0 ), Point2D( 1, 1 ), Point2D( 2, 2 ) ]
   np.testing.assert_allclose(
-      [ tuple( velocity ) for velocity in track.homog_velocity ],
+      [ tuple( velocity ) for velocity in track.raw_velocity ],
+      [ ( 0, 0 ), ( 1, 1 ), ( 1, 1 ) ],
+  )
+  assert track.filtered_position == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ), Point2D( 0.56, 0.56 ) ]
+  np.testing.assert_allclose(
+      [ tuple( velocity ) for velocity in track.filtered_velocity ],
       [ ( 0, 0 ), ( 0.2, 0.2 ), ( 0.36, 0.36 ) ],
   )
 
@@ -116,16 +121,17 @@ def test_kalman_smoother_rejects_measurements_over_ten_metres_per_second():
 
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
 
-  assert track.homog[ 1 ] == Point2D( 20, 20 )
-  assert track.homog_position[ 1 ].x < 10
-  assert np.linalg.norm( track.homog_velocity[ 1 ].to_numpy() ) <= 10
+  assert track.raw_position[ 1 ] == Point2D( 20, 20 )
+  assert track.filtered_position[ 1 ].x < 10
+  assert np.linalg.norm( track.filtered_velocity[ 1 ].to_numpy() ) <= 10
 
   track.clearHomography()
-  assert track.homog == []
-  assert track.homog_position == []
-  assert track.homog_velocity == []
+  assert track.raw_position == []
+  assert track.raw_velocity == []
+  assert track.filtered_position == []
+  assert track.filtered_velocity == []
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
-  assert track.homog_position[ 0 ] == Point2D( 0, 0 )
+  assert track.filtered_position[ 0 ] == Point2D( 0, 0 )
 
 
 def test_track_initial_segments_follow_consecutive_frame_runs_and_extend_live():
@@ -201,8 +207,8 @@ def test_homography_frame_source_and_renderer_build_frames_without_canvas():
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
-      homog=[ Point2D( 1, 2 ) ],
-      homog_position=[ Point2D( 3, 4 ) ],
+      raw_position=[ Point2D( 1, 2 ) ],
+      filtered_position=[ Point2D( 3, 4 ) ],
   )
   source = HomographyFrameSource( { track.id: track }, { 17: "referee" } )
   frame = next( source.iterFrames( 0, 1 ) )
@@ -229,8 +235,8 @@ def test_homography_playback_draws_raw_markers_half_transparent_and_smoothed_mar
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
-      homog=[ Point2D( 1, 1 ) ],
-      homog_position=[ Point2D( 3, 3 ) ],
+      raw_position=[ Point2D( 1, 1 ) ],
+      filtered_position=[ Point2D( 3, 3 ) ],
   )
   frame = next( HomographyFrameSource( { track.id: track }, { 17: "home_player" } ).iterFrames( 0, 1 ) )
   renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
@@ -253,13 +259,13 @@ def test_track_plots_mark_speed_outliers():
           BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ),
           BoundingBox( 1, 2, 3, 4, 0.9, 0, 1 ),
       ],
-      homog=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
-      homog_position=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
-      homog_velocity=[ Point2D( 0, 0 ), Point2D( 12, 0 ) ],
+      raw_position=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
+      raw_velocity=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
+      filtered_position=[ Point2D( 0, 0 ), Point2D( 20, 1 ) ],
+      filtered_velocity=[ Point2D( 0, 0 ), Point2D( 12, 0 ) ],
   )
   plots = TrackPlots.__new__( TrackPlots )
   plots.track = track
-  plots.frame_rate = 1
   plots.canvas = Mock()
   plots.canvas.winfo_width.return_value = 640
   plots.canvas.winfo_height.return_value = 210
@@ -277,16 +283,17 @@ def test_track_plots_filter_samples_and_scale_x_axis_to_slider_range():
       clip=1,
       id=8,
       boxes=[ BoundingBox( 0, 0, 0, 0, 0.9, 0, frame ) for frame in ( 0, 10, 20, 30 ) ],
-      homog=[ Point2D( 0, 0 ), Point2D( 100, 0 ), Point2D( 100, 0 ), Point2D( 200, 0 ) ],
-      homog_position=[ Point2D( 0, 0 ), Point2D( 90, 0 ), Point2D( 100, 0 ), Point2D( 190, 0 ) ],
-      homog_velocity=[ Point2D( 0, 0 ), Point2D( 5, 0 ), Point2D( 0, 0 ), Point2D( 5, 0 ) ],
+      raw_position=[ Point2D( 0, 0 ), Point2D( 100, 0 ), Point2D( 100, 0 ), Point2D( 200, 0 ) ],
+      raw_velocity=[ Point2D( 0, 0 ), Point2D( 500, 0 ), Point2D( 0, 0 ), Point2D( 500, 0 ) ],
+      filtered_position=[ Point2D( 0, 0 ), Point2D( 90, 0 ), Point2D( 100, 0 ), Point2D( 190, 0 ) ],
+      filtered_velocity=[ Point2D( 0, 0 ), Point2D( 5, 0 ), Point2D( 0, 0 ), Point2D( 5, 0 ) ],
   )
   plots = TrackPlots.__new__( TrackPlots )
   plots.canvas = Mock()
   plots.canvas.winfo_width.return_value = 640
   plots.canvas.winfo_height.return_value = 210
 
-  plots.setTrack( track, frame_rate=50, min_frame=10, max_frame=20 )
+  plots.setTrack( track, min_frame=10, max_frame=20 )
 
   labels = [ call.kwargs.get( "text" ) for call in plots.canvas.create_text.call_args_list ]
   assert "10" in labels
@@ -315,9 +322,10 @@ def test_track_plots_show_empty_message_when_range_has_no_track_samples():
       clip=1,
       id=8,
       boxes=[ BoundingBox( 0, 0, 0, 0, 0.9, 0, 4 ) ],
-      homog=[ Point2D( 1, 2 ) ],
-      homog_position=[ Point2D( 1, 2 ) ],
-      homog_velocity=[ Point2D( 0, 0 ) ],
+      raw_position=[ Point2D( 1, 2 ) ],
+      raw_velocity=[ Point2D( 0, 0 ) ],
+      filtered_position=[ Point2D( 1, 2 ) ],
+      filtered_velocity=[ Point2D( 0, 0 ) ],
   )
   plots = TrackPlots.__new__( TrackPlots )
   plots.canvas = Mock()
@@ -337,16 +345,16 @@ def test_export_heatmap_accumulates_all_roles_across_frames():
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
-      homog=[ Point2D( 20, 20 ) ],
-      homog_position=[ Point2D( 20, 20 ) ],
+      raw_position=[ Point2D( 20, 20 ) ],
+      filtered_position=[ Point2D( 20, 20 ) ],
   )
   referee_track = Track(
       clip=1,
       id=9,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 1 ) ],
       segments=[ TrackSegment( 1, 1, 18 ) ],
-      homog=[ Point2D( 60, 30 ) ],
-      homog_position=[ Point2D( 60, 30 ) ],
+      raw_position=[ Point2D( 60, 30 ) ],
+      filtered_position=[ Point2D( 60, 30 ) ],
   )
   frames = HomographyFrameSource(
       { home_track.id: home_track, referee_track.id: referee_track },
@@ -368,8 +376,8 @@ def test_export_renderer_can_omit_heatmap():
       clip=1,
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
-      homog=[ Point2D( 20, 20 ) ],
-      homog_position=[ Point2D( 20, 20 ) ],
+      raw_position=[ Point2D( 20, 20 ) ],
+      filtered_position=[ Point2D( 20, 20 ) ],
   )
   frame = next( HomographyFrameSource( { track.id: track }, {} ).iterFrames( 0, 1 ) )
   renderer = HomographyFrameRenderer( pitch, 440, 292, include_heatmap=False )
@@ -437,8 +445,8 @@ def test_live_preview_exports_frames_without_touching_canvas():
       clip=1,
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
-      homog=[ Point2D( 1, 2 ) ],
-      homog_position=[ Point2D( 3, 4 ) ],
+      raw_position=[ Point2D( 1, 2 ) ],
+      filtered_position=[ Point2D( 3, 4 ) ],
   )
   callbacks = []
   preview = LivePreview.__new__( LivePreview )
@@ -518,8 +526,8 @@ def test_live_preview_colors_marker_from_segment_participant_role():
       id=8,
       boxes=[ BoundingBox( 1, 2, 3, 4, 0.9, 0, 0 ) ],
       segments=[ TrackSegment( 0, 0, 17 ) ],
-      homog=[ Point2D( 1, 2 ) ],
-      homog_position=[ Point2D( 1, 2 ) ],
+      raw_position=[ Point2D( 1, 2 ) ],
+      filtered_position=[ Point2D( 1, 2 ) ],
   )
 
   preview.updateMappings( { track.id: track }, 0, { 17: "referee" } )
@@ -876,6 +884,75 @@ def test_role_assignment_updates_known_participation_role(monkeypatch):
 
   upsert.assert_called_once()
   assert participant.role == "home_player"
+
+
+def test_accepted_home_player_guess_assigns_an_unused_generic_participant():
+  assigned_generic = PersonParticipation(
+      person_id=DBPerson( id=17, first_name="Home", last_name="Player 1" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
+      shirt_number=None,
+      role="home_player",
+      is_placeholder=True,
+  )
+  available_generic = PersonParticipation(
+      person_id=DBPerson( id=18, first_name="Home", last_name="Player 2" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
+      shirt_number=None,
+      role="home_player",
+      is_placeholder=True,
+  )
+  target_track = Track( clip=4, id=8, segments=[ TrackSegment( 0, 10 ) ] )
+  other_track = Track( clip=4, id=9, segments=[ TrackSegment( 0, 10, 17 ) ] )
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = cast( Any, SimpleNamespace( tracks={ 8: target_track, 9: other_track } ) )
+  tracks.current_frame = 5
+  tracks.activeIdentifier = "VLM"
+  tracks.peopleByLabel = cast( Any, {
+      "Home Player 1": assigned_generic,
+      "Home Player 2": available_generic,
+  } )
+  tracks.tab = Mock()
+  tracks.persistSegments = Mock( return_value=True )
+  tracks.refresh = Mock()
+  tracks.tblTrackData = Mock()
+  tracks.tblTrackData.exists.return_value = True
+  tracks.on_role_change = Mock()
+  tracks.cropStatus = Mock()
+
+  assert tracks.applyGuessedRole( 8, "home_player" )
+
+  tracks.persistSegments.assert_called_once_with( 8, [ TrackSegment( 0, 10, 18 ) ] )
+  assert target_track.segments == [ TrackSegment( 0, 10, 18 ) ]
+  tracks.refresh.assert_called_once_with()
+  tracks.on_role_change.assert_called_once_with()
+
+
+def test_accepted_team_guess_does_not_reuse_a_generic_participant(monkeypatch):
+  assigned_generic = PersonParticipation(
+      person_id=DBPerson( id=17, first_name="Away", last_name="Player 1" ),
+      match_id=DBMatch( id=23, date=None, home="A", away="B", division="D" ),
+      shirt_number=None,
+      role="away_player",
+      is_placeholder=True,
+  )
+  target_track = Track( clip=4, id=8, segments=[ TrackSegment( 0, 10 ) ] )
+  other_track = Track( clip=4, id=9, segments=[ TrackSegment( 0, 10, 17 ) ] )
+  tracks = Tracks.__new__( Tracks )
+  tracks.appState = cast( Any, SimpleNamespace( tracks={ 8: target_track, 9: other_track } ) )
+  tracks.current_frame = 5
+  tracks.activeIdentifier = "VLM"
+  tracks.peopleByLabel = cast( Any, { "Away Player 1": assigned_generic } )
+  tracks.tab = Mock()
+  tracks.persistSegments = Mock()
+  tracks.refresh = Mock()
+  showinfo = Mock()
+  monkeypatch.setattr( tracks_module.messagebox, "showinfo", showinfo )
+
+  assert not tracks.applyGuessedRole( 8, "away_player" )
+
+  tracks.persistSegments.assert_not_called()
+  tracks.refresh.assert_not_called()
+  showinfo.assert_called_once()
 
 
 def test_initial_clip_load_preserves_preloaded_homography(monkeypatch):
@@ -1542,7 +1619,7 @@ def test_refresh_homography_applies_model_options_smoother_and_recalculates_trac
   app.refreshHomographyData()
 
   assert isinstance( track.smoother, ExponentialSmoother )
-  assert track.homog_position == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ) ]
+  assert track.filtered_position == [ Point2D( 0, 0 ), Point2D( 0.2, 0.2 ) ]
   app.tabData.tabTracks.refreshSelectedPlot.assert_called_once_with( 12, 42 )
   app.updateLivePreviewMappings.assert_called_once_with( 0 )
   app.mainImageController.drawFieldLines.assert_called_once_with()

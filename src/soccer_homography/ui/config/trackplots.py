@@ -9,18 +9,14 @@ class TrackPlots( ttk.Frame ):
   def __init__( self, master ):
     super().__init__( master )
     self.track: Track | None = None
-    self.frame_rate = 50.0
     self.canvas = tk.Canvas( self, background="white", highlightthickness=0 )
     self.canvas.pack( fill="both", expand=True )
     self.canvas.bind( "<Configure>", lambda _event: self.draw() )
     self.min_frame = 0
     self.max_frame = 3000
 
-  def setTrack( self, track: Track | None, frame_rate: float = 50.0, min_frame: int = 0, max_frame: int = 3000 ) -> None:
-    if frame_rate <= 0:
-      raise ValueError( "Frame rate must be positive to plot track velocity" )
+  def setTrack( self, track: Track | None, min_frame: int = 0, max_frame: int = 3000 ) -> None:
     self.track = track
-    self.frame_rate = frame_rate
     self.min_frame = min_frame
     self.max_frame = max_frame
     self.draw()
@@ -40,15 +36,22 @@ class TrackPlots( ttk.Frame ):
     if self.min_frame > self.max_frame:
       canvas.create_text( width / 2, height / 2, text="Start frame must not exceed finish frame", fill="#555555" )
       return
-    point_count = min( len( track.boxes ), len( track.homog ), len( track.homog_position ), len( track.homog_velocity ) )
+    point_count = min(
+        len( track.boxes ),
+        len( track.raw_position ),
+        len( track.raw_velocity ),
+        len( track.filtered_position ),
+        len( track.filtered_velocity ),
+    )
     if point_count == 0:
       canvas.create_text( width / 2, height / 2, text="Select a track with homography data to view plots", fill="#555555" )
       return
 
     all_frames = [ box.frame for box in track.boxes[ :point_count ] ]
-    all_raw = track.homog[ :point_count ]
-    all_smoothed = track.homog_position[ :point_count ]
-    all_velocity = track.homog_velocity[ :point_count ]
+    all_raw = track.raw_position[ :point_count ]
+    all_raw_velocity = track.raw_velocity[ :point_count ]
+    all_smoothed = track.filtered_position[ :point_count ]
+    all_velocity = track.filtered_velocity[ :point_count ]
     visible_indices = [
         index for index, frame in enumerate( all_frames )
         if self.min_frame <= frame <= self.max_frame
@@ -64,19 +67,10 @@ class TrackPlots( ttk.Frame ):
 
     frames = [ all_frames[ index ] for index in visible_indices ]
     raw = [ all_raw[ index ] for index in visible_indices ]
+    raw_velocity = [ all_raw_velocity[ index ] for index in visible_indices ]
     smoothed = [ all_smoothed[ index ] for index in visible_indices ]
     velocity = [ all_velocity[ index ] for index in visible_indices ]
-    measured_speeds = []
-    for index in visible_indices:
-      if index == 0:
-        measured_speeds.append( 0.0 )
-        continue
-      dt = ( all_frames[ index ] - all_frames[ index - 1 ] ) / self.frame_rate
-      if dt <= 0:
-        raise ValueError( "Track frames must be strictly increasing to plot measured velocity" )
-      measured_speeds.append(
-          ( ( all_raw[ index ].x - all_raw[ index - 1 ].x )**2 + ( all_raw[ index ].y - all_raw[ index - 1 ].y )**2 )**0.5 / dt
-      )
+    measured_speeds = [ ( point.x**2 + point.y**2 )**0.5 for point in raw_velocity ]
     position_series = (
         ( "Raw X", [ point.x for point in raw ], "#d38b00", True ),
         ( "Smoothed X", [ point.x for point in smoothed ], "#d38b00", False ),

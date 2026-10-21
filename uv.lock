@@ -465,7 +465,7 @@ wheels = [
 
 [[package]]
 name = "deepspeed"
-version = "0.19.7"
+version = "0.19.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
@@ -480,7 +480,7 @@ dependencies = [
     { name = "torch" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/06/aeeb0abbffbb3f1d8db049916eb654559d9d766443b058864b7e67e867f7/deepspeed-0.19.7.tar.gz", hash = "sha256:c6640ecbda08ec6b4b6c72521155351719f145f48d850687b7332f503992921c", size = 1927513, upload-time = "2026-09-16T22:01:06.442Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/d8/3162fc810870df1183e686ec70b57028b464a5940b148a90767c727f113c/deepspeed-0.19.8.tar.gz", hash = "sha256:9e491abd0827ea5c389dd702e15e11e13d83d904bac4a20d6c2a4cb37207a9af", size = 2020482, upload-time = "2026-10-20T15:27:54.535Z" }
 
 [[package]]
 name = "defusedxml"
@@ -1432,18 +1432,19 @@ wheels = [
 
 [[package]]
 name = "onnx-ir"
-version = "1.0.0"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ml-dtypes" },
     { name = "numpy" },
     { name = "onnx" },
+    { name = "packaging" },
     { name = "sympy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/c2/61194cec0dbc5622273c0ebd592d37cc1dca0d7f1a744f02edd45ac905a3/onnx_ir-1.0.0.tar.gz", hash = "sha256:9e261f25fde8da9612ae5cb43b3b374d5ff469c04af0363cad588b2bb000b812", size = 163121, upload-time = "2026-08-11T14:49:46.895Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/9c/19dee739ae9a7c647ab16fdb990da1b73abe9aa604c4e3c5c30138acc693/onnx_ir-1.1.0.tar.gz", hash = "sha256:b72176de575d820ec26864d17270d58ef886a7cf64db7649d15fcc3d5ae2a8ee", size = 169010, upload-time = "2026-10-20T19:40:42.215Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/cd/6d1637172eb59c7b18ac90ed089d1f599a11fe0e63b4db2d017f3bb38a32/onnx_ir-1.0.0-py3-none-any.whl", hash = "sha256:e578f0d608d3062866b48223616eb2d10a6d6d01f8b8faac596129034f483cc7", size = 185849, upload-time = "2026-08-11T14:49:45.524Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/80/1a63440081d94e25b96be6b29119f41119fe5c9521063edbdb7baeeb9589/onnx_ir-1.1.0-py3-none-any.whl", hash = "sha256:76cc313a788c073b75271c1b6abb172aaf90fcc6335ed40f9f3238b2064a2fa3", size = 192241, upload-time = "2026-10-20T19:40:40.651Z" },
 ]
 
 [[package]]
@@ -2067,11 +2068,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "84.2.0"
+version = "84.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/63/40/e2c41d00a4bfea5548c31420a74c6cf149cc0e7c36b45c4c82202ce867aa/setuptools-84.2.0.tar.gz", hash = "sha256:6f445ca2ce864605f81e223f262b4c94ffcb9a4a63473bae0ed7be5aab0291da", size = 1227656, upload-time = "2026-10-19T20:38:03.407Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/b3/c19426f783614d625699a4b247faf628ea9ab1db228674491767b417f9e1/setuptools-84.2.1.tar.gz", hash = "sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc", size = 1230289, upload-time = "2026-10-20T19:01:37.742Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dd/a2/2e1af99d56c8145aa69496026c7e5fd7b6ec759b500c3ad697e2062832dc/setuptools-84.2.0-py3-none-any.whl", hash = "sha256:8cc107ac7a403105dc8d6477664171f36135fab26adf8b5e0edaebc313f39b21", size = 875816, upload-time = "2026-10-19T20:38:01.629Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl", hash = "sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2", size = 876263, upload-time = "2026-10-20T19:01:35.678Z" },
 ]
 
 [[package]]
@@ -2164,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "supervision"
-version = "0.31.0"
+version = "0.31.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "av" },
@@ -2178,9 +2179,9 @@ dependencies = [
     { name = "scipy" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/0b/0a5686acabac99f30e06b9f5664d6c943ce66f95f72889e32a8de2214296/supervision-0.31.0.tar.gz", hash = "sha256:6e0306b85056c86a256e0ded4f756d4856b7f213b1bd80554d42f50042b219f4", size = 417460, upload-time = "2026-10-16T18:49:45.16Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/71/3ab6c9d36ed74c1fd0e380e96f0b2ffa16b8550f4e5efd61256ee1c8c4a5/supervision-0.31.1.tar.gz", hash = "sha256:02bf7d4faf9cb8593ae159db6df01fb87e0b840e2912b0de109c58c1118ed97f", size = 426052, upload-time = "2026-10-20T18:19:35.669Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/6a/7d56a8f18406f83ce7d702bff8af683a54d5282715747b61d773b7cbb201/supervision-0.31.0-py3-none-any.whl", hash = "sha256:c961f5135407be9056454ac2293bd3316559e71599c1c0e31fb16ca9d9f73416", size = 460360, upload-time = "2026-10-16T18:49:43.297Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/55/dcbfcd1f2472480fcf776f9ef20f879a902d3b1e4c36f936e72f06b936b8/supervision-0.31.1-py3-none-any.whl", hash = "sha256:f9043e6423a87bb4630742b9281030817602ed08885fee38f8e2d17742509042", size = 469104, upload-time = "2026-10-20T18:19:33.747Z" },
 ]
 
 [[package]]
