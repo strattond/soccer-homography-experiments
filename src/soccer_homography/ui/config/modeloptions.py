@@ -10,10 +10,17 @@ from soccer_homography.inference.crop_inference import (
     saveIdentificationPrompt,
 )
 
+DETECTOR_PROFILES = {
+    "Quality: YOLO26x TensorRT 1280": ( "x", "engine", ( 1280, 1280 ), 1 ),
+    "Balanced: YOLO26m PyTorch 640": ( "m", "pt", ( 640, 640 ), 8 ),
+    "Fast: YOLO26m PyTorch 320": ( "m", "pt", ( 320, 320 ), 8 ),
+}
+
 
 @dataclass
 class ModelOptionsState:
   # yapf: disable
+  detectorProfile: StringVar = field( default_factory=lambda: tk.StringVar( value="Quality: YOLO26x TensorRT 1280" ) )
   identificationModel: StringVar = field( default_factory=lambda: tk.StringVar( value="Clip" ) )
   identificationPrompt: StringVar = field( default_factory=lambda: tk.StringVar( value=DEFAULT_IDENTIFICATION_PROMPT ) )
   cropsPerSegment: IntVar = field( default_factory=lambda: tk.IntVar( value=6 ) )
@@ -32,6 +39,17 @@ class ModelOptions:
   def setup( self ):
     optionsFrame = ttk.Frame( self.tab )
     optionsFrame.pack( side="left", anchor="nw", fill="y", padx=( 4, 8 ), pady=4 )
+    ttk.Label( optionsFrame, text="Detection speed / quality" ).pack( anchor="w" )
+    self.optDetectorProfile = ttk.Combobox(
+        optionsFrame,
+        textvariable=self.modelOpts.detectorProfile,
+        values=tuple( DETECTOR_PROFILES ),
+        state="readonly",
+        width=34,
+    )
+    self.optDetectorProfile.pack( anchor="w" )
+    self.optDetectorProfile.bind( "<<ComboboxSelected>>", self.onDetectorProfileChanged )
+
     self.optIdentificationModel = ttk.Combobox(
         optionsFrame,
         textvariable=self.modelOpts.identificationModel,
@@ -42,7 +60,7 @@ class ModelOptions:
     ttk.Label( optionsFrame, text="Person identification model" ).pack( anchor="w" )
     self.optIdentificationModel.pack( anchor="w" )
 
-    ttk.Label( optionsFrame, text="Crops per track segment" ).pack( anchor="w", pady=( 12, 0 ) )
+    ttk.Label( optionsFrame, text="Crops per track segment" ).pack( anchor="w", pady=( 6, 0 ) )
     self.optCropsPerSegment = ttk.Spinbox(
         optionsFrame,
         textvariable=self.modelOpts.cropsPerSegment,
@@ -58,7 +76,7 @@ class ModelOptions:
         optionsFrame,
         text="Position smoother",
     ).pack(
-        anchor="w", pady=( 12, 0 )
+        anchor="w", pady=( 6, 0 )
     )
     self.optPositionSmoother = ttk.Combobox(
         optionsFrame,
@@ -80,6 +98,17 @@ class ModelOptions:
     self.promptSaveButton.pack( side="bottom", anchor="e", padx=4, pady=( 0, 4 ) )
     self.identificationPrompt = loadIdentificationPrompt()
     self.promptText.insert( "1.0", self.identificationPrompt )
+
+  def onDetectorProfileChanged( self, _event=None ) -> None:
+    profile = self.modelOpts.detectorProfile.get()
+    try:
+      size, engine, img_size, batch_size = DETECTOR_PROFILES[ profile ]
+    except KeyError as error:
+      raise ValueError( f"Unsupported detector profile: {profile}" ) from error
+    self.appState.mdlOpts.size = size
+    self.appState.mdlOpts.engine = engine
+    self.appState.mdlOpts.imgSz = img_size
+    self.appState.mdlOpts.batchSize = batch_size
 
   def getIdentificationModel( self ) -> str:
     return self.modelOpts.identificationModel.get()

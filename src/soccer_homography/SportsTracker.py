@@ -2,7 +2,7 @@ import gc
 import queue
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from typing import Any
 
@@ -17,7 +17,6 @@ from soccer_homography.data import BoundingBox, Homography, TrackData
 from soccer_homography.detectionadapter import DetectionAdapter
 from soccer_homography.log import logger
 
-BALL_CLASS_ID = 32
 PLAYER_CLASS_ID = 0
 
 
@@ -36,6 +35,7 @@ class OutputType( Enum ):
   BBOX = auto()
   TRACK = auto()
   NEW_FRAME = auto()
+  FRAME_BATCH = auto()
   COMPLETED = auto()
   STOP = auto()
 
@@ -49,9 +49,20 @@ class Command:
 
 
 @dataclass
+class FrameResult:
+  frame: int
+  boxes: list[BoundingBox] = field( default_factory=list )
+  tracks: list[TrackData] = field( default_factory=list )
+  mode: CommandType = CommandType.RUN_BBOX
+
+
+@dataclass
 class Output:
   type: OutputType
-  data: BoundingBox | TrackData | int | None = None
+  data: BoundingBox | TrackData | int | list[FrameResult] | None = None
+
+
+TRACK_OUTPUT_BATCH_SIZE = 8
 
 
 # This will be responsible for loading the model, performing detections and tracking, and so on
@@ -65,6 +76,7 @@ class SportsTracker:
   range:            tuple[int, int]              = field( default_factory=tuple[int, int] )
   index:            int                          = 0
   model:            YOLO | None                  = field( init=False, default=None )
+  activeMdlOpts:    ModelOptions | None          = field( init=False, default=None )
   tracker:          Tracker | None                = field( init=False, default=None )
   data:             Homography                   = field( init=False )
   cap:              cv2.VideoCapture             = field( init=False )
@@ -127,7 +139,8 @@ class SportsTracker:
             cmd.end = int( self.cap.get( cv2.CAP_PROP_FRAME_COUNT ) ) - 1
           self.range = ( cmd.start, cmd.end )
           self.index = cmd.start
-          modelName = "yolo26" + self.mdlOpts.size + "." + self.mdlOpts.engine
+          self.activeMdlOpts = replace( self.mdlOpts )
+          modelName = "yolo26" + self.activeMdlOpts.size + "." + self.activeMdlOpts.engine
           self.model = YOLO( modelName, verbose=False, task='detect' )
           self.curMode = CommandType.RUN_BBOX
           self.setImagePos( cmd.start )
@@ -153,85 +166,99 @@ class SportsTracker:
       pass
 
   def processResults( self, results ):
-    # Process results
+    frame_results: list[ FrameResult ] = []
     for r in results:
-      self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
       detections = DetectionAdapter( r )
-      keep_ids = { PLAYER_CLASS_ID, BALL_CLASS_ID }
-      all_mask = [ cid in keep_ids for cid in detections.class_id ]
-      detections = detections[ all_mask ]
-      #balls = detections[ detections.class_id == BALL_CLASS_ID ]
-      players = detections[ detections.class_id == PLAYER_CLASS_ID ]
-      #ball_dets = np.hstack( ( balls.xyxy, balls.confidence[ :, None ], balls.class_id[ :, None ] ) )
-      player_dets = np.hstack( ( players.xyxy, players.confidence[ :, None ], players.class_id[ :, None ], players.trackID[ :, None ] ) )
-      for det in player_dets:
-        x1f, y1f, x2f, y2f, conf, cidf, tidf = det
-
-        # Team colour classifier
-        x1, y1, x2, y2, cid, tid = map( int, ( x1f, y1f, x2f, y2f, cidf, tidf ) )
-        #logger.debug( f"Player box {x1:4d},{y1:4d} x {x2:4d},{y2:4d} Confidence {conf:8.4f} Class {cid} Track ID {tid}" )
-        self.out_queue.put( Output( type=OutputType.BBOX, data=BoundingBox( x1, y1, x2, y2, conf, cid, self.index ) ) )
-
+      player_mask = detections.class_id == PLAYER_CLASS_ID
+      player_boxes = detections.xyxy[ player_mask ]
+      player_confidence = detections.confidence[ player_mask ]
+      frame_boxes = [
+          BoundingBox(
+              int( coords[ 0 ] ),
+              int( coords[ 1 ] ),
+              int( coords[ 2 ] ),
+              int( coords[ 3 ] ),
+              float( confidence ),
+              PLAYER_CLASS_ID,
+              self.index,
+          )
+          for coords, confidence in zip( player_boxes, player_confidence, strict=True )
+      ]
+      frame_results.append( FrameResult( frame=self.index, boxes=frame_boxes, mode=CommandType.RUN_BBOX ) )
       self.index += 1
+    if frame_results:
+      self.out_queue.put( Output( type=OutputType.FRAME_BATCH, data=frame_results ) )
       self.checkCompletion()
 
   def checkCompletion( self ):
     if self.index > self.range[ 1 ]:
       logger.info( "Processing complete!" )
-      self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index - 1 ) )
       self.out_queue.put( Output( type=OutputType.COMPLETED ) )
       self.stop()
 
   def run( self ):
-
-    # Prebind these to make Python ignore it
-    ret = True
-    frame = None
-    results = None
+    tracking_batch: list[ FrameResult ] = []
     try:
       while not self.stopped:
         self.processCommands()
+        if self.paused or self.stopped:
+          self.flushTrackingBatch( tracking_batch )
         while self.paused and not self.stopped:
           time.sleep( 0.5 )
           self.processCommands()
 
-        # We might go from paused to stopped
         if self.stopped:
+          self.flushTrackingBatch( tracking_batch )
           break
 
-        if self.curMode == CommandType.RUN_BBOX or self.curMode == CommandType.RUN_TRACK:
+        if self.curMode == CommandType.RUN_BBOX:
+          if self.model is None or self.activeMdlOpts is None:
+            raise RuntimeError( "YOLO model configuration is unavailable while detection is active." )
+          active_mdl_opts = self.activeMdlOpts
+          frames: list[ np.ndarray ] = []
+          for _ in range( active_mdl_opts.batchSize ):
+            if self.index + len( frames ) > self.range[ 1 ]:
+              break
+            ret, frame = self.cap.read()
+            if not ret:
+              logger.error( f"Failed reading cap {ret}" )
+              self.stop()
+              break
+            frames.append( frame )
+          if not frames:
+            continue
+          results = self.model.predict(
+              source=frames,
+              verbose=False,
+              imgsz=active_mdl_opts.imgSz,
+              batch=len( frames ),
+          )
+          self.processResults( results )
+        elif self.curMode == CommandType.RUN_TRACK:
           ret, frame = self.cap.read()
           if not ret:
             logger.error( f"Failed reading cap {ret}" )
             self.stop()
             continue
-
-        # Do nothing without a valid frame
-        if frame is None:
-          continue
-        if self.curMode == CommandType.RUN_BBOX:
-          if self.model is None:
-            raise RuntimeError( "YOLO model is unavailable while detection is active." )
-          results = self.model.predict( source=[ frame ], verbose=False, imgsz=self.mdlOpts.imgSz )
-          self.processResults( results )
-        elif self.curMode == CommandType.RUN_TRACK:
-          self.processTracking( frame )
+          tracking_batch.append( self.processTracking( frame ) )
+          if len( tracking_batch ) >= TRACK_OUTPUT_BATCH_SIZE or self.index > self.range[ 1 ]:
+            self.flushTrackingBatch( tracking_batch )
+          self.checkCompletion()
     finally:
-      frame = None
-      results = None
+      self.flushTrackingBatch( tracking_batch )
       self.releaseResources()
       logger.info( "Quitting thread" )
 
-  def processTracking( self, frame ):
+  def processTracking( self, frame ) -> FrameResult:
     if self.tracker is None:
       raise RuntimeError( "Tracker is unavailable while tracking is active." )
     currDets = self.inBoxes.get( self.index, [] )
     if currDets:
-      dets = np.array( [ d.to_boxmot() for d in currDets ] )
+      dets = np.asarray( [ d.to_boxmot() for d in currDets ], dtype=np.float32 ).reshape( -1, 6 )
     else:
-      dets = np.empty( ( 0, 6 ) )
+      dets = np.empty( ( 0, 6 ), dtype=np.float32 )
     tracks = self.tracker.update( dets, frame )
-    self.out_queue.put( Output( type=OutputType.NEW_FRAME, data=self.index ) )
+    frame_tracks = []
 
     # If we're in the tracks list, then we're active to some degree.  But we could still be predicted.
     #print( self.index )
@@ -284,14 +311,21 @@ class SportsTracker:
       #  print( vars( track ) )
 
       bbox = BoundingBox( int( x1 ), int( y1 ), int( x2 ), int( y2 ), float( score ), int( cls ), self.index )
-      self.out_queue.put( Output( type=OutputType.TRACK, data=TrackData( self.curClipID, tid=int( track_id ), data=bbox ) ) )
+      frame_tracks.append( TrackData( self.curClipID, tid=int( track_id ), data=bbox ) )
 
+    result = FrameResult( frame=self.index, tracks=frame_tracks, mode=CommandType.RUN_TRACK )
     self.index += 1
-    self.checkCompletion()
+    return result
+
+  def flushTrackingBatch( self, frame_results: list[ FrameResult ] ) -> None:
+    if frame_results:
+      self.out_queue.put( Output( type=OutputType.FRAME_BATCH, data=list( frame_results ) ) )
+      frame_results.clear()
 
   def releaseResources( self ) -> None:
     self.cap.release()
     self.model = None
+    self.activeMdlOpts = None
     self.tracker = None
     self.inBoxes.clear()
     gc.collect()

@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 from soccer_homography import App
-from soccer_homography.data import BoundingBox, ExponentialSmoother, Homography, KalmanSmoother, Person, Point2D, Track, TrackSegment
+from soccer_homography.data import BoundingBox, ExponentialSmoother, Homography, KalmanSmoother, Person, Point2D, Track, TrackData, TrackSegment
 from soccer_homography.db.persist import Match as DBMatch
 from soccer_homography.db.persist import Person as DBPerson
 from soccer_homography.db.persist import PersonParticipation
@@ -29,7 +29,7 @@ from soccer_homography.inference.crop_inference import (
 from soccer_homography.inference.vlm_model import MIN_VLM_GPU_MEMORY_BYTES, MoondreamVLM, VLMImageResult, VLMResponse, guessRole
 from soccer_homography.homography_frames import HomographyFrameRenderer, HomographyFrameSource
 from soccer_homography.pitch import SoccerPitchImage
-from soccer_homography.SportsTracker import SportsTracker
+from soccer_homography.SportsTracker import CommandType, FrameResult, Output, OutputType, SportsTracker
 from soccer_homography.ui.components import Slider
 from soccer_homography.ui.HomographyUI import HomographyUI
 from soccer_homography.ui.config.crop_worker import CropExtractionWorker, cropFromFrame, planCropFrames
@@ -1702,6 +1702,216 @@ def test_sports_tracker_releases_inference_resources( monkeypatch ):
   assert tracker.tracker is None
   assert tracker.inBoxes == {}
   empty_cache.assert_called_once_with()
+
+
+def test_sports_tracker_batches_detection_results_into_one_output( monkeypatch ):
+  class FakeAdapter:
+    def __init__( self, _result ):
+      self.class_id = np.array( [ 0, 32 ] )
+      self.xyxy = np.array( [ [ 1, 2, 3, 4 ], [ 5, 6, 7, 8 ] ] )
+      self.confidence = np.array( [ 0.9, 0.8 ] )
+
+  sports_tracker_module = importlib.import_module( "soccer_homography.SportsTracker" )
+  monkeypatch.setattr( sports_tracker_module, "DetectionAdapter", FakeAdapter )
+  worker = cast( Any, SportsTracker.__new__( SportsTracker ) )
+  worker.index = 10
+  worker.range = ( 10, 11 )
+  worker.out_queue = queue.Queue()
+  worker.paused = True
+  worker.stopped = False
+
+  worker.processResults( [ object(), object() ] )
+
+  frame_batch = worker.out_queue.get_nowait()
+  completed = worker.out_queue.get_nowait()
+  assert frame_batch.type == OutputType.FRAME_BATCH
+  assert [ result.frame for result in frame_batch.data ] == [ 10, 11 ]
+  assert [ result.boxes[ 0 ] for result in frame_batch.data ] == [
+      BoundingBox( 1, 2, 3, 4, 0.9, 0, 10 ),
+      BoundingBox( 1, 2, 3, 4, 0.9, 0, 11 ),
+  ]
+  assert completed.type == OutputType.COMPLETED
+  assert worker.stopped is True
+
+
+def test_sports_tracker_reads_and_predicts_bounded_frame_batches( monkeypatch ):
+  class FakeCapture:
+    def __init__( self ):
+      self.frames = [ np.full( ( 2, 2, 3 ), index, dtype=np.uint8 ) for index in range( 3 ) ]
+
+    def read( self ):
+      if not self.frames:
+        return False, None
+      return True, self.frames.pop( 0 )
+
+  class FakeModel:
+    def __init__( self ):
+      self.calls = []
+
+    def predict( self, **kwargs ):
+      self.calls.append( kwargs )
+      return [ object() for _ in kwargs[ "source" ] ]
+
+  class FakeAdapter:
+    def __init__( self, _result ):
+      self.class_id = np.array( [ 0 ] )
+      self.xyxy = np.array( [ [ 1, 2, 3, 4 ] ] )
+      self.confidence = np.array( [ 0.9 ] )
+
+  sports_tracker_module = importlib.import_module( "soccer_homography.SportsTracker" )
+  monkeypatch.setattr( sports_tracker_module, "DetectionAdapter", FakeAdapter )
+  worker = cast( Any, SportsTracker.__new__( SportsTracker ) )
+  worker.processCommands = Mock()
+  worker.paused = False
+  worker.stopped = False
+  worker.curMode = CommandType.RUN_BBOX
+  worker.range = ( 0, 2 )
+  worker.index = 0
+  worker.mdlOpts = SimpleNamespace( batchSize=2, imgSz=( 640, 640 ) )
+  worker.model = FakeModel()
+  worker.activeMdlOpts = SimpleNamespace( batchSize=2, imgSz=( 640, 640 ) )
+  worker.cap = FakeCapture()
+  worker.out_queue = queue.Queue()
+  worker.releaseResources = Mock()
+
+  worker.run()
+
+  assert [ len( call[ "source" ] ) for call in worker.model.calls ] == [ 2, 1 ]
+  assert [ call[ "batch" ] for call in worker.model.calls ] == [ 2, 1 ]
+  outputs = [ worker.out_queue.get_nowait(), worker.out_queue.get_nowait(), worker.out_queue.get_nowait() ]
+  assert [ result.frame for output in outputs[:2] for result in output.data ] == [ 0, 1, 2 ]
+  assert outputs[ -1 ].type == OutputType.COMPLETED
+  worker.releaseResources.assert_called_once_with()
+
+
+def test_sports_tracker_groups_tracking_outputs_without_skipping_tracker_updates():
+  class FakeCapture:
+    def __init__( self ):
+      self.frames = [ np.zeros( ( 2, 2, 3 ), dtype=np.uint8 ) for _ in range( 9 ) ]
+
+    def read( self ):
+      if not self.frames:
+        return False, None
+      return True, self.frames.pop( 0 )
+
+  tracker = Mock()
+  tracker.update.return_value = []
+  worker = cast( Any, SportsTracker.__new__( SportsTracker ) )
+  worker.processCommands = Mock()
+  worker.paused = False
+  worker.stopped = False
+  worker.curMode = CommandType.RUN_TRACK
+  worker.range = ( 0, 8 )
+  worker.index = 0
+  worker.inBoxes = {}
+  worker.tracker = tracker
+  worker.curClipID = 1
+  worker.cap = FakeCapture()
+  worker.out_queue = queue.Queue()
+  worker.releaseResources = Mock()
+
+  worker.run()
+
+  outputs = [ worker.out_queue.get_nowait(), worker.out_queue.get_nowait(), worker.out_queue.get_nowait() ]
+  frame_batches = [ output.data for output in outputs if output.type == OutputType.FRAME_BATCH ]
+  assert [ [ result.frame for result in batch ] for batch in frame_batches ] == [
+      list( range( 8 ) ),
+      [ 8 ],
+  ]
+  assert outputs[ -1 ].type == OutputType.COMPLETED
+  assert tracker.update.call_count == 9
+
+
+def test_sports_tracker_processes_detections_as_float32_and_returns_frame_result():
+  tracker = Mock()
+  tracker.update.return_value = [ [ 1, 2, 3, 4, 7, 0.9, 0, 0 ] ]
+  worker = cast( Any, SportsTracker.__new__( SportsTracker ) )
+  worker.index = 5
+  worker.curClipID = 2
+  worker.inBoxes = { 5: [ BoundingBox( 1, 2, 3, 4, 0.9, 0, 5 ) ] }
+  worker.tracker = tracker
+
+  result = worker.processTracking( np.zeros( ( 8, 8, 3 ), dtype=np.uint8 ) )
+
+  detections = tracker.update.call_args.args[ 0 ]
+  assert detections.dtype == np.float32
+  assert detections.shape == ( 1, 6 )
+  assert result.frame == 5
+  assert result.tracks[ 0 ].tid == 7
+  assert worker.index == 6
+
+
+def test_detector_profiles_update_model_configuration():
+  options = ModelOptions.__new__( ModelOptions )
+  options.modelOpts = SimpleNamespace( detectorProfile=Mock( get=Mock( return_value="Balanced: YOLO26m PyTorch 640" ) ) )
+  options.appState = SimpleNamespace( mdlOpts=SimpleNamespace() )
+
+  options.onDetectorProfileChanged()
+
+  assert options.appState.mdlOpts.size == "m"
+  assert options.appState.mdlOpts.engine == "pt"
+  assert options.appState.mdlOpts.imgSz == ( 640, 640 )
+  assert options.appState.mdlOpts.batchSize == 8
+
+
+def test_poll_for_ui_applies_detection_frame_batches_and_redraws_once():
+  app = cast( Any, App.__new__( App ) )
+  app.tracking = SimpleNamespace(
+      out_queue=queue.Queue(),
+      curMode=CommandType.RUN_BBOX,
+  )
+  app.tracking.out_queue.put( Output(
+      OutputType.FRAME_BATCH,
+      [
+          FrameResult( 4, [ BoundingBox( 1, 2, 3, 4, 0.9, 0, 4 ) ] ),
+          FrameResult( 5, [] ),
+      ],
+  ) )
+  app.appState = SimpleNamespace( boxes={}, tracks={}, framesProcessed=0 )
+  app.pendingDetectionChunks = set()
+  app.prgDetection = Mock()
+  app.minimap = Mock()
+  app.root = Mock()
+
+  app.pollForUI()
+
+  assert app.appState.boxes == { 4: [ BoundingBox( 1, 2, 3, 4, 0.9, 0, 4 ) ] }
+  assert app.appState.framesProcessed == 2
+  assert app.pendingDetectionChunks == { 0 }
+  app.minimap.markFramesAsDone.assert_called_once_with( [ 4, 5 ] )
+  app.minimap.redraw.assert_called_once_with()
+  assert app.prgDetection.tick.call_count == 2
+  app.root.after.assert_called_once_with( 0, app.pollForUI )
+
+
+def test_poll_for_ui_applies_tracking_frame_batch():
+  track_data = TrackData(
+      clip=2,
+      tid=7,
+      data=BoundingBox( 1, 2, 3, 4, 0.9, 0, 6 ),
+  )
+  app = cast( Any, App.__new__( App ) )
+  app.tracking = SimpleNamespace(
+      out_queue=queue.Queue(),
+      curMode=CommandType.RUN_TRACK,
+  )
+  app.tracking.out_queue.put( Output(
+      OutputType.FRAME_BATCH,
+      [ FrameResult( 6, tracks=[ track_data ], mode=CommandType.RUN_TRACK ) ],
+  ) )
+  app.appState = SimpleNamespace( boxes={}, tracks={}, framesProcessed=0 )
+  app.curTrackID = 7
+  app.pendingTrackingChunks = set()
+  app.prgDetection = Mock()
+  app.minimap = Mock()
+  app.root = Mock()
+
+  app.pollForUI()
+
+  assert app.appState.tracks[ 7 ].boxes == [ track_data.data ]
+  assert app.appState.framesProcessed == 1
+  assert app.pendingTrackingChunks == { 0 }
+  app.minimap.setTrackSegments.assert_called_once_with( app.appState.tracks[ 7 ].segments )
 
 
 def test_moondream_vlm_queries_rgb_crop_and_role_votes():

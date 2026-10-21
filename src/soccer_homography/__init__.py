@@ -47,6 +47,7 @@ from soccer_homography.log import logger, logging
 from soccer_homography.SportsTracker import (
   Command,
   CommandType,
+  FrameResult,
   Output,
   OutputType,
   SportsTracker,
@@ -716,7 +717,50 @@ class App:
       data = None
 
     if data is not None:
-      if data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, BoundingBox ):
+      if data.type == OutputType.FRAME_BATCH and isinstance( data.data, list ):
+        if self.tracking is None:
+          raise RuntimeError( "Tracking worker is unavailable while processing frame results." )
+        frame_numbers = []
+        selected_track_updated = False
+        for frame_result in data.data:
+          if not isinstance( frame_result, FrameResult ):
+            raise TypeError( "Frame batch contains an invalid result." )
+          if frame_result.mode == CommandType.RUN_BBOX:
+            for bbox in frame_result.boxes:
+              self.appState.boxes.setdefault( bbox.frame, [] ).append( bbox )
+              self.pendingDetectionChunks.add( bbox.frame // CHUNK_SIZE )
+            frame_numbers.append( frame_result.frame )
+          elif frame_result.mode == CommandType.RUN_TRACK:
+            for track_data in frame_result.tracks:
+              track = self.appState.tracks.get( track_data.tid )
+              if track is None:
+                track = Track( track_data.clip, track_data.tid )
+                self.appState.tracks[ track_data.tid ] = track
+              track.addBox( track_data.data )
+              selected_track_updated |= track_data.tid == self.curTrackID
+              self.pendingTrackingChunks.add( track_data.data.frame // CHUNK_SIZE )
+
+          self.appState.framesProcessed += 1
+          self.prgDetection.tick()
+          if self.appState.framesProcessed % CHUNK_SIZE == 0:
+            if frame_result.mode == CommandType.RUN_BBOX:
+              self.chunkDetections()
+              logger.info( f"Writing chunk {self.appState.detectChunk}" )
+              self.appState.detectChunk += 1
+            elif frame_result.mode == CommandType.RUN_TRACK:
+              self.chunkTracking()
+              logger.info( f"Writing chunk {self.appState.trackChunk}" )
+              self.appState.trackChunk += 1
+
+        if frame_numbers:
+          self.minimap.markFramesAsDone( frame_numbers )
+          self.minimap.redraw()
+        if selected_track_updated:
+          track = self.appState.tracks.get( self.curTrackID )
+          if track is not None:
+            self.minimap.setTrackSegments( track.segments )
+        pollDelay = 0
+      elif data.type == OutputType.BBOX and data.data is not None and isinstance( data.data, BoundingBox ):
         bbox = data.data
         if bbox.frame not in self.appState.boxes:
           self.appState.boxes[ bbox.frame ] = []

@@ -38,6 +38,7 @@ class ModelOptions:
   size:     str  = 'x'
   imgSz:    tuple[int, int]  = (1280, 1280)
   engine:   str  = 'engine' # or 'pt'
+  batchSize: int = 1
 
   def to_dict(self):
     return asdict( self )
