@@ -6,6 +6,9 @@ import numpy as np
 from filterpy.kalman import KalmanFilter
 
 
+CHI_SQUARED_2D_99_PERCENT = 9.21
+
+
 @dataclass( frozen=True, slots=True )
 class PositionEstimate:
   position: tuple[ float, float ]
@@ -105,7 +108,11 @@ class KalmanSmoother:
     kf.predict()
 
     innovation = measurement - kf.x[ :2 ]
-    if np.linalg.norm( innovation ) / dt <= self.max_speed:
+    innovation_covariance = kf.H @ kf.P @ kf.H.T + kf.R
+    mahalanobis_distance_squared = float(
+        ( innovation.T @ np.linalg.solve( innovation_covariance, innovation ) )[ 0, 0 ]
+    )
+    if mahalanobis_distance_squared <= CHI_SQUARED_2D_99_PERCENT:
       kf.update( measurement )
 
     velocity = kf.x[ 2:4, 0 ]

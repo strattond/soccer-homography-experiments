@@ -108,7 +108,7 @@ def test_track_refresh_homography_tracks_smoothed_position_and_velocity_by_frame
   )
 
 
-def test_kalman_smoother_rejects_measurements_over_ten_metres_per_second():
+def test_kalman_smoother_rejects_distant_measurements_and_caps_speed():
   track = Track(
       clip=1,
       id=8,
@@ -132,6 +132,19 @@ def test_kalman_smoother_rejects_measurements_over_ten_metres_per_second():
   assert track.filtered_velocity == []
   track.refreshHomography( Homography( hom4k=np.eye( 3 ) ), fps=1 )
   assert track.filtered_position[ 0 ] == Point2D( 0, 0 )
+
+
+def test_kalman_smoother_recovers_from_fast_measurements_and_tracks_reversal():
+  smoother = KalmanSmoother()
+  positions = [
+      smoother.update( position, dt=0.02 ).position
+      for position in ( ( 0, 0 ), ( 0.3, 0 ), ( 0.6, 0 ), ( 0.9, 0 ), ( 0.6, 0 ), ( 0.3, 0 ), ( 0, 0 ) )
+  ]
+  estimate = smoother.update( ( -0.3, 0 ), dt=0.02 )
+
+  assert max( position[ 0 ] for position in positions ) > 0.5
+  assert estimate.position[ 0 ] < positions[ -1 ][ 0 ]
+  assert estimate.velocity[ 0 ] < 0
 
 
 def test_track_initial_segments_follow_consecutive_frame_runs_and_extend_live():
